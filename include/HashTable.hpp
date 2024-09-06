@@ -38,11 +38,11 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             HashTable(void) : m_size(0UL) {
                 //--------------------------
-                // for (auto& bucket : m_table) {
-                //     bucket.store(nullptr);
-                // } // end for (auto& bucket : m_table)
+                for (auto& bucket : m_table) {
+                    bucket.store(nullptr);
+                } // end for (auto& bucket : m_table)
                 //--------------------------
-                m_table.fill(nullptr);
+                // m_table.fill(nullptr);
                 //--------------------------
             } // end HashTable(void)
             //--------------------------

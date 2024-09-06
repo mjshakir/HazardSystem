@@ -40,7 +40,12 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             HashMultiTable(void) : m_size(0UL) {
-                m_table.fill(nullptr);
+                //--------------------------
+                for (auto& bucket : m_table) {
+                    bucket.store(nullptr);
+                } // end for (auto& bucket : m_table)
+                //--------------------------
+                // m_table.fill(nullptr);
             } // end HashMultiTable(void)
             //--------------------------
             HashMultiTable(const HashMultiTable&)               = delete;
@@ -87,6 +92,10 @@ namespace HazardSystem {
             void reclaim(const std::function<bool(const T*)>& is_hazard) {
                 scan_and_reclaim(is_hazard);
             } // end void reclaim(const std::function<bool(const std::shared_ptr<T>&)>& is_hazard)
+            //--------------------------
+            size_t size(void) const {
+                return m_size.load();
+            } // end size_t size(void) const
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
