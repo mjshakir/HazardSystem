@@ -72,7 +72,7 @@ namespace HazardSystem {
                 return get_data() != ptr;
             } // end bool operator!=(const T* ptr) const noexcept
             //--------------------------
-        bool operator==(const atomic_unique_ptr& other) const noexcept {
+            bool operator==(const atomic_unique_ptr& other) const noexcept {
                 return get_data() == other.get_data();
             } // end bool operator==(const atomic_unique_ptr& other) const noexcept
             //--------------------------
@@ -88,13 +88,13 @@ namespace HazardSystem {
                 return get_data(order);
             } // end T* get(void) const noexcept
             //--------------------------
-            void reset(T* ptr = nullptr) {
-                //--------------------------
-                reset_data(ptr);
-                //--------------------------
-            } // end void reset(T* ptr = nullptr)
+            // void reset(T* ptr = nullptr) {
+            //     //--------------------------
+            //     reset_data(ptr);
+            //     //--------------------------
+            // } // end void reset(T* ptr = nullptr)
             //--------------------------
-            void reset(T* ptr, std::memory_order order) {
+            void reset(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) {
                 //--------------------------
                 reset_data(ptr, order);
                 //--------------------------
@@ -124,7 +124,7 @@ namespace HazardSystem {
                 //--------------------------
             } // end bool transfer_shared_pointer(std::shared_ptr<T>& shared_ptr)
             //--------------------------
-            bool delete(void) {
+            bool delete_ptr(void) {
                 //--------------------------
                 return delete_data();
                 //--------------------------
@@ -141,23 +141,17 @@ namespace HazardSystem {
                 return compare_exchange_weak_data(expected, desired, order);
                 //--------------------------
             } // end bool compare_exchange_weak(T*& expected, T* desired, std::memory_order order)
-            //--------------------------
-        bool compare_exchange_strong(T*& expected, T* desired, std::memory_order order) {
-                //--------------------------
-                return m_ptr.compare_exchange_strong(expected, desired, order);
-                //--------------------------
-            } // end bool compare_exchange_strong(T*& expected, T* desired, std::memory_order order)
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            void reset_data(T* ptr = nullptr) noexcept {
-                //--------------------------
-                T* p_old = m_ptr.exchange(ptr, std::memory_order_acq_rel);
-                delete p_old;
-                //--------------------------
-            } // end void reset(T* ptr = nullptr)
+            // void reset_data(T* ptr = nullptr) noexcept {
+            //     //--------------------------
+            //     T* p_old = m_ptr.exchange(ptr, std::memory_order_acq_rel);
+            //     delete p_old;
+            //     //--------------------------
+            // } // end void reset(T* ptr = nullptr)
             //--------------------------
-            void reset_data(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) noexcept {
+            void reset_data(T* ptr, std::memory_order order) noexcept {
                 //--------------------------
                 T* p_old = m_ptr.exchange(ptr, order);
                 delete p_old;
