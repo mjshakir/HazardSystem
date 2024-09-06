@@ -12,6 +12,7 @@
 //--------------------------------------------------------------
 #include "HazardPointer.hpp"
 #include "HashTable.hpp"
+#include "HashMultiTable.hpp"
 #include "atomic_unique_ptr.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
@@ -48,9 +49,9 @@ namespace HazardSystem {
                 scan_and_reclaim_all();
             }// end void reclaim_all(void)
             //--------------------------
-            void clear(void) {
-                clear_data();
-            }// end void clear(void)
+            // void clear(void) {
+            //     clear_data();
+            // }// end void clear(void)
             //--------------------------
             size_t retire_size(void) const {
                 return m_retired_nodes.size();
@@ -78,7 +79,7 @@ namespace HazardSystem {
                 for (auto& hp : m_hazard_pointers) {
                     if (hp.load()) {
                         // delete hp.load();  // Properly clean up allocated memory
-                        hp.delete();
+                        hp.delete_ptr();
                     } // end if (hp.load())
                     hp.store(nullptr);
                 } // end for (auto& hp : m_hazard_pointers)
@@ -151,25 +152,25 @@ namespace HazardSystem {
                 m_retired_nodes.clear();
             } // end void scan_and_reclaim_all(void)
             //--------------------------
-            void clear_data(void) {
-                //--------------------------
-                for (auto& bucket : m_hazard_pointers) {
-                    //--------------------------
-                    Node* current = bucket.get();
-                    //--------------------------
-                    while (current) {
-                        //--------------------------
-                        delete current->data.release();  // Properly clean up allocated memory
-                        Node* next = current->next.get();
-                        //--------------------------
-                        delete current;
-                        current = next;
-                        //--------------------------
-                    } // end while (current)
-                    //--------------------------
-                } // end for (auto& bucket : m_hazard_pointers)
-                //--------------------------
-            } // end void clear_hazard_pointers(void)
+            // void clear_data(void) {
+            //     //--------------------------
+            //     for (auto& bucket : m_hazard_pointers) {
+            //         //--------------------------
+            //         Node* current = bucket.get();
+            //         //--------------------------
+            //         while (current) {
+            //             //--------------------------
+            //             delete current->data.release();  // Properly clean up allocated memory
+            //             Node* next = current->next.get();
+            //             //--------------------------
+            //             delete current;
+            //             current = next;
+            //             //--------------------------
+            //         } // end while (current)
+            //         //--------------------------
+            //     } // end for (auto& bucket : m_hazard_pointers)
+            //     //--------------------------
+            // } // end void clear_hazard_pointers(void)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
