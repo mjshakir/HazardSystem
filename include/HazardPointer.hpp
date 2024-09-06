@@ -3,27 +3,46 @@
 // Standard cpp library
 //--------------------------------------------------------------
 #include <iostream>
-#include <atomic>
 //--------------------------------------------------------------
-namespace CircularBuffer {
+// User Defined Headers
+//--------------------------------------------------------------
+#include "atomic_unique_ptr.hpp"
+//--------------------------------------------------------------
+namespace HazardSystem {
     //--------------------------------------------------------------
-    namespace HazardSystem {
-        //--------------------------------------------------------------
-        struct HazardPointer {
+    template<typename T>
+    struct HazardPointer {
+        //--------------------------
+        HazardPointer(void) : pointer(nullptr) {
             //--------------------------
-            HazardPointer(void);
+        }// end HazardPointer(void)
+        //--------------------------
+        HazardPointer(T* ptr) : pointer(ptr) {
             //--------------------------
-            HazardPointer(const HazardPointer&)               = delete;
-            HazardPointer& operator=(const HazardPointer&)    = delete;
+        }// end HazardPointer(T* ptr)
+        //--------------------------
+        HazardPointer(std::unique_ptr<T> ptr) : pointer(ptr.release()) {
             //--------------------------
-            HazardPointer(HazardPointer&& other) noexcept;
-            HazardPointer& operator=(HazardPointer&& other) noexcept;
+        }// end HazardPointer(std::unique_ptr<T> ptr)
+        //--------------------------
+        HazardPointer(std::shared_ptr<T> ptr) : pointer(ptr.get()) {
             //--------------------------
-            std::atomic<void*> pointer;
+        }// end HazardPointer(std::shared_ptr<T> ptr)
+        //--------------------------
+        ~HazardPointer(void) {
             //--------------------------
-        }; // end struct HazardPointer    
-        //--------------------------------------------------------------
-    }// end namespace HazardSystem
+            pointer.reset();
+            //--------------------------
+        }// end ~HazardPointer(void)
+        //--------------------------
+        HazardPointer(const HazardPointer&)             = delete;
+        HazardPointer& operator=(const HazardPointer&)  = delete;
+        HazardPointer(HazardPointer&&) noexcept         = default;
+        HazardPointer& operator=(HazardPointer&&)       = default;
+        //--------------------------
+        atomic_unique_ptr<T> pointer;
+        //--------------------------
+    }; // end struct HazardPointer    
     //--------------------------------------------------------------
-}// end namespace CircularBuffer
+}// end namespace HazardSystem
 //--------------------------------------------------------------
