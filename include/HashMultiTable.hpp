@@ -21,6 +21,8 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             struct Node {
                 //--------------------------
+                Node(void) = default;
+                //--------------------------
                 Node(const Key& key_, T* data_)
                     : key(key_), data(data_), next(nullptr) {
                     //--------------------------
@@ -31,8 +33,13 @@ namespace HazardSystem {
                     //--------------------------
                 } // end Node(const Key& key_, std::unique_ptr<T> data_)
                 //--------------------------
+                Node(const Key& key_, std::shared_ptr<T> data_)
+                    : key(key_), data(data_), next(nullptr) {
+                    //--------------------------
+                } // end Node(const Key& key_, std::shared_ptr<T> data_)
+                //--------------------------
                 Key key;
-                atomic_unique_ptr<T> data;  // Using atomic_unique_ptr for data
+                std::atomic<std::shared_ptr<T>> data;  // Using atomic_unique_ptr for data
                 atomic_unique_ptr<Node> next;
                 //--------------------------
             }; // end struct Node
@@ -57,13 +64,17 @@ namespace HazardSystem {
                 clear_data();
             } // end ~HashMultiTable(void)
             //--------------------------
-            bool insert(const Key& key, std::unique_ptr<T> data) {
+            bool insert(const Key& key, std::shared_ptr<T> data) {
                 return insert_data(key, std::move(data));
             } // end bool insert(const Key& key, std::unique_ptr<T> data)
             //--------------------------
             std::vector<std::shared_ptr<T>> find(const Key& key) const {
                 return find_data(key);
             } // end std::vector<std::shared_ptr<T>> find(const Key& key)
+            //--------------------------
+            std::shared_ptr<T> find(const Key& key, T* data) const {
+                return find_data(key, data);
+            } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
             //--------------------------
             std::shared_ptr<T> find_first(const Key& key) const {
                 return find_first_data(key);
@@ -77,12 +88,12 @@ namespace HazardSystem {
                 return remove_data(key);
             } // end bool remove(const Key& key)
             //--------------------------
-            bool swap(const Key& old_key, const Key& new_key, std::unique_ptr<T> data) {
-                return swap_key(old_key, new_key, std::move(data));
+            bool swap(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
+                return swap_key(old_key, new_key, data);
             } // end bool swap(const Key& old_key, const Key& new_key, std::unique_ptr<T> data)
             //--------------------------
-            bool swap(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data) {
-                return swap_data(key, std::move(old_data), std::move(new_data));
+            bool swap(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
+                return swap_data(key, old_data, new_data);
             } // end bool swap(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data)
             //--------------------------
             void clear(void) {
@@ -99,37 +110,37 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            bool insert_data(const Key& key, std::unique_ptr<T> data) {
+            bool insert_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
                 const size_t index  = hasher(key);
-                auto new_node       = std::make_unique<Node>(key, std::move(data));
+                auto new_node       = std::shared_ptr<Node>(key, data);
                 Node* expected      = nullptr;
                 //--------------------------
                 // Insert the node at the head of the linked list in the bucket
-                if (m_table.at(index).compare_exchange_strong(expected, new_node.get())) {
-                    new_node.release();
+                if (m_table.at(index).compare_exchange_strong(expected, new_node.load())) {
+                    // new_node.release();
                     m_size.fetch_add(1UL);  // Increment the size of the hash table
                     return true;
-                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.get()))
+                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.load()))
                 //--------------------------
-                Node* current = m_table.at(index).get();
+                Node* current = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.get() == data) {
+                    if (current->key == key and current->data.load() == data) {
                         return false; // Avoid duplicate insertion
-                    } // end if (current->key == key and current->data.get() == data)
+                    } // end if (current->key == key and current->data.load() == data)
                     //--------------------------
                     if (!current->next) {
-                        if (current->next.compare_exchange_strong(expected, new_node.get())) {
-                            new_node.release();
+                        if (current->next.compare_exchange_strong(expected, new_node.load())) {
+                            // new_node.release();
                             m_size.fetch_add(1UL);  // Increment the size of the hash table
                             return true;
-                        } // end if (current->next.compare_exchange_strong(expected, new_node.get()))
+                        } // end if (current->next.compare_exchange_strong(expected, new_node.load()))
                         //--------------------------
                     } // end if (!current->next)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                 } // end while (current)
                 //--------------------------
                 return false;
@@ -142,15 +153,15 @@ namespace HazardSystem {
                 results.reserve(N);
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        results.push_back(std::make_shared<T>(current->data.get()));
+                        results.push_back(std::shared_ptr<T>(current->data.load()));
                     } // end if (current->key == key)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -158,18 +169,40 @@ namespace HazardSystem {
                 //--------------------------
             } // end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
             //--------------------------
+            std::shared_ptr<T> find_data(const Key& key, T* data) const {
+                //--------------------------
+                const size_t index  = hasher(key);              // Get the index for the hash table bucket
+                Node* current       = m_table.at(index).load();  // Get the first node in the bucket
+                //--------------------------
+                while (current) {
+                    //--------------------------
+                    // Check both the key and data pointer
+                    if (current->key == key and current->data.load() == data) {
+                        // Return the data wrapped in a shared_ptr (without transferring ownership)
+                        return std::shared_ptr<T>(current->data.load(), [](T*) {});  // Custom deleter does nothing
+                    }   // end if (current->key == key && current->data.load() == data)
+                    //--------------------------
+                    current = current->next.load();  // Move to the next node in the list
+                    //--------------------------
+                } // end while (current)
+                //--------------------------
+                // If no match found, return nullptr
+                return nullptr;
+                //--------------------------
+            } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
+            //--------------------------
             std::shared_ptr<T> find_first_data(const Key& key) const {
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return std::make_shared<T>(current->data.get());
+                        return std::shared_ptr<T>(current->data.load());
                     } // end if (current->key == key)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -180,12 +213,12 @@ namespace HazardSystem {
             bool remove_data(const Key& key, std::unique_ptr<T> data) {
                 //--------------------------
                 size_t index    = hasher(key);
-                Node* current   = m_table.at(index).get();
+                Node* current   = m_table.at(index).load();
                 Node* prev      = nullptr;
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.get() == data) {
+                    if (current->key == key and current->data.load() == data) {
                         //--------------------------
                         if (prev) {
                             prev->next.reset(current->next.release());
@@ -194,16 +227,16 @@ namespace HazardSystem {
                         } // end if (prev)
                         //--------------------------
                         current->next.reset();
-                        current->data.reset();    // Automatically delete data using atomic_unique_ptr
-                        m_size.fetch_sub(1UL);          // Decrement the size of the hash table
+                        current->data.store(nullptr);    // Safely delete the data
+                        m_size.fetch_sub(1UL);        // Decrement the size of the hash table
                         delete current;
                         //--------------------------
                         return true;
                         //--------------------------
-                    } // end if (current->key == key and current->data.get() == data)
+                    } // end if (current->key == key and current->data.load() == data)
                     //--------------------------
                     prev = current;
-                    current = current->next.get();
+                    current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -214,7 +247,7 @@ namespace HazardSystem {
             bool remove_data(const Key& key) {
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 Node* prev          = nullptr;
                 bool removed        = false;
                 //--------------------------
@@ -222,7 +255,7 @@ namespace HazardSystem {
                     //--------------------------
                     if (current->key == key) {
                         //--------------------------
-                        Node* next_node = current->next.get();
+                        Node* next_node = current->next.load();
                         //--------------------------
                         if (prev) {
                             prev->next.reset(next_node);
@@ -231,7 +264,7 @@ namespace HazardSystem {
                         } // end if (prev)
                         //--------------------------
                         current->next.reset();
-                        current->data.reset();  // Automatically delete data using atomic_unique_ptr
+                        current->data.store(nullptr);  // Automatically delete data using atomic_unique_ptr
                         //--------------------------
                         delete current;
                         //--------------------------
@@ -242,7 +275,7 @@ namespace HazardSystem {
                         //--------------------------
                     } else {
                         prev = current;
-                        current = current->next.get();
+                        current = current->next.load();
                     } // end if (current->key == key)
                 } // end while (current)
                 //--------------------------
@@ -250,38 +283,38 @@ namespace HazardSystem {
                 //--------------------------
             } // end bool remove_all_data(const Key& key)
             //--------------------------
-            bool swap_key(const Key& old_key, const Key& new_key, std::unique_ptr<T> data) {
+            bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
                 //--------------------------
                 const size_t index  = hasher(old_key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == old_key and current->data.get() == data.get()) {
+                    if (current->key == old_key and current->data.load() == data) {
                         current->key = new_key;
                         return true;
-                    } // end if (current->key == old_key && current->data.get() == data)
+                    } // end if (current->key == old_key && current->data.load() == data)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                 } // end while (current)
                 //--------------------------
                 return false;
             } // end bool swap_key(const Key& old_key, const Key& new_key, std::unique_ptr<T> data)
             //--------------------------
             // Swap the data of an entry while keeping the key the same
-            bool swap_data(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data) {
+            bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.get() == old_data.get()) {
-                        current->data.reset(new_data.release());  // Update the data pointer
+                    if (current->key == key and current->data.load() == old_data) {
+                        current->data.store(new_data); // Update the data pointer
                         return true;
-                    } // end if (current->key == key && current->data.get() == old_data)
+                    } // end if (current->key == key && current->data.load() == old_data)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                 } // end while (current)
                 //--------------------------
                 return false;
@@ -291,25 +324,25 @@ namespace HazardSystem {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* current   = bucket.get();
+                    Node* current   = bucket.load();
                     Node* prev      = nullptr;
                     //--------------------------
                     while (current) {
                         //--------------------------
-                        if (!is_hazard(current->data.get())) {  // Check using raw pointer
+                        if (!is_hazard(current->data.load())) {  // Check using raw pointer
                             if (prev) {
                                 prev->next.reset(current->next.release());
                             } else {
                                 bucket.reset(current->next.release());
                             }
-                            current->next.reset();    // Safely delete the next node
-                            current->data.reset();    // Safely delete the data
+                            current->next.reset();          // Safely delete the next node
+                            current->data.store(nullptr);   // Safely delete the data
                             delete current;                 // Safely delete the current node
                             m_size.fetch_sub(1UL);          // Decrement the size of the hash table
                         } else {
                             prev = current;
-                            current = current->next.get();
-                        } // end if (!is_hazard(current->data.get()))
+                            current = current->next.load();
+                        } // end if (!is_hazard(current->data.load()))
                         //--------------------------
                     } // end while (current)
                     //--------------------------
@@ -321,13 +354,13 @@ namespace HazardSystem {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* current = bucket.get();
+                    Node* current = bucket.load();
                     //--------------------------
                     while (current) {
                         Node* temp = current;
-                        current = current->next.get();
+                        current = current->next.load();
                         temp->next.reset();
-                        temp->data.reset();  // Delete data safely
+                        temp->data.store(nullptr);
                         delete temp;
                     } // end while (current)
                     //--------------------------
