@@ -105,10 +105,10 @@ namespace HazardSystem {
                     new_node.release();     // Transfer ownership to atomic_unique_ptr
                     m_size.fetch_add(1UL);  // Increment the size of the hash table
                     return true;
-                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.get()))
+                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.load()))
                 //--------------------------
                 // Collision resolution by linear probing
-                Node* current = m_table.at(index).get();
+                Node* current = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
@@ -121,10 +121,10 @@ namespace HazardSystem {
                             new_node.release();     // Transfer ownership to atomic_unique_ptr
                             m_size.fetch_add(1UL);  // Increment the size of the hash table
                             return true;
-                        } // end if (current->next.compare_exchange_strong(expected, new_node.get()))
+                        } // end if (current->next.compare_exchange_strong(expected, new_node.load()))
                     } // end if (!current->next)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -136,15 +136,15 @@ namespace HazardSystem {
             std::shared_ptr<T> find_data(const Key& key) const {
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).get();
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return std::make_shared<T>(current->data.get());
+                        return std::shared_ptr<T>(current->data.load());
                     } // end if (current->key == key)
                     //--------------------------
-                    current = current->next.get();
+                    current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -155,7 +155,7 @@ namespace HazardSystem {
             bool remove_data(const Key& key) {
                 //--------------------------
                 size_t index    = hasher(key);
-                Node* current   = m_table.at(index).get();
+                Node* current   = m_table.at(index).load();
                 Node* prev      = nullptr;
                 //--------------------------
                 while (current) {
@@ -176,7 +176,7 @@ namespace HazardSystem {
                         //--------------------------
                     } // end if (current->key == key)
                     prev    = current;
-                    current = current->next.get();
+                    current = current->next.load();
                 } // end while (current)
                 //--------------------------
                 return false;
@@ -188,14 +188,14 @@ namespace HazardSystem {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* current   = bucket.get();
+                    Node* current   = bucket.load();
                     Node* prev      = nullptr;
                     //--------------------------
                     while (current) {
                         //--------------------------
                         // Check if the data is still a hazard
                         //--------------------------
-                        if (!is_hazard(current->data.get())) {
+                        if (!is_hazard(current->data.load())) {
                             //--------------------------
                             // Not a hazard; reclaim memory
                             if (prev) {
@@ -213,8 +213,8 @@ namespace HazardSystem {
                         } else {
                             // Data is still a hazard; continue to next node
                             prev = current;
-                            current = current->next.get();
-                        } // end if (!is_hazard(current->data.get()))
+                            current = current->next.load();
+                        } // end if (!is_hazard(current->data.load()))
                         //--------------------------
                     } // end while (current)
                     //--------------------------
@@ -224,9 +224,9 @@ namespace HazardSystem {
             //--------------------------
             void clear_data(void) {
                 for (auto& bucket : m_table) {
-                    Node* current = bucket.get();
+                    Node* current = bucket.load();
                     while (current) {
-                        Node* next = current->next.get();
+                        Node* next = current->next.load();
                         delete current;
                         current = next;
                     } // end while (current)
