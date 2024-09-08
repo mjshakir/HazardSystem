@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <functional>
 #include <atomic>
+#include <memory>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -49,9 +50,9 @@ namespace HazardSystem {
                 scan_and_reclaim_all();
             }// end void reclaim_all(void)
             //--------------------------
-            // void clear(void) {
-            //     clear_data();
-            // }// end void clear(void)
+            void clear(void) {
+                clear_data();
+            }// end void clear(void)
             //--------------------------
             size_t retire_size(void) const {
                 return m_retired_nodes.size();
@@ -88,7 +89,7 @@ namespace HazardSystem {
             //--------------------------
             void initialize_hazard_pointers(void) {
                 for (size_t i = 0; i < HAZARD_POINTERS; ++i) {
-                    m_hazard_pointers.insert(true, std::make_unique<HazardPointer<T>>());
+                    m_hazard_pointers.insert(true, std::make_shared<HazardPointer<T>>());
                 } // end for (size_t i = 0; i < HAZARD_POINTERS; ++i)
             }// end void initialize_hazard_pointers(void)
             //--------------------------
@@ -96,12 +97,20 @@ namespace HazardSystem {
                 //--------------------------
                 // Acquire the first available hazard pointer
                 auto hp = m_hazard_pointers.find_first(true);
+                //--------------------------
                 if (hp) {
                     //--------------------------
-                    hp->pointer.reset();                            // Reset the atomic_unique_ptr to null
-                    m_hazard_pointers.swap(true, false, hp.get());
+                    hp->reset();                                    // Reset the atomic_unique_ptr to null
+                    m_hazard_pointers.swap(true, false, hp);  // Mark it as in use
                     //--------------------------
-                    return std::shared_ptr<HazardPointer<T>>(hp.get(), [this](HazardPointer<T>* p) { release_data(std::shared_ptr<HazardPointer<T>>(p)); });
+                    // return hp;
+                    //--------------------------
+                    // Extract the raw pointer from the atomic_unique_ptr and wrap it in a shared_ptr
+                    // HazardPointer<T>* p_hp = hp->load();  // Extract the pointer from the atomic_unique_ptr
+                    // Return a shared_ptr to the HazardPointer<T>, without deleting the object when shared_ptr goes out of scope
+                    // return std::shared_ptr<HazardPointer<T>>(p_hp, [](HazardPointer<T>*) {});  // Custom deleter does nothing
+                    //--------------------------
+                    return std::shared_ptr<HazardPointer<T>>(hp->get());
                     //--------------------------
                 } // end if (hp)
                 //--------------------------
@@ -111,16 +120,14 @@ namespace HazardSystem {
             } // end std::optional<HazardPointer*> acquire_data(void)
             //--------------------------
             bool release_data(std::shared_ptr<HazardPointer<T>> hp) {
-                //--------------------------
                 if (hp) {
-                    hp->pointer.reset();                            // Clear the hazard pointer
-                    m_hazard_pointers.swap(false, true, hp.get());  // Mark it as free
+                    // hp->data.store(nullptr);  // Safely reset the raw pointer in atomic
+                    hp = nullptr;                               // Reset the atomic_unique_ptr to null
+                    m_hazard_pointers.swap(true, false, hp);  // Mark it as free
                     return true;
-                } // end if (hp)
-                //--------------------------
+                }
                 return false;
-                //--------------------------
-            }// end vool release_data(HazardPointer* hp)
+            }// end bool release_data(std::shared_ptr<HazardPointer<T>> hp)
             //--------------------------
             void retire_node(std::unique_ptr<T> node) {
                 //--------------------------
@@ -129,7 +136,7 @@ namespace HazardSystem {
                     T* raw_ptr = node.get();                // Extract the raw pointer
                     //--------------------------
                     // Insert raw pointer into retired nodes and release ownership from unique_ptr
-                    m_retired_nodes.insert(raw_ptr, node.release());  
+                    m_retired_nodes.insert(raw_ptr, std::move(node));  
                     //--------------------------
                     // Trigger reclaim if retired node count reaches threshold
                     if (m_retired_nodes.size() >= PER_THREAD) {
@@ -152,29 +159,16 @@ namespace HazardSystem {
                 m_retired_nodes.clear();
             } // end void scan_and_reclaim_all(void)
             //--------------------------
-            // void clear_data(void) {
-            //     //--------------------------
-            //     for (auto& bucket : m_hazard_pointers) {
-            //         //--------------------------
-            //         Node* current = bucket.get();
-            //         //--------------------------
-            //         while (current) {
-            //             //--------------------------
-            //             delete current->data.release();  // Properly clean up allocated memory
-            //             Node* next = current->next.get();
-            //             //--------------------------
-            //             delete current;
-            //             current = next;
-            //             //--------------------------
-            //         } // end while (current)
-            //         //--------------------------
-            //     } // end for (auto& bucket : m_hazard_pointers)
-            //     //--------------------------
-            // } // end void clear_hazard_pointers(void)
+            void clear_data(void) {
+                //--------------------------
+                m_hazard_pointers.clear();
+                m_retired_nodes.clear();
+                //--------------------------
+            } // end void clear_hazard_pointers(void)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            HashMultiTable<bool, atomic_unique_ptr<HazardPointer<T>>, HAZARD_POINTERS> m_hazard_pointers;   // Hash table for hazard pointers
+            HashMultiTable<bool, std::shared_ptr<HazardPointer<T>>, HAZARD_POINTERS> m_hazard_pointers;   // Hash table for hazard pointers
             HashTable<T*, T, PER_THREAD> m_retired_nodes;                                                   // Unordered map for retired node
         //--------------------------------------------------------------
         };// end class HazardPointerManager
