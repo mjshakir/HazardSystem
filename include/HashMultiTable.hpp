@@ -44,6 +44,23 @@ namespace HazardSystem {
                 //--------------------------
             }; // end struct Node
             //--------------------------------------------------------------
+            class iterator {
+                public:
+                    iterator(Node* ptr) : current(ptr) {}
+
+                    Node& operator*() const { return *current; }
+                    Node* operator->() { return current; }
+                    iterator& operator++() {
+                        current = current->next.get();
+                        return *this;
+                    }
+                    bool operator==(const iterator& other) const { return current == other.current; }
+                    bool operator!=(const iterator& other) const { return current != other.current; }
+
+                private:
+                    Node* current;
+            };
+            //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
             HashMultiTable(void) : m_size(0UL) {
@@ -107,13 +124,21 @@ namespace HazardSystem {
             size_t size(void) const {
                 return m_size.load();
             } // end size_t size(void) const
+            //--------------------------
+            iterator begin(void) {
+                return iterator(m_table.front().load());
+            } // end iterator begin(void)
+            //--------------------------
+            iterator end(void) {
+                return iterator(nullptr);
+            } // end iterator end(void)
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
             bool insert_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
                 const size_t index  = hasher(key);
-                auto new_node       = std::shared_ptr<Node>(key, data);
+                auto new_node       = std::shared_ptr<Node>(key, std::move(data));
                 Node* expected      = nullptr;
                 //--------------------------
                 // Insert the node at the head of the linked list in the bucket
@@ -132,7 +157,7 @@ namespace HazardSystem {
                     } // end if (current->key == key and current->data.load() == data)
                     //--------------------------
                     if (!current->next) {
-                        if (current->next.compare_exchange_strong(expected, new_node.load())) {
+                        if (current->next.compare_exchange_strong(expected, new_node.get())) {
                             // new_node.release();
                             m_size.fetch_add(1UL);  // Increment the size of the hash table
                             return true;
@@ -310,7 +335,7 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     if (current->key == key and current->data.load() == old_data) {
-                        current->data.store(new_data); // Update the data pointer
+                        current->data.store(std::move(new_data)); // Update the data pointer
                         return true;
                     } // end if (current->key == key && current->data.load() == old_data)
                     //--------------------------
@@ -318,6 +343,7 @@ namespace HazardSystem {
                 } // end while (current)
                 //--------------------------
                 return false;
+                //--------------------------
             } // end bool swap_data(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data)
             //--------------------------
             void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard) {
