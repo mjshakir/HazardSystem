@@ -35,7 +35,7 @@ namespace HazardSystem {
             //--------------------------
             // Release a hazard pointer slot
             bool release(std::shared_ptr<HazardPointer<T>> hp) {
-                release_data(hp);
+                return release_data(hp);
             }// end void release(HazardPointer* hp)
             //--------------------------
             void retire(std::unique_ptr<T> node) {
@@ -168,7 +168,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            HashMultiTable<bool, std::shared_ptr<HazardPointer<T>>, HAZARD_POINTERS> m_hazard_pointers;   // Hash table for hazard pointers
+            HashMultiTable<bool, HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;   // Hash table for hazard pointers
             HashTable<T*, T, PER_THREAD> m_retired_nodes;                                                   // Unordered map for retired node
         //--------------------------------------------------------------
         };// end class HazardPointerManager
