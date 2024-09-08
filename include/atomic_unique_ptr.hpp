@@ -4,6 +4,7 @@
 //--------------------------------------------------------------
 #include <iostream>
 #include <atomic>
+#include <memory>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -80,19 +81,32 @@ namespace HazardSystem {
                 return get_data() != other.get_data();
             } // end bool operator!=(const atomic_unique_ptr& other) const noexcept
             //--------------------------
-            T* get(void) const noexcept {
+            atomic_unique_ptr& operator=(T* ptr) noexcept {
+                reset(ptr);
+                return *this;
+            } // end atomic_unique_ptr& operator=(T* ptr) noexcept
+            //--------------------------
+            atomic_unique_ptr& operator=(std::unique_ptr<T> ptr) noexcept {
+                reset(ptr.release());
+                return *this;
+            } // end atomic_unique_ptr& operator=(std::unique_ptr<T> ptr) noexcept
+            //--------------------------
+            atomic_unique_ptr& operator=(std::nullptr_t) noexcept {
+                reset();
+                return *this;
+            } // end atomic_unique_ptr& operator=(std::nullptr_t) noexcept
+            //--------------------------
+            bool store(T* ptr, std::memory_order order = std::memory_order_acq_rel) noexcept {
+                return store_data(ptr, order);
+            } // end bool store(T* ptr, std::memory_order order)
+            //--------------------------
+            T* load(void) const noexcept {
                 return get_data();
-            } // end T* get(void) const noexcept
+            } // end T* load(void) const noexcept
             //--------------------------
-            T* get(std::memory_order order) const noexcept {
+            T* load(std::memory_order order) const noexcept {
                 return get_data(order);
-            } // end T* get(void) const noexcept
-            //--------------------------
-            // void reset(T* ptr = nullptr) {
-            //     //--------------------------
-            //     reset_data(ptr);
-            //     //--------------------------
-            // } // end void reset(T* ptr = nullptr)
+            } // end T* load(void) const noexcept
             //--------------------------
             void reset(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) {
                 //--------------------------
@@ -144,12 +158,17 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            // void reset_data(T* ptr = nullptr) noexcept {
-            //     //--------------------------
-            //     T* p_old = m_ptr.exchange(ptr, std::memory_order_acq_rel);
-            //     delete p_old;
-            //     //--------------------------
-            // } // end void reset(T* ptr = nullptr)
+            bool store_data(T* ptr, std::memory_order order) noexcept {
+                //--------------------------
+                if (!ptr) {
+                    return false;
+                } // end if (!ptr)
+                //--------------------------
+                m_ptr.store(ptr, order);
+                //--------------------------
+                return true;
+                //--------------------------
+            } // end void store(T* ptr, std::memory_order order)
             //--------------------------
             void reset_data(T* ptr, std::memory_order order) noexcept {
                 //--------------------------
@@ -192,7 +211,7 @@ namespace HazardSystem {
             bool transfer_data(std::shared_ptr<T>& s_ptr) {
                 //--------------------------
                 if (s_ptr) {
-                    reset(s_ptr.get()); // Set the atomic_unique_ptr to manage the shared_ptr's object
+                    reset(s_ptr.load()); // Set the atomic_unique_ptr to manage the shared_ptr's object
                     s_ptr.reset();      // Release the shared_ptr's ownership
                     return true;
                 }// end if (s_ptr)
