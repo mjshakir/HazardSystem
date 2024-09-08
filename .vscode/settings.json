@@ -55,6 +55,7 @@
         "variant": "cpp",
         "vector": "cpp",
         "algorithm": "cpp",
-        "atomic": "cpp"
+        "atomic": "cpp",
+        "iterator": "cpp"
     }
 }
