@@ -77,19 +77,13 @@ namespace HazardSystem {
             //--------------------------
             ~HazardPointerManager(void) {
                 //--------------------------
-                for (auto& hp : m_hazard_pointers) {
-                    if (hp.load()) {
-                        // delete hp.load();  // Properly clean up allocated memory
-                        hp.delete_ptr();
-                    } // end if (hp.load())
-                    hp.store(nullptr);
-                } // end for (auto& hp : m_hazard_pointers)
+                clear_data();
                 //--------------------------
             }// end ~HazardPointerManager(void)
             //--------------------------
             void initialize_hazard_pointers(void) {
                 for (size_t i = 0; i < HAZARD_POINTERS; ++i) {
-                    m_hazard_pointers.insert(true, std::make_shared<HazardPointer<T>>());
+                    m_hazard_pointers.insert(true, std::make_unique<HazardPointer<T>>());
                 } // end for (size_t i = 0; i < HAZARD_POINTERS; ++i)
             }// end void initialize_hazard_pointers(void)
             //--------------------------
@@ -100,17 +94,18 @@ namespace HazardSystem {
                 //--------------------------
                 if (hp) {
                     //--------------------------
-                    hp->reset();                                    // Reset the atomic_unique_ptr to null
+                    // hp->reset();                                    // Reset the atomic_unique_ptr to null
+                    hp = nullptr;                               // Reset the atomic_unique_ptr to null
                     m_hazard_pointers.swap(true, false, hp);  // Mark it as in use
                     //--------------------------
-                    // return hp;
+                    return hp;
                     //--------------------------
                     // Extract the raw pointer from the atomic_unique_ptr and wrap it in a shared_ptr
                     // HazardPointer<T>* p_hp = hp->load();  // Extract the pointer from the atomic_unique_ptr
                     // Return a shared_ptr to the HazardPointer<T>, without deleting the object when shared_ptr goes out of scope
                     // return std::shared_ptr<HazardPointer<T>>(p_hp, [](HazardPointer<T>*) {});  // Custom deleter does nothing
                     //--------------------------
-                    return std::shared_ptr<HazardPointer<T>>(hp->get());
+                    // return std::shared_ptr<HazardPointer<T>>(hp->get());
                     //--------------------------
                 } // end if (hp)
                 //--------------------------
@@ -147,13 +142,35 @@ namespace HazardSystem {
                 //--------------------------
             }// end void retire_node(void* node, std::function<void(void*)> deleter)
             //--------------------------
+            bool is_hazard(const T* node) const {
+                //--------------------------
+                auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
+                return m_hazard_pointers.contain(false, hazardPtr.get());
+                //--------------------------
+            }// end bool is_hazard(void* node)
+            //--------------------------
             void scan_and_reclaim(void) {
                 //--------------------------
-                m_retired_nodes.reclaim([this](T* node) {
-                    return !m_hazard_pointers.find(false, node);  // Reclaim if node is not a hazard
-                });
+                // m_retired_nodes.reclaim([this](T* node) -> bool {
+                //     // HazardPointer<T> hazardPtr(node);  // Create a HazardPointer object
+                //     auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
+                //     return !m_hazard_pointers.contain(false, hazardPtr.get());  // Reclaim if node is not a hazard
+                // });
+                //--------------------------
+                m_retired_nodes.reclaim(std::bind(&HazardPointerManager::is_hazard, this, std::placeholders::_1));
                 //--------------------------
             } // end void scan_and_reclaim(void)
+            //--------------------------
+            // void scan_and_reclaim(void) {
+            //     //--------------------------
+            //     m_retired_nodes.reclaim([this](T* node) {
+            //         // Create a shared_ptr to a HazardPointer<T> that wraps the node
+            //         auto hazard_ptr = std::make_unique<HazardPointer<T>>(node);
+            //         // Check if the node is not a hazard
+            //         return !m_hazard_pointers.find(false, std::move(hazard_ptr));
+            //     });
+            //     //--------------------------
+            // } // end void scan_and_reclaim(void)
             //--------------------------
             void scan_and_reclaim_all(void) {
                 m_retired_nodes.clear();
@@ -169,7 +186,7 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             HashMultiTable<bool, HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;   // Hash table for hazard pointers
-            HashTable<T*, T, PER_THREAD> m_retired_nodes;                                                   // Unordered map for retired node
+            HashTable<T*, T, PER_THREAD> m_retired_nodes;                                // Unordered map for retired node
         //--------------------------------------------------------------
         };// end class HazardPointerManager
     //--------------------------------------------------------------
