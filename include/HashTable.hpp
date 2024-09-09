@@ -63,11 +63,17 @@ namespace HazardSystem {
             } // end bool insert(const Key& key, std::shared_ptr<T> data)
             //--------------------------
             // Find a node by key
-            std::shared_ptr<T> find(const Key& key) const {
+            // std::shared_ptr<T> find(const Key& key) const {
+            //     //--------------------------
+            //     return find_data(key);
+            //     //--------------------------
+            // } // end std::shared_ptr<T> find(Key key)
+            //--------------------------
+            std::unique_ptr<T> find(const Key& key) {
                 //--------------------------
                 return find_data(key);
                 //--------------------------
-            } // end std::shared_ptr<T> find(Key key)
+            } // end std::unique_ptr<T> find(const Key& key)
             //--------------------------
             // Remove a node by key and call its deleter
             bool remove(const Key& key) {
@@ -133,23 +139,43 @@ namespace HazardSystem {
             } // end bool insert_data(const Key& key, std::shared_ptr<T> data, std::function<void(std::shared_ptr<T>)> deleter)
             //--------------------------
             // Find a node by key
-            std::shared_ptr<T> find_data(const Key& key) const {
+            // std::shared_ptr<T> find_data(const Key& key) const {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key) {
+            //             return std::shared_ptr<T>(current->data.load());
+            //         } // end if (current->key == key)
+            //         //--------------------------
+            //         current = current->next.load();
+            //         //--------------------------
+            //     } // end while (current)
+            //     //--------------------------
+            //     return nullptr;
+            // } // end std::shared_ptr<T> find_data(const Key& key)
+            //--------------------------
+            std::unique_ptr<T> find_data(const Key& key) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(key);
+                Node* current = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return std::shared_ptr<T>(current->data.load());
+                        // Transfer ownership of the data
+                        return std::move(current->data);
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();
                     //--------------------------
                 } // end while (current)
                 //--------------------------
-                return nullptr;
-            } // end std::shared_ptr<T> find_data(const Key& key)
+                return nullptr;  // Key not found
+                //--------------------------
+            } // end std::unique_ptr<T> find_data(const Key& key)
             //--------------------------
             // Remove a node by key and call its deleter
             bool remove_data(const Key& key) {
