@@ -39,7 +39,7 @@ namespace HazardSystem {
                 } // end Node(const Key& key_, std::shared_ptr<T> data_)
                 //--------------------------
                 Key key;
-                std::atomic<std::shared_ptr<T>> data;  // Using atomic_unique_ptr for data
+                atomic_unique_ptr<T> data;  // Using atomic_unique_ptr for data
                 atomic_unique_ptr<Node> next;
                 //--------------------------
             }; // end struct Node
@@ -81,7 +81,7 @@ namespace HazardSystem {
                 clear_data();
             } // end ~HashMultiTable(void)
             //--------------------------
-            bool insert(const Key& key, std::shared_ptr<T> data) {
+            bool insert(const Key& key, std::unique_ptr<T> data) {
                 return insert_data(key, std::move(data));
             } // end bool insert(const Key& key, std::unique_ptr<T> data)
             //--------------------------
@@ -96,6 +96,10 @@ namespace HazardSystem {
             std::shared_ptr<T> find_first(const Key& key) const {
                 return find_first_data(key);
             } // end std::shared_ptr<T> find_first(const Key& key)
+            //--------------------------
+            bool contain(const Key& key, const T* data) const {
+                return contain_data(key, data);
+            } // end bool contain(const Key& key, T* data) const
             //--------------------------
             bool remove(const Key& key, std::unique_ptr<T> data) {
                 return remove_data(key, data);
@@ -135,30 +139,30 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            bool insert_data(const Key& key, std::shared_ptr<T> data) {
+            bool insert_data(const Key& key, std::unique_ptr<T> data) {
                 //--------------------------
                 const size_t index  = hasher(key);
-                auto new_node       = std::shared_ptr<Node>(key, std::move(data));
+                auto new_node       = std::make_unique<Node>(key, std::move(data));
                 Node* expected      = nullptr;
                 //--------------------------
                 // Insert the node at the head of the linked list in the bucket
-                if (m_table.at(index).compare_exchange_strong(expected, new_node.load())) {
-                    // new_node.release();
+                if (m_table.at(index).compare_exchange_strong(expected, new_node.get())) {
+                    new_node.release();
                     m_size.fetch_add(1UL);  // Increment the size of the hash table
                     return true;
-                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.load()))
+                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.get()))
                 //--------------------------
                 Node* current = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.load() == data) {
+                    if (current->key == key and current->data.load() == new_node.get()->data.load()) {
                         return false; // Avoid duplicate insertion
                     } // end if (current->key == key and current->data.load() == data)
                     //--------------------------
                     if (!current->next) {
                         if (current->next.compare_exchange_strong(expected, new_node.get())) {
-                            // new_node.release();
+                            new_node.release();
                             m_size.fetch_add(1UL);  // Increment the size of the hash table
                             return true;
                         } // end if (current->next.compare_exchange_strong(expected, new_node.load()))
@@ -194,27 +198,66 @@ namespace HazardSystem {
                 //--------------------------
             } // end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
             //--------------------------
+            // std::shared_ptr<T> find_data(const Key& key, T* data) const {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);              // Get the index for the hash table bucket
+            //     Node* current       = m_table.at(index).load();  // Get the first node in the bucket
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         // Check both the key and data pointer
+            //         if (current->key == key and current->data.load() == data) {
+            //             // Return the data wrapped in a shared_ptr (without transferring ownership)
+            //             return std::shared_ptr<T>(current->data.load(), [](T*) {});  // Custom deleter does nothing
+            //         }   // end if (current->key == key && current->data.load() == data)
+            //         //--------------------------
+            //         current = current->next.load();  // Move to the next node in the list
+            //         //--------------------------
+            //     } // end while (current)
+            //     //--------------------------
+            //     // If no match found, return nullptr
+            //     return nullptr;
+            //     //--------------------------
+            // } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
+            //--------------------------
             std::shared_ptr<T> find_data(const Key& key, T* data) const {
                 //--------------------------
-                const size_t index  = hasher(key);              // Get the index for the hash table bucket
-                Node* current       = m_table.at(index).load();  // Get the first node in the bucket
+                const size_t index  = hasher(key);
+                Node* current       = m_table.at(index).load();
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    // Check both the key and data pointer
+                    // Compare keys and the contents of the shared_ptr
+                    //--------------------------
                     if (current->key == key and current->data.load() == data) {
-                        // Return the data wrapped in a shared_ptr (without transferring ownership)
-                        return std::shared_ptr<T>(current->data.load(), [](T*) {});  // Custom deleter does nothing
-                    }   // end if (current->key == key && current->data.load() == data)
+                        // Return the data wrapped in a shared_ptr without transferring ownership
+                        return std::shared_ptr<T>(current->data.get(), [](T*) {});
+                    } // end if (current->key == key and current->data.get() == data.get())
                     //--------------------------
-                    current = current->next.load();  // Move to the next node in the list
-                    //--------------------------
+                    current = current->next.load();
                 } // end while (current)
                 //--------------------------
-                // If no match found, return nullptr
                 return nullptr;
                 //--------------------------
-            } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
+            } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<HazardPointer<T>> data) const
+            //--------------------------
+            bool contain_data(const Key& key, const T* data) const {
+                //--------------------------
+                const size_t index  = hasher(key);
+                Node* current       = m_table.at(index).load();
+                //--------------------------
+                while (current) {
+                    //--------------------------
+                    if (current->key == key and current->data.load() == data) {
+                        return true;
+                    } // end if (current->key == key and current->data.load() == data)
+                    //--------------------------
+                    current = current->next.load();
+                } // end while (current)
+                //--------------------------
+                return false;
+                //--------------------------
+            } // end bool contain_data(const Key& key, T* data) const
             //--------------------------
             std::shared_ptr<T> find_first_data(const Key& key) const {
                 //--------------------------
@@ -315,7 +358,7 @@ namespace HazardSystem {
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == old_key and current->data.load() == data) {
+                    if (current->key == old_key and current->data.load() == data.get()) {
                         current->key = new_key;
                         return true;
                     } // end if (current->key == old_key && current->data.load() == data)
@@ -334,7 +377,7 @@ namespace HazardSystem {
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.load() == old_data) {
+                    if (current->key == key and current->data.pointer.load() == old_data) {
                         current->data.store(std::move(new_data)); // Update the data pointer
                         return true;
                     } // end if (current->key == key && current->data.load() == old_data)
