@@ -147,7 +147,7 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return std::shared_ptr<T>(current->data.load());
+                        return std::shared_ptr<T>(current->data.load(), [](T* ptr) { /* Do nothing */ });
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();
