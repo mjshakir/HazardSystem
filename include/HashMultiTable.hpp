@@ -97,7 +97,7 @@ namespace HazardSystem {
                 return find_first_data(key);
             } // end std::shared_ptr<T> find_first(const Key& key)
             //--------------------------
-            bool contain(const Key& key, const T* data) const {
+            bool contain(const Key& key, T* data) const {
                 return contain_data(key, data);
             } // end bool contain(const Key& key, T* data) const
             //--------------------------
@@ -241,7 +241,7 @@ namespace HazardSystem {
                 //--------------------------
             } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<HazardPointer<T>> data) const
             //--------------------------
-            bool contain_data(const Key& key, const T* data) const {
+            bool contain_data(const Key& key, T* data) const {
                 //--------------------------
                 const size_t index  = hasher(key);
                 Node* current       = m_table.at(index).load();

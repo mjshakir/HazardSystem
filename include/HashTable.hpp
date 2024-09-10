@@ -83,7 +83,7 @@ namespace HazardSystem {
             } // end bool remove(Key key)
             //--------------------------
             // Scan and reclaim nodes that are no longer in use
-            void reclaim(const std::function<bool(const T*)>& is_hazard) {
+            void reclaim(const std::function<bool(T*)>& is_hazard) {
                 //--------------------------
                 scan_and_reclaim(is_hazard);
                 //--------------------------
@@ -210,7 +210,7 @@ namespace HazardSystem {
             } // end bool remove(Key key)
             //--------------------------
             // Scan and reclaim nodes that are no longer in use
-            void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard) {
+            void scan_and_reclaim(const std::function<bool(T*)>& is_hazard) {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------

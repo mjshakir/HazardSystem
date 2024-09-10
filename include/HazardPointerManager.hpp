@@ -142,10 +142,11 @@ namespace HazardSystem {
                 //--------------------------
             }// end void retire_node(void* node, std::function<void(void*)> deleter)
             //--------------------------
-            bool is_hazard(const T* node) const {
+            bool is_hazard(T* node) const {
                 //--------------------------
-                auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
-                return m_hazard_pointers.contain(false, hazardPtr.get());
+                // auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
+                HazardPointer<T> hazardPtr(node);
+                return m_hazard_pointers.contain(false, &hazardPtr);
                 //--------------------------
             }// end bool is_hazard(void* node)
             //--------------------------
