@@ -187,7 +187,8 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        results.push_back(std::shared_ptr<T>(current->data.load()));
+                        // results.push_back(std::shared_ptr<T>(current->data.load()));
+                        results.push_back(current->data.shared());
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();
@@ -197,28 +198,6 @@ namespace HazardSystem {
                 return results;
                 //--------------------------
             } // end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
-            //--------------------------
-            // std::shared_ptr<T> find_data(const Key& key, T* data) const {
-            //     //--------------------------
-            //     const size_t index  = hasher(key);              // Get the index for the hash table bucket
-            //     Node* current       = m_table.at(index).load();  // Get the first node in the bucket
-            //     //--------------------------
-            //     while (current) {
-            //         //--------------------------
-            //         // Check both the key and data pointer
-            //         if (current->key == key and current->data.load() == data) {
-            //             // Return the data wrapped in a shared_ptr (without transferring ownership)
-            //             return std::shared_ptr<T>(current->data.load(), [](T*) {});  // Custom deleter does nothing
-            //         }   // end if (current->key == key && current->data.load() == data)
-            //         //--------------------------
-            //         current = current->next.load();  // Move to the next node in the list
-            //         //--------------------------
-            //     } // end while (current)
-            //     //--------------------------
-            //     // If no match found, return nullptr
-            //     return nullptr;
-            //     //--------------------------
-            // } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
             //--------------------------
             std::shared_ptr<T> find_data(const Key& key, T* data) const {
                 //--------------------------
@@ -231,7 +210,7 @@ namespace HazardSystem {
                     //--------------------------
                     if (current->key == key and current->data.load() == data) {
                         // Return the data wrapped in a shared_ptr without transferring ownership
-                        return std::shared_ptr<T>(current->data.get(), [](T*) {});
+                        return current->data.shared();
                     } // end if (current->key == key and current->data.get() == data.get())
                     //--------------------------
                     current = current->next.load();
@@ -267,7 +246,7 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return std::shared_ptr<T>(current->data.load());
+                        return current->data.shared();
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();

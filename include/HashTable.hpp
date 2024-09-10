@@ -148,6 +148,7 @@ namespace HazardSystem {
                     //--------------------------
                     if (current->key == key) {
                         return std::shared_ptr<T>(current->data.load(), [](T* ptr) { /* Do nothing */ });
+                        return current->data.shared();
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();
