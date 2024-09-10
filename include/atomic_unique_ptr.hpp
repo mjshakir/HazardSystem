@@ -108,19 +108,13 @@ namespace HazardSystem {
                 return get_data(order);
             } // end T* load(void) const noexcept
             //--------------------------
-            void reset(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) {
+            bool reset(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) {
                 //--------------------------
-                reset_data(ptr, order);
+                return reset_data(ptr, order);
                 //--------------------------
             } // end void reset(T* ptr = nullptr)
             //--------------------------
-            T* release(void) {
-                //--------------------------
-                return release_data();
-                //--------------------------
-            } // end T* release(void)
-            //--------------------------
-            T* release(std::memory_order order) {
+            T* release(std::memory_order order = std::memory_order_acq_rel) {
                 //--------------------------
                 return release_data(order);
                 //--------------------------
@@ -170,18 +164,18 @@ namespace HazardSystem {
                 //--------------------------
             } // end void store(T* ptr, std::memory_order order)
             //--------------------------
-            void reset_data(T* ptr, std::memory_order order) noexcept {
+            bool reset_data(T* ptr, std::memory_order order) noexcept {
                 //--------------------------
                 T* p_old = m_ptr.exchange(ptr, order);
+                //--------------------------
+                if(!p_old) {
+                    return false;
+                } // end if (!p_old)
+                //--------------------------
                 delete p_old;
+                return true;
                 //--------------------------
             } // end void reset(T* ptr = nullptr)
-            //--------------------------
-            T* release_data(void) noexcept {
-                //--------------------------
-                return m_ptr.exchange(nullptr, std::memory_order_acq_rel);
-                //--------------------------
-            } // end T* release(void)
             //--------------------------
             T* release_data(std::memory_order order) noexcept {
                 //--------------------------
