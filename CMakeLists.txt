@@ -70,16 +70,6 @@ endif()
 set(HAZARDSYSTEM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
-# Find TBB
-find_package(TBB QUIET)
-if(TBB_FOUND)
-    set(HAS_TBB ON)
-    message(STATUS "Intel TBB found: ${TBB_VERSION}")
-else()
-    set(HAS_TBB OFF)
-endif()
-#------------------------------------------------------------------------------------------
-# Define the source files
 set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
