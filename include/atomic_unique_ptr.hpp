@@ -5,6 +5,7 @@
 #include <iostream>
 #include <atomic>
 #include <memory>
+#include <functional>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -108,6 +109,14 @@ namespace HazardSystem {
                 return get_data(order);
             } // end T* load(void) const noexcept
             //--------------------------
+            std::shared_ptr<T> shared(void) noexcept {
+                return get_shared();
+            } // end std::shared_ptr<T> get_shared(void)
+            //--------------------------
+            std::unique_ptr<T, std::function<void(T*)>> unique(void) noexcept {
+                return get_unique();
+            } // end std::unique_ptr<T> get_unique(void)
+            //--------------------------
             bool reset(T* ptr = nullptr, std::memory_order order = std::memory_order_acq_rel) {
                 //--------------------------
                 return reset_data(ptr, order);
@@ -195,6 +204,26 @@ namespace HazardSystem {
                 //--------------------------
             } // end T* get(void) const
             //--------------------------
+            std::shared_ptr<T> get_shared(void) noexcept {
+                //--------------------------
+                T* ptr = m_ptr.load(std::memory_order_acquire);
+                //--------------------------
+                // Return a shared_ptr with a no-op deleter, so it doesn't delete the pointer
+                return std::shared_ptr<T>(ptr, [](T*) {
+                    // Do nothing in the deleter since atomic_unique_ptr manages the pointer
+                });
+                //--------------------------
+            } // end std::shared_ptr<T> get_shared(void)
+            //--------------------------
+            // Method to return a unique_ptr without transferring ownership
+            std::unique_ptr<T, std::function<void(T*)>> get_unique(void) noexcept {
+                T* ptr = m_ptr.load(std::memory_order_acquire);
+                // Return a unique_ptr with a custom deleter that does nothing
+                return std::unique_ptr<T, std::function<void(T*)>>(ptr, [](T*) {
+                    // Do nothing in the deleter since atomic_unique_ptr manages the pointer
+                });
+            } // end std::unique_ptr<T> get_unique(void)
+            //--------------------------------------------------------------
             void swap_data(atomic_unique_ptr& other) {
                 //--------------------------
                 T* temp = other.m_ptr.exchange(m_ptr.load(std::memory_order_acquire), std::memory_order_acq_rel);
@@ -204,13 +233,13 @@ namespace HazardSystem {
             //--------------------------
             bool transfer_data(std::shared_ptr<T>& s_ptr) {
                 //--------------------------
-                if (s_ptr) {
-                    reset(s_ptr.load()); // Set the atomic_unique_ptr to manage the shared_ptr's object
-                    s_ptr.reset();      // Release the shared_ptr's ownership
-                    return true;
-                }// end if (s_ptr)
+                if(!s_ptr) {
+                    return false;
+                } // end if (!s_ptr)
                 //--------------------------
-                return false;
+                reset(s_ptr.load()); // Set the atomic_unique_ptr to manage the shared_ptr's object
+                s_ptr.reset();      // Release the shared_ptr's ownership
+                return true;
                 //--------------------------
             } // end bool transfer_shared_pointer(std::shared_ptr<T>& shared_ptr)
             //--------------------------
