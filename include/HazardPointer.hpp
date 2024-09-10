@@ -25,7 +25,7 @@ namespace HazardSystem {
             //--------------------------
         }// end HazardPointer(std::unique_ptr<T> ptr)
         //--------------------------
-        HazardPointer(std::shared_ptr<T> ptr) : pointer(ptr.load()) {
+        HazardPointer(std::shared_ptr<T> ptr) : pointer(ptr.get()) {
             //--------------------------
         }// end HazardPointer(std::shared_ptr<T> ptr)
         //--------------------------
