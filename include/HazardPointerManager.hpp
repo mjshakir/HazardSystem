@@ -117,7 +117,7 @@ namespace HazardSystem {
             bool release_data(std::shared_ptr<HazardPointer<T>> hp) {
                 if (hp) {
                     // hp->data.store(nullptr);  // Safely reset the raw pointer in atomic
-                    hp = nullptr;                               // Reset the atomic_unique_ptr to null
+                    hp.reset();                             // Reset the atomic_unique_ptr to null
                     m_hazard_pointers.swap(true, false, hp);  // Mark it as free
                     return true;
                 }
