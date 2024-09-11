@@ -18,13 +18,7 @@ namespace HazardSystem {
             //--------------------------
         }// end HazardPointer(void)
         //--------------------------
-        // HazardPointer(T* ptr) : pointer(ptr) {
-        //     //--------------------------
-        // }// end HazardPointer(T* ptr)
-        //--------------------------
-        HazardPointer(T* ptr) {
-            //--------------------------
-            pointer.store(ptr);
+        HazardPointer(T* ptr) : pointer(std::make_shared<T>(ptr)) {
             //--------------------------
         }// end HazardPointer(T* ptr)
         //--------------------------
