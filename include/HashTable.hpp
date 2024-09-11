@@ -158,7 +158,7 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return current->data.shared();
+                        return current->data.load();
                     } // end if (current->key == key)
                     //--------------------------
                     current = current->next.load();
@@ -204,8 +204,8 @@ namespace HazardSystem {
                 //--------------------------
                 const size_t index = hasher(key);  // Get the hash index
                 //--------------------------
-                // Get the head of the list from the atomic_unique_ptr using unique()
-                auto current = m_table.at(index).unique();
+                // Get the head of the list from the atomic_unique_ptr using load()
+                auto current = m_table.at(index).load();
                 std::unique_ptr<Node, std::function<void(Node*)>> prev(nullptr, [](Node*) {});
                 //--------------------------
                 while (current) {
@@ -214,7 +214,7 @@ namespace HazardSystem {
                         //--------------------------
                         // Node found, proceed with removal
                         if (prev) {
-                            // Set the previous node's next to the current node's next using unique()
+                            // Set the previous node's next to the current node's next using load()
                             prev->next.reset(current->next.release());
                         } else {
                             // Update the head of the table's bucket
@@ -233,7 +233,7 @@ namespace HazardSystem {
                     //--------------------------
                     // Move to the next node in the list
                     prev = std::move(current);  // Move the current node to prev
-                    current = prev->next.unique();  // Move to the next node
+                    current = prev->next.load();  // Move to the next node
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -291,7 +291,7 @@ namespace HazardSystem {
             //             //--------------------------
             //             // Check if the data is still a hazard
             //             //--------------------------
-            //             if (!is_hazard(current->data.shared())) {
+            //             if (!is_hazard(current->data.load())) {
             //                 //--------------------------
             //                 // Not a hazard; reclaim memory
             //                 if (prev) {
@@ -323,14 +323,14 @@ namespace HazardSystem {
                 for (auto& bucket : m_table) {
                     //--------------------------
                     // Use unique_ptr to handle ownership of the bucket's node
-                    auto current = bucket.unique();
+                    auto current = bucket.load();
                     std::unique_ptr<Node, std::function<void(Node*)>> prev(nullptr, [](Node*) {});
                     //--------------------------
                     while (current) {
                         //--------------------------
-                        // Check if the data is still a hazard using shared() method
-                        if (!is_hazard(current->data.shared())) {
-                            auto next_node = current->next.unique();
+                        // Check if the data is still a hazard using load() method
+                        if (!is_hazard(current->data.load())) {
+                            auto next_node = current->next.load();
                             if (prev) {
                                 prev->next.reset(next_node.release());  // Safely release
                             } else {
@@ -346,8 +346,8 @@ namespace HazardSystem {
                         } else {
                             // Data is still a hazard, move to the next node
                             prev.reset(current.release());  // Transfer ownership of current to prev
-                            current = prev->next.unique();  // Get the next node using unique()
-                        } // end if (!is_hazard(current->data.shared()))
+                            current = prev->next.load();  // Get the next node using load()
+                        } // end if (!is_hazard(current->data.load()))
                         //--------------------------
                     } // end while (current)
                     //--------------------------
@@ -357,8 +357,8 @@ namespace HazardSystem {
             //--------------------------
             // void scan_and_reclaim(const std::function<bool(T*)>& is_hazard) {
             //     for (auto& bucket : m_table) {
-            //         // Get the first node in the bucket using unique(), which uses a custom deleter
-            //         auto current = bucket.unique();  
+            //         // Get the first node in the bucket using load(), which uses a custom deleter
+            //         auto current = bucket.load();  
             //         std::unique_ptr<Node, std::function<void(Node*)>> prev(nullptr, [](Node*) {});  // Use custom deleter
 
             //         while (current) {
@@ -366,7 +366,7 @@ namespace HazardSystem {
             //             if (!is_hazard(current.get())) {
             //                 // Not a hazard; reclaim memory
             //                 if (prev) {
-            //                     // Set prev->next to current->next using unique()
+            //                     // Set prev->next to current->next using load()
             //                     prev->next.reset(current->next.release());
             //                 } else {
             //                     // Update the bucket with current->next
@@ -381,8 +381,8 @@ namespace HazardSystem {
             //                 // Data is still a hazard; move to the next node
             //                 prev = std::move(current);  // Transfer ownership to prev
             //             }
-            //             // Move to the next node using unique()
-            //             current = prev ? prev->next.unique() : nullptr;
+            //             // Move to the next node using load()
+            //             current = prev ? prev->next.load() : nullptr;
             //         }
             //     }
             // } // end void scan_and_reclaim(const std::function<bool(T*)>& is_hazard)
@@ -402,11 +402,11 @@ namespace HazardSystem {
             void clear_data(void) {
                 for (auto& bucket : m_table) {
                     // Use unique_ptr to ensure safe deletion of nodes
-                    auto current = bucket.unique();
+                    auto current = bucket.load();
                     //--------------------------
                     while (current) {
                         // Move ownership of the next node into a unique_ptr
-                        auto next = current->next.unique();
+                        auto next = current->next.load();
                         //--------------------------
                         // No need to manually delete current, unique_ptr will handle it
                         current.reset();  // Deletes the current node
