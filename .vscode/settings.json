@@ -56,6 +56,12 @@
         "vector": "cpp",
         "algorithm": "cpp",
         "atomic": "cpp",
-        "iterator": "cpp"
+        "iterator": "cpp",
+        "deque": "cpp",
+        "forward_list": "cpp",
+        "iomanip": "cpp",
+        "list": "cpp",
+        "regex": "cpp",
+        "unordered_set": "cpp"
     }
 }
