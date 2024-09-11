@@ -136,10 +136,16 @@ class HashMultiTable {
             //--------------------------
             auto current = m_table.at(index).load();
             while (current) {
-                if (current->key == key and current->data.load().get() == new_node->data.get()) {
+                // First, load the shared_ptr from the atomic<std::shared_ptr<T>> in both current and new_node
+                auto current_data_ptr = current->data.load();
+                auto new_node_data_ptr = new_node->data.load();
+
+                // Compare the raw pointer values using get() to ensure they point to the same object
+                if (current->key == key && current_data_ptr.get() == new_node_data_ptr.get()) {
                     return false;  // Duplicate key or data found
                 }
-                if (!current->next) {
+
+                if (!current->next.load()) {
                     if (current->next.compare_exchange_strong(expected, new_node)) {
                         m_size.fetch_add(1UL);  // Increment the size of the hash table
                         return true;
@@ -148,7 +154,7 @@ class HashMultiTable {
                 current = current->next.load();
             }
             return false;
-        }
+        } // end bool insert_data(const Key& key, std::shared_ptr<T> data)
         //--------------------------
         std::vector<std::shared_ptr<T>> find_data(const Key& key) const {
             //--------------------------
