@@ -139,151 +139,312 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
+            // bool insert_data(const Key& key, std::unique_ptr<T> data) {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     auto new_node       = std::make_unique<Node>(key, std::move(data));
+            //     Node* expected      = nullptr;
+            //     //--------------------------
+            //     // Insert the node at the head of the linked list in the bucket
+            //     if (m_table.at(index).compare_exchange_strong(expected, new_node.get())) {
+            //         new_node.release();
+            //         m_size.fetch_add(1UL);  // Increment the size of the hash table
+            //         return true;
+            //     } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.get()))
+            //     //--------------------------
+            //     Node* current = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key and current->data.load() == new_node.get()->data.load()) {
+            //             return false; // Avoid duplicate insertion
+            //         } // end if (current->key == key and current->data.load() == data)
+            //         //--------------------------
+            //         if (!current->next) {
+            //             if (current->next.compare_exchange_strong(expected, new_node.get())) {
+            //                 new_node.release();
+            //                 m_size.fetch_add(1UL);  // Increment the size of the hash table
+            //                 return true;
+            //             } // end if (current->next.compare_exchange_strong(expected, new_node.load()))
+            //             //--------------------------
+            //         } // end if (!current->next)
+            //         //--------------------------
+            //         current = current->next.load();
+            //     } // end while (current)
+            //     //--------------------------
+            //     return false;
+            //     //--------------------------
+            // } // end bool insert_data(const Key& key, std::unique_ptr<T> data)
+            //--------------------------
             bool insert_data(const Key& key, std::unique_ptr<T> data) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                auto new_node       = std::make_unique<Node>(key, std::move(data));
-                Node* expected      = nullptr;
+                const size_t index = hasher(key);
+                auto new_node = std::make_unique<Node>(key, std::move(data));  // Create a new node with the data
+                Node* expected = nullptr;
+
                 //--------------------------
                 // Insert the node at the head of the linked list in the bucket
                 if (m_table.at(index).compare_exchange_strong(expected, new_node.get())) {
-                    new_node.release();
+                    new_node.release();  // Transfer ownership to atomic_unique_ptr
                     m_size.fetch_add(1UL);  // Increment the size of the hash table
                     return true;
-                } // end if (m_table.at(index).compare_exchange_strong(expected, new_node.get()))
+                }
+                
                 //--------------------------
-                Node* current = m_table.at(index).load();
-                //--------------------------
+                auto current = m_table.at(index).shared();  // Get a shared pointer to the current node
+                
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.load() == new_node.get()->data.load()) {
-                        return false; // Avoid duplicate insertion
-                    } // end if (current->key == key and current->data.load() == data)
+                    // Ensure no duplicate keys are inserted
+                    if (current->key == key && current->data.load() == new_node->data.load()) {
+                        return false;  // Duplicate key or data found, insertion not allowed
+                    }
+                    
                     //--------------------------
+                    // Insert at the end of the list if there's no next node
                     if (!current->next) {
-                        if (current->next.compare_exchange_strong(expected, new_node.get())) {
-                            new_node.release();
+                        Node* expected_next = nullptr;  // Extract raw pointer from the unique_ptr
+                        if (current->next.compare_exchange_strong(expected_next, new_node.get())) {
+                            new_node.release();  // Transfer ownership to the atomic_unique_ptr in the node
                             m_size.fetch_add(1UL);  // Increment the size of the hash table
                             return true;
-                        } // end if (current->next.compare_exchange_strong(expected, new_node.load()))
-                        //--------------------------
-                    } // end if (!current->next)
+                        }
+                    }
+                    
                     //--------------------------
-                    current = current->next.load();
-                } // end while (current)
+                    current = current->next.shared();  // Move to the next node
+                }
+                
                 //--------------------------
                 return false;
-                //--------------------------
-            } // end bool insert_data(const Key& key, std::unique_ptr<T> data)
+            }
+            //--------------------------
+            // std::vector<std::shared_ptr<T>> find_data(const Key& key) const {
+            //     //--------------------------
+            //     std::vector<std::shared_ptr<T>> results;
+            //     results.reserve(N);
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key) {
+            //             // results.push_back(std::shared_ptr<T>(current->data.load()));
+            //             results.push_back(current->data.shared());
+            //         } // end if (current->key == key)
+            //         //--------------------------
+            //         current = current->next.load();
+            //         //--------------------------
+            //     } // end while (current)
+            //     //--------------------------
+            //     return results;
+            //     //--------------------------
+            // } // end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
             //--------------------------
             std::vector<std::shared_ptr<T>> find_data(const Key& key) const {
                 //--------------------------
                 std::vector<std::shared_ptr<T>> results;
-                results.reserve(N);
+                results.reserve(N);  // Set an initial size for efficiency, adjust based on expected number of results
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(key);
+                auto current = m_table.at(index).shared();  // Start with a shared pointer to the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
+                    // Check if the key matches and push the shared data pointer to the results
                     if (current->key == key) {
-                        // results.push_back(std::shared_ptr<T>(current->data.load()));
-                        results.push_back(current->data.shared());
-                    } // end if (current->key == key)
+                        results.push_back(current->data.shared());  // Use shared() to safely get a shared_ptr to the data
+                    }
                     //--------------------------
-                    current = current->next.load();
-                    //--------------------------
-                } // end while (current)
+                    current = current->next.shared();  // Move to the next node in the linked list using shared pointer
+                }
                 //--------------------------
-                return results;
-                //--------------------------
+                return results;  // Return the vector of shared pointers
             } // end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
+            //--------------------------
+            // std::shared_ptr<T> find_data(const Key& key, T* data) const {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         // Compare keys and the contents of the shared_ptr
+            //         //--------------------------
+            //         if (current->key == key and current->data.load() == data) {
+            //             // Return the data wrapped in a shared_ptr without transferring ownership
+            //             return current->data.shared();
+            //         } // end if (current->key == key and current->data.get() == data.get())
+            //         //--------------------------
+            //         current = current->next.load();
+            //     } // end while (current)
+            //     //--------------------------
+            //     return nullptr;
+            //     //--------------------------
+            // } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<HazardPointer<T>> data) const
             //--------------------------
             std::shared_ptr<T> find_data(const Key& key, T* data) const {
                 //--------------------------
                 const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                auto current        = m_table.at(index).shared(); // Get a shared_ptr to the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    // Compare keys and the contents of the shared_ptr
+                    // Compare keys and the contents of the unique_ptr or shared_ptr
                     //--------------------------
-                    if (current->key == key and current->data.load() == data) {
-                        // Return the data wrapped in a shared_ptr without transferring ownership
-                        return current->data.shared();
-                    } // end if (current->key == key and current->data.get() == data.get())
+                    auto current_data = current->data.shared();  // Get a shared_ptr to the data
+                    if (current->key == key and current_data.get() == data) {
+                        // Return the shared_ptr safely
+                        return current_data;
+                    } // end if (current->key == key and current_data.get() == data)
                     //--------------------------
-                    current = current->next.load();
+                    current = current->next.shared();  // Move to the next node safely using shared_ptr
                 } // end while (current)
                 //--------------------------
-                return nullptr;
+                return nullptr;  // Return nullptr if no match found
                 //--------------------------
-            } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<HazardPointer<T>> data) const
+            } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
+            //--------------------------
+            // bool contain_data(const Key& key, T* data) const {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key and current->data.load() == data) {
+            //             return true;
+            //         } // end if (current->key == key and current->data.load() == data)
+            //         //--------------------------
+            //         current = current->next.load();
+            //     } // end while (current)
+            //     //--------------------------
+            //     return false;
+            //     //--------------------------
+            // } // end bool contain_data(const Key& key, T* data) const
             //--------------------------
             bool contain_data(const Key& key, T* data) const {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(key);
+                auto current       = m_table.at(index).shared(); // Get a shared_ptr to the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.load() == data) {
-                        return true;
-                    } // end if (current->key == key and current->data.load() == data)
+                    // Compare keys and use shared_ptr to check the data without transferring ownership
                     //--------------------------
-                    current = current->next.load();
+                    auto current_data = current->data.shared(); // Use shared_ptr for safe access to data
+                    if (current->key == key and current_data.get() == data) {
+                        return true; // Found matching key and data
+                    } // end if (current->key == key and current_data.get() == data)
+                    //--------------------------
+                    current = current->next.shared(); // Move to the next node safely using shared_ptr
                 } // end while (current)
                 //--------------------------
-                return false;
+                return false; // No match found
                 //--------------------------
             } // end bool contain_data(const Key& key, T* data) const
             //--------------------------
+            // std::shared_ptr<T> find_first_data(const Key& key) const {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key) {
+            //             return current->data.shared();
+            //         } // end if (current->key == key)
+            //         //--------------------------
+            //         current = current->next.load();
+            //         //--------------------------
+            //     } // end while (current)
+            //     //--------------------------
+            //     return nullptr;  // No matching key found
+            //     //--------------------------
+            // } // end std::shared_ptr<T> find_first(const Key& key)  const
+            //--------------------------
             std::shared_ptr<T> find_first_data(const Key& key) const {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(key);
+                auto current = m_table.at(index).shared();  // Get a shared_ptr to the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
-                        return current->data.shared();
+                        return current->data.shared();  // Safely return shared_ptr to the data
                     } // end if (current->key == key)
                     //--------------------------
-                    current = current->next.load();
+                    current = current->next.shared();  // Safely move to the next node using shared_ptr
                     //--------------------------
                 } // end while (current)
                 //--------------------------
                 return nullptr;  // No matching key found
                 //--------------------------
-            } // end std::shared_ptr<T> find_first(const Key& key)  const
+            } // end std::shared_ptr<T> find_first(const Key& key) const
+            //--------------------------
+            // bool remove_data(const Key& key, std::unique_ptr<T> data) {
+            //     //--------------------------
+            //     size_t index    = hasher(key);
+            //     Node* current   = m_table.at(index).load();
+            //     Node* prev      = nullptr;
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key and current->data.load() == data) {
+            //             //--------------------------
+            //             if (prev) {
+            //                 prev->next.reset(current->next.release());
+            //             } else {
+            //                 m_table.at(index).reset(current->next.release());
+            //             } // end if (prev)
+            //             //--------------------------
+            //             current->next.reset();
+            //             current->data.store(nullptr);    // Safely delete the data
+            //             m_size.fetch_sub(1UL);        // Decrement the size of the hash table
+            //             delete current;
+            //             //--------------------------
+            //             return true;
+            //             //--------------------------
+            //         } // end if (current->key == key and current->data.load() == data)
+            //         //--------------------------
+            //         prev = current;
+            //         current = current->next.load();
+            //         //--------------------------
+            //     } // end while (current)
+            //     //--------------------------
+            //     return false;
+            //     //--------------------------
+            // } // end bool remove_data(const Key& key, std::unique_ptr<T> data)
             //--------------------------
             bool remove_data(const Key& key, std::unique_ptr<T> data) {
                 //--------------------------
-                size_t index    = hasher(key);
-                Node* current   = m_table.at(index).load();
-                Node* prev      = nullptr;
+                size_t index = hasher(key);
+                auto current = m_table.at(index).unique();  // Get unique ownership of the current node
+                std::unique_ptr<Node, std::function<void(Node*)>> prev = nullptr;  // Use unique_ptr for previous node
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.load() == data) {
+                    if (current->key == key and current->data.unique() == data) {
                         //--------------------------
                         if (prev) {
-                            prev->next.reset(current->next.release());
+                            prev->next.reset(current->next.release());  // Transfer ownership of the next node
                         } else {
-                            m_table.at(index).reset(current->next.release());
+                            m_table.at(index).reset(current->next.release());  // Update the table entry
                         } // end if (prev)
                         //--------------------------
-                        current->next.reset();
-                        current->data.store(nullptr);    // Safely delete the data
-                        m_size.fetch_sub(1UL);        // Decrement the size of the hash table
-                        delete current;
+                        current->next.reset();  // Release the next pointer safely
+                        current->data.store(nullptr);  // Safely remove the data
+                        m_size.fetch_sub(1UL);  // Decrement the size of the hash table
+                        //--------------------------
+                        delete current.get();  // Delete the current node
                         //--------------------------
                         return true;
                         //--------------------------
                     } // end if (current->key == key and current->data.load() == data)
                     //--------------------------
-                    prev = current;
-                    current = current->next.load();
+                    prev = std::move(current);  // Move ownership to prev
+                    current = prev->next.unique();  // Move to the next node safely
                     //--------------------------
                 } // end while (current)
                 //--------------------------
@@ -291,105 +452,219 @@ namespace HazardSystem {
                 //--------------------------
             } // end bool remove_data(const Key& key, std::unique_ptr<T> data)
             //--------------------------
+            // bool remove_data(const Key& key) {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     Node* prev          = nullptr;
+            //     bool removed        = false;
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key) {
+            //             //--------------------------
+            //             Node* next_node = current->next.load();
+            //             //--------------------------
+            //             if (prev) {
+            //                 prev->next.reset(next_node);
+            //             } else {
+            //                 m_table.at(index).reset(next_node);
+            //             } // end if (prev)
+            //             //--------------------------
+            //             current->next.reset();
+            //             current->data.store(nullptr);  // Automatically delete data using atomic_unique_ptr
+            //             //--------------------------
+            //             delete current;
+            //             //--------------------------
+            //             m_size.fetch_sub(1UL);  // Decrement the size of the hash table
+            //             //--------------------------
+            //             current = next_node;
+            //             removed = true;
+            //             //--------------------------
+            //         } else {
+            //             prev = current;
+            //             current = current->next.load();
+            //         } // end if (current->key == key)
+            //     } // end while (current)
+            //     //--------------------------
+            //     return removed;
+            //     //--------------------------
+            // } // end bool remove_all_data(const Key& key)
+            //--------------------------
             bool remove_data(const Key& key) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
-                Node* prev          = nullptr;
-                bool removed        = false;
+                const size_t index = hasher(key);
+                auto current = m_table.at(index).unique();  // Get unique ownership of the current node
+                std::unique_ptr<Node, std::function<void(Node*)>> prev = nullptr;  // Use unique_ptr for the previous node
+                bool removed = false;
                 //--------------------------
                 while (current) {
                     //--------------------------
                     if (current->key == key) {
                         //--------------------------
-                        Node* next_node = current->next.load();
+                        auto next_node = current->next.unique();  // Get unique ownership of the next node
                         //--------------------------
                         if (prev) {
-                            prev->next.reset(next_node);
+                            prev->next.reset(next_node.release());  // Transfer ownership of the next node
                         } else {
-                            m_table.at(index).reset(next_node);
+                            m_table.at(index).reset(next_node.release());  // Reset the current table entry
                         } // end if (prev)
                         //--------------------------
-                        current->next.reset();
-                        current->data.store(nullptr);  // Automatically delete data using atomic_unique_ptr
-                        //--------------------------
-                        delete current;
+                        current->next.reset();        // Release the next pointer safely
+                        current->data.store(nullptr); // Safely release data using atomic_unique_ptr
                         //--------------------------
                         m_size.fetch_sub(1UL);  // Decrement the size of the hash table
                         //--------------------------
-                        current = next_node;
+                        current.reset();  // Automatically delete the current node
                         removed = true;
                         //--------------------------
+                        current = std::move(next_node);  // Move to the next node safely
                     } else {
-                        prev = current;
-                        current = current->next.load();
+                        prev = std::move(current);      // Move ownership to the prev node
+                        current = prev->next.unique();  // Move to the next node safely
                     } // end if (current->key == key)
                 } // end while (current)
                 //--------------------------
                 return removed;
                 //--------------------------
-            } // end bool remove_all_data(const Key& key)
+            } // end bool remove_data(const Key& key)
+            //--------------------------
+            // bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
+            //     //--------------------------
+            //     const size_t index  = hasher(old_key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == old_key and current->data.load() == data.get()) {
+            //             current->key = new_key;
+            //             return true;
+            //         } // end if (current->key == old_key && current->data.load() == data)
+            //         //--------------------------
+            //         current = current->next.load();
+            //     } // end while (current)
+            //     //--------------------------
+            //     return false;
+            // } // end bool swap_key(const Key& old_key, const Key& new_key, std::unique_ptr<T> data)
             //--------------------------
             bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
                 //--------------------------
-                const size_t index  = hasher(old_key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(old_key);
+                auto current = m_table.at(index).shared();  // Get shared ownership of the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == old_key and current->data.load() == data.get()) {
-                        current->key = new_key;
+                    if (current->key == old_key and current->data.shared() == data) {
+                        current->key = new_key;  // Update the key
                         return true;
-                    } // end if (current->key == old_key && current->data.load() == data)
+                    } // end if (current->key == old_key && current->data.shared() == data)
                     //--------------------------
-                    current = current->next.load();
+                    current = current->next.shared();  // Move to the next node safely using shared ownership
                 } // end while (current)
                 //--------------------------
                 return false;
-            } // end bool swap_key(const Key& old_key, const Key& new_key, std::unique_ptr<T> data)
+                //--------------------------
+            } // end bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data)
             //--------------------------
             // Swap the data of an entry while keeping the key the same
+            // bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
+            //     //--------------------------
+            //     const size_t index  = hasher(key);
+            //     Node* current       = m_table.at(index).load();
+            //     //--------------------------
+            //     while (current) {
+            //         //--------------------------
+            //         if (current->key == key and current->data.pointer.load() == old_data) {
+            //             current->data.store(std::move(new_data)); // Update the data pointer
+            //             return true;
+            //         } // end if (current->key == key && current->data.load() == old_data)
+            //         //--------------------------
+            //         current = current->next.load();
+            //     } // end while (current)
+            //     //--------------------------
+            //     return false;
+            //     //--------------------------
+            // } // end bool swap_data(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data)
+            //--------------------------
             bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load();
+                const size_t index = hasher(key);
+                auto current = m_table.at(index).shared();  // Get shared ownership of the current node
                 //--------------------------
                 while (current) {
                     //--------------------------
-                    if (current->key == key and current->data.pointer.load() == old_data) {
-                        current->data.store(std::move(new_data)); // Update the data pointer
+                    if (current->key == key and current->data.shared() == old_data) {
+                        current->data.store(std::move(new_data));  // Update the data using atomic store
                         return true;
-                    } // end if (current->key == key && current->data.load() == old_data)
+                    } // end if (current->key == key && current->data.shared() == old_data)
                     //--------------------------
-                    current = current->next.load();
+                    current = current->next.shared();  // Move to the next node safely using shared ownership
                 } // end while (current)
                 //--------------------------
                 return false;
                 //--------------------------
-            } // end bool swap_data(const Key& key, std::unique_ptr<T> old_data, std::unique_ptr<T> new_data)
+            } // end bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data)
+            //--------------------------
+            // void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard) {
+            //     //--------------------------
+            //     for (auto& bucket : m_table) {
+            //         //--------------------------
+            //         Node* current   = bucket.load();
+            //         Node* prev      = nullptr;
+            //         //--------------------------
+            //         while (current) {
+            //             //--------------------------
+            //             if (!is_hazard(current->data.load())) {  // Check using raw pointer
+            //                 if (prev) {
+            //                     prev->next.reset(current->next.release());
+            //                 } else {
+            //                     bucket.reset(current->next.release());
+            //                 }
+            //                 current->next.reset();          // Safely delete the next node
+            //                 current->data.store(nullptr);   // Safely delete the data
+            //                 delete current;                 // Safely delete the current node
+            //                 m_size.fetch_sub(1UL);          // Decrement the size of the hash table
+            //             } else {
+            //                 prev = current;
+            //                 current = current->next.load();
+            //             } // end if (!is_hazard(current->data.load()))
+            //             //--------------------------
+            //         } // end while (current)
+            //         //--------------------------
+            //     } // end for (auto& bucket : m_table)
+            //     //--------------------------
+            // } // end void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard)
             //--------------------------
             void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard) {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* current   = bucket.load();
-                    Node* prev      = nullptr;
+                    auto current = bucket.shared();  // Use shared pointer for safe access
+                    std::unique_ptr<Node, std::function<void(Node*)>> prev(nullptr, [](Node*) {}); // Initialize an empty unique_ptr for prev
                     //--------------------------
                     while (current) {
                         //--------------------------
-                        if (!is_hazard(current->data.load())) {  // Check using raw pointer
+                        // Check if the data is a hazard using the raw pointer from shared data
+                        if (!is_hazard(current->data.load())) {
+                            //--------------------------
+                            // Data is not a hazard; reclaim the node
+                            auto next_node = current->next.unique();  // Use unique() for exclusive access to next node
+                            //--------------------------
                             if (prev) {
-                                prev->next.reset(current->next.release());
+                                prev->next.reset(next_node.release());  // Update prev to point to the next node
                             } else {
-                                bucket.reset(current->next.release());
+                                bucket.reset(next_node.release());      // Update the bucket to point to the next node
                             }
+                            //--------------------------
                             current->next.reset();          // Safely delete the next node
                             current->data.store(nullptr);   // Safely delete the data
-                            delete current;                 // Safely delete the current node
+                            current.reset();                // Safely delete the current node
                             m_size.fetch_sub(1UL);          // Decrement the size of the hash table
+                            //--------------------------
+                            current = std::move(next_node);  // Move to the next node
                         } else {
-                            prev = current;
-                            current = current->next.load();
+                            prev = std::move(current);       // Move current to prev for safe tracking
+                            current = current->next.shared();  // Move to the next node safely using shared ownership
                         } // end if (!is_hazard(current->data.load()))
                         //--------------------------
                     } // end while (current)
@@ -398,20 +673,43 @@ namespace HazardSystem {
                 //--------------------------
             } // end void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard)
             //--------------------------
+            // void clear_data(void) {
+            //     //--------------------------
+            //     for (auto& bucket : m_table) {
+            //         //--------------------------
+            //         Node* current = bucket.load();
+            //         //--------------------------
+            //         while (current) {
+            //             Node* temp = current;
+            //             current = current->next.load();
+            //             temp->next.reset();
+            //             temp->data.store(nullptr);
+            //             delete temp;
+            //         } // end while (current)
+            //         //--------------------------
+            //     } // end for (auto& bucket : m_table)
+            //     //--------------------------
+            //     m_size.store(0UL);  // Reset the size to zero
+            //     //--------------------------
+            // } // end void clear_data(void)
+            //--------------------------
             void clear_data(void) {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* current = bucket.load();
+                    auto current = bucket.unique();  // Use unique() to get exclusive ownership of the current node
                     //--------------------------
                     while (current) {
-                        Node* temp = current;
-                        current = current->next.load();
-                        temp->next.reset();
-                        temp->data.store(nullptr);
-                        delete temp;
+                        auto next_node = current->next.unique();  // Use unique() to safely access the next node
+                        //--------------------------
+                        current->next.reset();         // Safely reset the next pointer
+                        current->data.store(nullptr);  // Safely delete the data
+                        //--------------------------
+                        current.reset();               // Safely delete the current node
+                        current = std::move(next_node);  // Move to the next node
                     } // end while (current)
                     //--------------------------
+                    bucket.reset();  // Reset the bucket to ensure it's clear
                 } // end for (auto& bucket : m_table)
                 //--------------------------
                 m_size.store(0UL);  // Reset the size to zero
