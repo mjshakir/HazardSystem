@@ -38,8 +38,8 @@ namespace HazardSystem {
                 return release_data(hp);
             }// end void release(HazardPointer* hp)
             //--------------------------
-            void retire(std::unique_ptr<T> node) {
-                retire_node(std::move(node));
+            bool retire(std::unique_ptr<T> node) {
+                return retire_node(std::move(node));
             }// end void retire(void* node)
             //--------------------------
             void reclaim(void) {
@@ -77,7 +77,7 @@ namespace HazardSystem {
             //--------------------------
             ~HazardPointerManager(void) {
                 //--------------------------
-                clear_data();
+                // clear_data();
                 //--------------------------
             }// end ~HazardPointerManager(void)
             //--------------------------
@@ -87,57 +87,106 @@ namespace HazardSystem {
                 } // end for (size_t i = 0; i < HAZARD_POINTERS; ++i)
             }// end void initialize_hazard_pointers(void)
             //--------------------------
+            // std::shared_ptr<HazardPointer<T>> acquire_data(void) {
+            //     //--------------------------
+            //     // Acquire the first available hazard pointer
+            //     auto hp = m_hazard_pointers.find_first(true);
+            //     //--------------------------
+            //     if (hp) {
+            //         //--------------------------
+            //         hp.reset();                             // Reset the atomic_unique_ptr to null
+            //         m_hazard_pointers.swap(true, false, hp);  // Mark it as in use
+            //         //--------------------------
+            //         return hp;
+            //         //--------------------------
+            //     } // end if (hp)
+            //     //--------------------------
+            //     // If no free hazard pointers are found, return nullptr
+            //     return nullptr;
+            //     //--------------------------
+            // } // end std::optional<HazardPointer*> acquire_data(void)
+            //--------------------------
             std::shared_ptr<HazardPointer<T>> acquire_data(void) {
                 //--------------------------
                 // Acquire the first available hazard pointer
-                auto hp = m_hazard_pointers.find_first(true);
+                auto hp = m_hazard_pointers.find_first(true);  // Find the first "free" hazard pointer
                 //--------------------------
                 if (hp) {
-                    //--------------------------
-                    hp.reset();                             // Reset the atomic_unique_ptr to null
-                    m_hazard_pointers.swap(true, false, hp);  // Mark it as in use
-                    //--------------------------
-                    return hp;
-                    //--------------------------
+                    hp->pointer.reset();  // Reset the internal atomic pointer to clear any prior resource
+                    m_hazard_pointers.swap(true, false, hp);  // Mark it as "in use"
+                    return hp;  // Return the acquired hazard pointer
                 } // end if (hp)
                 //--------------------------
-                // If no free hazard pointers are found, return nullptr
-                return nullptr;
-                //--------------------------
-            } // end std::optional<HazardPointer*> acquire_data(void)
+                return nullptr;  // No free hazard pointer found
+            } // end std::shared_ptr<HazardPointer<T>> acquire_data(void)
+            //--------------------------
+            // bool release_data(std::shared_ptr<HazardPointer<T>> hp) {
+            //     //--------------------------
+            //     if(!hp) {
+            //         return false;
+            //     } // end if (!hp)
+            //     //--------------------------
+            //     // hp->data.store(nullptr);  // Safely reset the raw pointer in atomic
+            //     // hp.reset();                             // Reset the atomic_unique_ptr to null
+            //     hp->pointer.reset();                    // Reset the atomic_unique_ptr to null
+            //     m_hazard_pointers.swap(true, false, hp);  // Mark it as free
+            //     return true;
+            // }// end bool release_data(std::shared_ptr<HazardPointer<T>> hp)
             //--------------------------
             bool release_data(std::shared_ptr<HazardPointer<T>> hp) {
-                if (hp) {
-                    // hp->data.store(nullptr);  // Safely reset the raw pointer in atomic
-                    hp.reset();                             // Reset the atomic_unique_ptr to null
-                    m_hazard_pointers.swap(true, false, hp);  // Mark it as free
-                    return true;
-                }
-                return false;
+                //--------------------------
+                if (!hp) {
+                    return false;  // Return false if the hazard pointer is null
+                } // end if (!hp)
+                //--------------------------
+                hp->pointer.reset();  // Reset the internal atomic pointer to null, releasing the resource
+                m_hazard_pointers.swap(false, true, std::move(hp));  // Mark it as "free" again
+                //--------------------------
+                return true;  // Successfully released the hazard pointer
             }// end bool release_data(std::shared_ptr<HazardPointer<T>> hp)
             //--------------------------
-            void retire_node(std::unique_ptr<T> node) {
+            bool retire_node(std::unique_ptr<T> node) {
                 //--------------------------
-                if (node) {
-                    //--------------------------
-                    T* raw_ptr = node.get();                // Extract the raw pointer
-                    //--------------------------
-                    // Insert raw pointer into retired nodes and release ownership from unique_ptr
-                    m_retired_nodes.insert(raw_ptr, std::move(node));  
-                    //--------------------------
-                    // Trigger reclaim if retired node count reaches threshold
-                    if (m_retired_nodes.size() >= PER_THREAD) {
-                        reclaim();
-                    } // end if (m_retired_nodes.size() >= PER_THREAD)
-                    //--------------------------
-                } // end if (node)
+                if(!node) {
+                    return false;  // Return false if the node is null
+                } // end if (!node)
+                //--------------------------
+                T* raw_ptr = node.get();                // Extract the raw pointer
+                //--------------------------
+                // Insert raw pointer into retired nodes and release ownership from unique_ptr
+                m_retired_nodes.insert(raw_ptr, std::move(node));  
+                //--------------------------
+                // Trigger reclaim if retired node count reaches threshold
+                if (m_retired_nodes.size() >= PER_THREAD) {
+                    reclaim();
+                } // end if (m_retired_nodes.size() >= PER_THREAD)
+                //--------------------------
+                return true;  // Successfully retired the node
                 //--------------------------
             }// end void retire_node(void* node, std::function<void(void*)> deleter)
             //--------------------------
-            bool is_hazard(T* node) const {
+            // bool retire_node(std::unique_ptr<T> node) {
+            //     //--------------------------
+            //     if (!node) {
+            //         return false;  // Return false if the node is null
+            //     } // end if (!node)
+            //     //--------------------------
+            //     // Emplace the node into retired nodes (HashTable) without manually extracting the raw pointer
+            //     m_retired_nodes.insert(std::move(node));  
+            //     //--------------------------
+            //     // Trigger reclaim if retired node count reaches threshold
+            //     if (m_retired_nodes.size() >= PER_THREAD) {
+            //         reclaim();
+            //     } // end if (m_retired_nodes.size() >= PER_THREAD)
+            //     //--------------------------
+            //     return true;  // Successfully retired the node
+            //     //--------------------------
+            // } // end void retire_node(std::unique_ptr<T> node)
+            //--------------------------
+            bool is_hazard(std::shared_ptr<T> node) const {
                 //--------------------------
                 // auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
-                HazardPointer<T> hazardPtr(node);
+                HazardPointer<T> hazardPtr(node.get());
                 return m_hazard_pointers.contain(false, &hazardPtr);
                 //--------------------------
             }// end bool is_hazard(void* node)
