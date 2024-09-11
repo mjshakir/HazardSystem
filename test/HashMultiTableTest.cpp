@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <thread>
 #include <atomic>
 #include "HashMultiTable.hpp"
@@ -225,7 +224,7 @@ TEST_F(HashMultiTableTest, ReclaimNodesTest) {
     }
 
     // Reclaim nodes that are no longer hazards (in this case, everything)
-    hash_table.reclaim([](const TestNode* node) -> bool {
+    hash_table.reclaim([](const std::shared_ptr<TestNode>& node) -> bool {
         return false;  // No hazards; reclaim everything
     });
 
@@ -278,4 +277,152 @@ TEST_F(HashMultiTableTest, MultiThread_StressTest) {
     ASSERT_GT(insert_count, 0);
     ASSERT_GT(find_count, 0);
     ASSERT_GT(remove_count, 0);
+}
+
+// Test case 9: Inserting duplicate data for the same key
+TEST_F(HashMultiTableTest, InsertDuplicateDataTest) {
+    HashMultiTable<int, TestNode, 10> hash_table;
+
+    // Insert elements with the same key but different data
+    auto node1 = std::make_unique<TestNode>(42);
+    auto node2 = std::make_unique<TestNode>(100);
+
+    ASSERT_TRUE(hash_table.insert(1, std::move(node1)));
+    ASSERT_TRUE(hash_table.insert(1, std::move(node2)));
+
+    // Check that both nodes are stored for the same key
+    auto nodes = hash_table.find(1);
+    ASSERT_EQ(nodes.size(), 2);
+    ASSERT_EQ(nodes[0]->data, 42);
+    ASSERT_EQ(nodes[1]->data, 100);
+}
+
+// Test case 10: Removing specific data from a key with multiple entries
+TEST_F(HashMultiTableTest, RemoveSpecificDataTest) {
+    HashMultiTable<int, TestNode, 10> hash_table;
+
+    // Insert multiple entries with the same key
+    auto node1 = std::make_unique<TestNode>(42);
+    auto node2 = std::make_unique<TestNode>(100);
+
+    ASSERT_TRUE(hash_table.insert(1, std::move(node1)));
+    ASSERT_TRUE(hash_table.insert(1, std::move(node2)));
+
+    // Remove one of the entries (node2)
+    auto node_to_remove = std::make_unique<TestNode>(100);
+    ASSERT_TRUE(hash_table.remove(1, std::move(node_to_remove)));
+
+    // Verify that only the remaining entry exists
+    auto nodes = hash_table.find(1);
+    ASSERT_EQ(nodes.size(), 1);
+    ASSERT_EQ(nodes[0]->data, 42);
+}
+
+// Test case 11: Finding first entry for a key
+TEST_F(HashMultiTableTest, FindFirstEntryTest) {
+    HashMultiTable<int, TestNode, 10> hash_table;
+
+    // Insert multiple entries for the same key
+    auto node1 = std::make_unique<TestNode>(42);
+    auto node2 = std::make_unique<TestNode>(100);
+
+    ASSERT_TRUE(hash_table.insert(1, std::move(node1)));
+    ASSERT_TRUE(hash_table.insert(1, std::move(node2)));
+
+    // Check that the first entry is returned
+    auto first_entry = hash_table.find_first(1);
+    ASSERT_NE(first_entry, nullptr);
+    ASSERT_EQ(first_entry->data, 42);  // First inserted node
+}
+
+// Test case 12: Reclaim hazardous entries test
+TEST_F(HashMultiTableTest, ReclaimHazardousEntriesTest) {
+    HashMultiTable<int, TestNode, 10> hash_table;
+
+    // Insert entries into the table
+    for (int i = 0; i < 10; ++i) {
+        auto node = std::make_unique<TestNode>(i);
+        ASSERT_TRUE(hash_table.insert(i, std::move(node)));
+    }
+
+    // Reclaim entries, treating nodes with even data as hazards
+    hash_table.reclaim([](const std::shared_ptr<TestNode>& node) -> bool {
+        return node->data % 2 == 0;  // Even data are hazardous
+    });
+
+    // Verify that only non-hazardous (odd) nodes are reclaimed
+    for (int i = 0; i < 10; ++i) {
+        auto nodes = hash_table.find(i);
+        if (i % 2 == 0) {
+            // Even entries should not have been reclaimed
+            ASSERT_EQ(nodes.size(), 1);
+        } else {
+            // Odd entries should have been reclaimed
+            ASSERT_TRUE(nodes.empty());
+        }
+    }
+}
+
+// Test case 13: Clear the hash table
+TEST_F(HashMultiTableTest, ClearHashTableTest) {
+    HashMultiTable<int, TestNode, 10> hash_table;
+
+    // Insert elements
+    for (int i = 0; i < 10; ++i) {
+        auto node = std::make_unique<TestNode>(i);
+        ASSERT_TRUE(hash_table.insert(i, std::move(node)));
+    }
+
+    // Verify the table size before clearing
+    ASSERT_EQ(hash_table.size(), 10);
+
+    // Clear the table
+    hash_table.clear();
+
+    // Verify that the table is empty after clearing
+    ASSERT_EQ(hash_table.size(), 0);
+
+    // Ensure that no nodes are found
+    for (int i = 0; i < 10; ++i) {
+        auto nodes = hash_table.find(i);
+        ASSERT_TRUE(nodes.empty());
+    }
+}
+
+// Test case 14: Concurrent find and reclaim test
+TEST_F(HashMultiTableTest, MultiThread_ConcurrentFindReclaimTest) {
+    HashMultiTable<int, TestNode, 100> hash_table;
+
+    // Insert elements into the table
+    for (int i = 0; i < 100; ++i) {
+        auto node = std::make_unique<TestNode>(i);
+        ASSERT_TRUE(hash_table.insert(i, std::move(node)));
+    }
+
+    // Thread function for finding elements
+    auto find_func = [&]() {
+        for (int i = 0; i < 100; ++i) {
+            auto nodes = hash_table.find(i);
+            if (!nodes.empty()) {
+                ASSERT_EQ(nodes[0]->data, i);
+            }
+        }
+    };
+
+    // Thread function for reclaiming non-hazardous nodes
+    auto reclaim_func = [&]() {
+        hash_table.reclaim([](const std::shared_ptr<TestNode>& node) -> bool {
+            return false;  // Reclaim everything
+        });
+    };
+
+    // Run both find and reclaim concurrently
+    std::thread t1(find_func);
+    std::thread t2(reclaim_func);
+
+    t1.join();
+    t2.join();
+
+    // Ensure that the table is empty after reclaim
+    ASSERT_EQ(hash_table.size(), 0);
 }

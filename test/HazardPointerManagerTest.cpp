@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <thread>
 #include <atomic>
 #include "HazardPointerManager.hpp"
@@ -7,21 +6,19 @@
 #include "atomic_unique_ptr.hpp"
 #include <string>
 
+// Define a simple state struct for complex state testing
 struct TestState {
     int value;
     std::string name;
 
-    TestState(int v, const std::string& n) : value(v), name(n) {
-        // Constructor
-    }
+    TestState(int v, const std::string& n) : value(v), name(n) {}
 
     ~TestState() {
-        // Destructor to detect deletion
         std::cout << "TestState with value " << value << " and name " << name << " destroyed." << std::endl;
     }
 };
 
-
+// Using the HazardSystem namespace for HazardPointerManager
 using HazardSystem::HazardPointerManager;
 
 // Test fixture for setting up the tests
@@ -45,12 +42,12 @@ TEST_F(HazardPointerManagerTest, SingleThread_AcquireReleaseTest) {
     ASSERT_NE(hp, nullptr);  // Ensure we successfully acquired a pointer
 
     // Test that the hazard pointer is empty after acquisition
-    ASSERT_EQ(hp->pointer.get(), nullptr);
+    ASSERT_EQ(hp->pointer.load(), nullptr);
 
     // Set a value using unique_ptr
     auto value = std::make_unique<int>(42);
     hp->pointer.reset(value.release());
-    ASSERT_EQ(*hp->pointer.get(), 42);
+    ASSERT_EQ(*hp->pointer.load(), 42);
 
     // Release the hazard pointer
     bool released = manager.release(hp);
@@ -152,7 +149,7 @@ TEST_F(HazardPointerManagerTest, AtomicUniquePointerTest) {
     // Test atomic_unique_ptr behavior
     auto node = std::make_unique<int>(42);
     hp->pointer.reset(node.release());
-    ASSERT_EQ(*hp->pointer.get(), 42);
+    ASSERT_EQ(*hp->pointer.load(), 42);
 
     // Releasing hazard pointer
     bool released = manager.release(hp);
@@ -214,7 +211,7 @@ TEST_F(HazardPointerManagerTest, ReAcquireAfterReleaseTest) {
     ASSERT_TRUE(released);  // Ensure release was successful
 
     // Try to re-acquire the same pointer, it should not be accessible anymore
-    ASSERT_EQ(hp->pointer.get(), nullptr);
+    ASSERT_EQ(hp->pointer.load(), nullptr);
 }
 
 // Test case 9: Handling nullptr retirements
@@ -242,7 +239,7 @@ TEST_F(HazardPointerManagerTest, ReclaimEmptyRetiredNodesTest) {
     ASSERT_EQ(manager.retire_size(), 0);
 }
 
-// Test case 15: Prevent double reclamation of the same node
+// Test case 11: Prevent double reclamation of the same node
 TEST_F(HazardPointerManagerTest, DoubleReclamationTest) {
     HazardPointerManager<int, 10, 5>& manager = HazardPointerManager<int, 10, 5>::instance();
 
@@ -260,7 +257,7 @@ TEST_F(HazardPointerManagerTest, DoubleReclamationTest) {
     ASSERT_EQ(manager.retire_size(), 0);
 }
 
-// Test case 16: Retiring the same node multiple times
+// Test case 12: Retiring the same node multiple times
 TEST_F(HazardPointerManagerTest, RetireSameNodeMultipleTimesTest) {
     HazardPointerManager<int, 10, 5>& manager = HazardPointerManager<int, 10, 5>::instance();
 
@@ -278,7 +275,7 @@ TEST_F(HazardPointerManagerTest, RetireSameNodeMultipleTimesTest) {
     ASSERT_EQ(manager.retire_size(), 0);
 }
 
-// Test case 17: High contention during retirement and reclamation
+// Test case 13: High contention during retirement and reclamation
 TEST_F(HazardPointerManagerTest, HighContentionRetireReclaimTest) {
     HazardPointerManager<int, 10, 5>& manager = HazardPointerManager<int, 10, 5>::instance();
     std::atomic<int> retire_count(0);
@@ -318,6 +315,131 @@ TEST_F(HazardPointerManagerTest, HighContentionRetireReclaimTest) {
     ASSERT_EQ(manager.retire_size(), 0);
 }
 
+// Test case 14: Test HazardPointerManager with complex state struct
+TEST_F(HazardPointerManagerTest, HazardPointerWithComplexStateTest) {
+    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+
+    // Acquire a hazard pointer for TestState
+    auto hp = manager.acquire();
+    ASSERT_NE(hp, nullptr);  // Ensure hazard pointer was acquired
+
+    // Allocate and set a TestState object
+    auto state = std::make_unique<TestState>(42, "TestObject");
+    hp->pointer.reset(state.release());
+
+    // Verify that the TestState object was properly set
+    ASSERT_EQ(hp->pointer->value, 42);
+    ASSERT_EQ(hp->pointer->name, "TestObject");
+
+    // Release the hazard pointer and ensure it's reset
+    bool released = manager.release(hp);
+    ASSERT_TRUE(released);
+
+    // Manually clean up
+    delete hp->pointer.load();
+}
+
+// Test case 15: Ensure proper deletion of complex state struct
+TEST_F(HazardPointerManagerTest, RetireComplexStateStructTest) {
+    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+
+    // Create and retire a TestState object
+    auto state = std::make_unique<TestState>(99, "RetiredObject");
+    TestState* raw_state = state.get();
+    manager.retire(std::move(state));
+
+    // Ensure the object is still tracked in the retired list
+    ASSERT_EQ(manager.retire_size(), 1);
+
+    // Reclaim and ensure the object is deleted
+    manager.reclaim();
+
+    ASSERT_EQ(manager.retire_size(), 0);  // Ensure it's no longer in the retired list
+    // Destructor output should confirm deletion
+}
+
+// Test case 16: Multithreaded complex state test for hazard pointer acquisition and retirement
+TEST_F(HazardPointerManagerTest, MultiThread_ComplexStateTest) {
+    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+    std::atomic<int> acquire_count(0);
+    std::atomic<int> retire_count(0);
+
+    auto acquire_thread = [&]() {
+        for (int i = 0; i < 50; ++i) {
+            auto hp = manager.acquire();
+            if (hp != nullptr) {
+                acquire_count++;
+                auto state = std::make_unique<TestState>(i, "ThreadAcquired");
+                hp->pointer.reset(state.release());
+                manager.release(hp);
+            }
+        }
+    };
+
+    auto retire_thread = [&]() {
+        for (int i = 0; i < 50; ++i) {
+            auto state = std::make_unique<TestState>(i, "ThreadRetired");
+            manager.retire(std::move(state));
+            retire_count++;
+        }
+    };
+
+    std::thread t1(acquire_thread);
+    std::thread t2(retire_thread);
+    std::thread t3(acquire_thread);
+    std::thread t4(retire_thread);
+
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+
+    manager.reclaim();  // Reclaim retired objects
+
+    ASSERT_EQ(acquire_count.load(), 100);  // Ensure hazard pointers were acquired
+    ASSERT_EQ(retire_count.load(), 100);   // Ensure nodes were retired
+}
+
+// Test case 17: High contention during retirement and reclamation
+// TEST_F(HazardPointerManagerTest, HighContentionRetireReclaimTest) {
+//     HazardPointerManager<int, 10, 5>& manager = HazardPointerManager<int, 10, 5>::instance();
+//     std::atomic<int> retire_count(0);
+//     std::atomic<int> reclaim_count(0);
+
+//     auto retire_thread = [&]() {
+//         for (int i = 0; i < 100; ++i) {
+//             auto node = std::make_unique<int>(i);
+//             manager.retire(std::move(node));
+//             retire_count++;
+//         }
+//     };
+
+//     auto reclaim_thread = [&]() {
+//         for (int i = 0; i < 100; ++i) {
+//             manager.reclaim();
+//             reclaim_count++;
+//         }
+//     };
+
+//     std::thread t1(retire_thread);
+//     std::thread t2(reclaim_thread);
+//     std::thread t3(retire_thread);
+//     std::thread t4(reclaim_thread);
+
+//     t1.join();
+//     t2.join();
+//     t3.join();
+//     t4.join();
+
+//     // Ensure all retirements and reclamations occurred without race conditions
+//     ASSERT_EQ(retire_count.load(), 200);
+//     ASSERT_GE(reclaim_count.load(), 100);  // Reclamation may be triggered multiple times
+
+//     // Ensure all nodes are eventually reclaimed
+//     manager.reclaim_all();
+//     ASSERT_EQ(manager.retire_size(), 0);
+// }
+
 // Test case 18: Acquire all hazard pointers, ensuring no more can be acquired
 TEST_F(HazardPointerManagerTest, ExhaustAllHazardPointersTest) {
     HazardPointerManager<int, 10, 5>& manager = HazardPointerManager<int, 10, 5>::instance();
@@ -354,7 +476,7 @@ TEST_F(HazardPointerManagerTest, ReuseReleasedHazardPointerTest) {
 
     // Re-acquire the hazard pointer and check it’s reset
     auto new_hp = manager.acquire();
-    ASSERT_EQ(new_hp->pointer.get(), nullptr);  // The hazard pointer should be reset
+    ASSERT_EQ(new_hp->pointer.load(), nullptr);  // The hazard pointer should be reset
 }
 
 // Test case 20: Concurrently retire and acquire hazard pointers
@@ -426,91 +548,49 @@ TEST_F(HazardPointerManagerTest, ConcurrentHazardPointerContentionTest) {
 }
 
 // Test case 22: Test HazardPointerManager with complex state struct
-TEST_F(HazardPointerManagerTest, HazardPointerWithComplexStateTest) {
-    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+// TEST_F(HazardPointerManagerTest, HazardPointerWithComplexStateTest) {
+//     HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
 
-    // Acquire a hazard pointer for TestState
-    auto hp = manager.acquire();
-    ASSERT_NE(hp, nullptr);  // Ensure hazard pointer was acquired
+//     // Acquire a hazard pointer for TestState
+//     auto hp = manager.acquire();
+//     ASSERT_NE(hp, nullptr);  // Ensure hazard pointer was acquired
 
-    // Allocate and set a TestState object
-    auto state = std::make_unique<TestState>(42, "TestObject");
-    hp->pointer.reset(state.release());
+//     // Allocate and set a TestState object
+//     auto state = std::make_unique<TestState>(42, "TestObject");
+//     hp->pointer.reset(state.release());
 
-    // Verify that the TestState object was properly set
-    ASSERT_EQ(hp->pointer->value, 42);
-    ASSERT_EQ(hp->pointer->name, "TestObject");
+//     // Verify that the TestState object was properly set
+//     ASSERT_EQ(hp->pointer->value, 42);
+//     ASSERT_EQ(hp->pointer->name, "TestObject");
 
-    // Release the hazard pointer and ensure it's reset
-    bool released = manager.release(hp);
-    ASSERT_TRUE(released);
+//     // Release the hazard pointer and ensure it's reset
+//     bool released = manager.release(hp);
+//     ASSERT_TRUE(released);
 
-    // Manually clean up
-    delete hp->pointer.get();
-}
+//     // Manually clean up
+//     delete hp->pointer.load();
+// }
 
 // Test case 23: Ensure proper deletion of complex state struct
-TEST_F(HazardPointerManagerTest, RetireComplexStateStructTest) {
-    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+// TEST_F(HazardPointerManagerTest, RetireComplexStateStructTest) {
+//     HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
 
-    // Create and retire a TestState object
-    auto state = std::make_unique<TestState>(99, "RetiredObject");
-    TestState* raw_state = state.get();
-    manager.retire(std::move(state));
+//     // Create and retire a TestState object
+//     auto state = std::make_unique<TestState>(99, "RetiredObject");
+//     TestState* raw_state = state.get();
+//     manager.retire(std::move(state));
 
-    // Ensure the object is still tracked in the retired list
-    ASSERT_EQ(manager.retire_size(), 1);
+//     // Ensure the object is still tracked in the retired list
+//     ASSERT_EQ(manager.retire_size(), 1);
 
-    // Reclaim and ensure the object is deleted
-    manager.reclaim();
+//     // Reclaim and ensure the object is deleted
+//     manager.reclaim();
 
-    ASSERT_EQ(manager.retire_size(), 0);  // Ensure it's no longer in the retired list
-    // Destructor output should confirm deletion
-}
+//     ASSERT_EQ(manager.retire_size(), 0);  // Ensure it's no longer in the retired list
+//     // Destructor output should confirm deletion
+// }
 
-// Test case 24: Multithreaded complex state test for hazard pointer acquisition and retirement
-TEST_F(HazardPointerManagerTest, MultiThread_ComplexStateTest) {
-    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
-    std::atomic<int> acquire_count(0);
-    std::atomic<int> retire_count(0);
-
-    auto acquire_thread = [&]() {
-        for (int i = 0; i < 50; ++i) {
-            auto hp = manager.acquire();
-            if (hp != nullptr) {
-                acquire_count++;
-                auto state = std::make_unique<TestState>(i, "ThreadAcquired");
-                hp->pointer.reset(state.release());
-                manager.release(hp);
-            }
-        }
-    };
-
-    auto retire_thread = [&]() {
-        for (int i = 0; i < 50; ++i) {
-            auto state = std::make_unique<TestState>(i, "ThreadRetired");
-            manager.retire(std::move(state));
-            retire_count++;
-        }
-    };
-
-    std::thread t1(acquire_thread);
-    std::thread t2(retire_thread);
-    std::thread t3(acquire_thread);
-    std::thread t4(retire_thread);
-
-    t1.join();
-    t2.join();
-    t3.join();
-    t4.join();
-
-    manager.reclaim();  // Reclaim retired objects
-
-    ASSERT_EQ(acquire_count.load(), 100);  // Ensure hazard pointers were acquired
-    ASSERT_EQ(retire_count.load(), 100);   // Ensure nodes were retired
-}
-
-// Test case 25: Reclaim complex state struct with hazard pointer still in use
+// Test case 24: Reclaim complex state struct with hazard pointer still in use
 TEST_F(HazardPointerManagerTest, ReclaimWithComplexStateInUseTest) {
     HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
 
@@ -534,5 +614,25 @@ TEST_F(HazardPointerManagerTest, ReclaimWithComplexStateInUseTest) {
     manager.reclaim();
 
     // The object should now be reclaimed
+    ASSERT_EQ(manager.retire_size(), 0);
+}
+
+// Test case 25: Reuse retired node
+TEST_F(HazardPointerManagerTest, ReuseRetiredNodeTest) {
+    HazardPointerManager<TestState, 10, 5>& manager = HazardPointerManager<TestState, 10, 5>::instance();
+
+    // Create and retire a node
+    auto state = std::make_unique<TestState>(42, "RetiredNode");
+    manager.retire(std::move(state));
+
+    // Reclaim the node
+    manager.reclaim();
+
+    // Now create another node with the same data
+    auto reused_state = std::make_unique<TestState>(42, "RetiredNode");
+    manager.retire(std::move(reused_state));
+
+    // Reclaim and ensure the reused node is reclaimed properly
+    manager.reclaim();
     ASSERT_EQ(manager.retire_size(), 0);
 }

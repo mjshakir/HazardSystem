@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <thread>
 #include <atomic>
 #include "atomic_unique_ptr.hpp"
@@ -24,18 +23,18 @@ TEST_F(AtomicUniquePtrTest, SingleThread_BasicOperations) {
     atomic_unique_ptr<int> atomic_ptr;
     
     // Initially, the pointer should be null
-    ASSERT_EQ(atomic_ptr.get(), nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
     
     // Reset to a new value
     int* value = new int(42);
     atomic_ptr.reset(value);
-    ASSERT_EQ(atomic_ptr.get(), value);
+    ASSERT_EQ(atomic_ptr.load(), value);
     ASSERT_EQ(*atomic_ptr, 42);
 
     // Release the pointer and ensure it is no longer owned
     int* released_value = atomic_ptr.release();
     ASSERT_EQ(released_value, value);
-    ASSERT_EQ(atomic_ptr.get(), nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
 
     delete released_value;  // Clean up manually after release
 
@@ -45,7 +44,7 @@ TEST_F(AtomicUniquePtrTest, SingleThread_BasicOperations) {
 
     // Reset with nullptr should delete the existing value
     atomic_ptr.reset(nullptr);
-    ASSERT_EQ(atomic_ptr.get(), nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
 }
 
 // Test case 2: Single-threaded compare_exchange_strong/weak
@@ -53,7 +52,7 @@ TEST_F(AtomicUniquePtrTest, SingleThread_CompareExchangeTest) {
     atomic_unique_ptr<int> atomic_ptr(new int(42));
 
     // Expected value is the current pointer value
-    int* expected = atomic_ptr.get();
+    int* expected = atomic_ptr.load();
     int* new_value = new int(100);
 
     // Use compare_exchange_strong to swap the pointer
@@ -65,7 +64,7 @@ TEST_F(AtomicUniquePtrTest, SingleThread_CompareExchangeTest) {
     delete expected;  // Clean up old value
 
     // Use compare_exchange_weak with a different value
-    int* weak_expected = atomic_ptr.get();
+    int* weak_expected = atomic_ptr.load();
     int* another_new_value = new int(200);
 
     success = atomic_ptr.compare_exchange_weak(weak_expected, another_new_value);
@@ -102,7 +101,7 @@ TEST_F(AtomicUniquePtrTest, MultiThread_ResetAndReleaseTest) {
     t2.join();
 
     // Ensure the pointer is null at the end
-    ASSERT_EQ(atomic_ptr.get(), nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
 }
 
 // Test case 4: Multithreaded swap test
@@ -134,7 +133,7 @@ TEST_F(AtomicUniquePtrTest, MultiThread_CompareExchangeStrongTest) {
 
     auto thread_func = [&]() {
         for (int i = 0; i < 100; ++i) {
-            int* expected = atomic_ptr.get();
+            int* expected = atomic_ptr.load();
             int* new_value = new int(i + 100);
             if (atomic_ptr.compare_exchange_strong(expected, new_value)) {
                 success_count++;
@@ -156,7 +155,7 @@ TEST_F(AtomicUniquePtrTest, MultiThread_CompareExchangeStrongTest) {
 
     // Ensure that we have succeeded in swapping at least some values
     ASSERT_GT(success_count.load(), 0);
-    ASSERT_NE(atomic_ptr.get(), nullptr);
+    ASSERT_NE(atomic_ptr.load(), nullptr);
 }
 
 // Test case 6: Multithreaded transfer test
@@ -218,5 +217,120 @@ TEST_F(AtomicUniquePtrTest, MultiThread_StressTest) {
     t3.join();
 
     // Ensure no crashes and the final pointer state is valid
-    ASSERT_EQ(atomic_ptr.get(), nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+}
+
+// Test case 8: Resetting to nullptr multiple times
+TEST_F(AtomicUniquePtrTest, ResetToNullptrTest) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+
+    // Reset to nullptr once
+    atomic_ptr.reset(nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+
+    // Reset to nullptr again, should remain nullptr
+    atomic_ptr.reset(nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+}
+
+// Test case 9: Double release test
+TEST_F(AtomicUniquePtrTest, DoubleReleaseTest) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+
+    // First release should return the pointer
+    int* released_value = atomic_ptr.release();
+    ASSERT_EQ(released_value, new int(42));
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+
+    // Second release should return nullptr since it was already released
+    ASSERT_EQ(atomic_ptr.release(), nullptr);
+
+    delete released_value;
+}
+
+// Test case 10: Compare exchange failure test
+TEST_F(AtomicUniquePtrTest, CompareExchangeFailureTest) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+
+    int* expected = new int(100);  // Incorrect expected value
+    int* new_value = new int(200);
+
+    // Compare exchange should fail because expected is incorrect
+    bool success = atomic_ptr.compare_exchange_strong(expected, new_value);
+    ASSERT_FALSE(success);
+
+    // Ensure the original pointer value remains the same
+    ASSERT_EQ(*atomic_ptr, 42);
+
+    delete expected;
+    delete new_value;
+}
+
+// Test case 11: Move constructor and move assignment operator test
+TEST_F(AtomicUniquePtrTest, MoveSemanticsTest) {
+    atomic_unique_ptr<int> atomic_ptr1(new int(42));
+
+    // Move construct atomic_ptr2 from atomic_ptr1
+    atomic_unique_ptr<int> atomic_ptr2(std::move(atomic_ptr1));
+
+    // atomic_ptr1 should now be null
+    ASSERT_EQ(atomic_ptr1.load(), nullptr);
+
+    // atomic_ptr2 should have the original value
+    ASSERT_EQ(*atomic_ptr2, 42);
+
+    // Move assign atomic_ptr1 from atomic_ptr2
+    atomic_ptr1 = std::move(atomic_ptr2);
+
+    // atomic_ptr2 should now be null
+    ASSERT_EQ(atomic_ptr2.load(), nullptr);
+
+    // atomic_ptr1 should have the original value again
+    ASSERT_EQ(*atomic_ptr1, 42);
+}
+
+
+// Test case 12: Concurrent compare_exchange_weak test
+TEST_F(AtomicUniquePtrTest, ConcurrentCompareExchangeWeakTest) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+    std::atomic<int> success_count(0);
+
+    auto thread_func = [&]() {
+        for (int i = 0; i < 100; ++i) {
+            int* expected = atomic_ptr.load();
+            int* new_value = new int(i + 100);
+            if (atomic_ptr.compare_exchange_weak(expected, new_value)) {
+                success_count++;
+                delete expected;
+            } else {
+                delete new_value;
+            }
+        }
+    };
+
+    // Run multiple threads trying to perform compare_exchange_weak
+    std::thread t1(thread_func);
+    std::thread t2(thread_func);
+    std::thread t3(thread_func);
+
+    t1.join();
+    t2.join();
+    t3.join();
+
+    // Ensure that we have succeeded in swapping at least some values
+    ASSERT_GT(success_count.load(), 0);
+    ASSERT_NE(atomic_ptr.load(), nullptr);
+}
+
+// Test case 13: Shared ownership transfer failure test
+TEST_F(AtomicUniquePtrTest, TransferOwnershipFailureTest) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+    std::shared_ptr<int> null_shared_ptr;
+
+    // Attempt to transfer ownership to a null shared_ptr
+    bool result = atomic_ptr.transfer(null_shared_ptr);
+
+    // Ensure transfer failed and atomic_ptr still owns the object
+    ASSERT_FALSE(result);
+    ASSERT_EQ(*atomic_ptr, 42);
 }
