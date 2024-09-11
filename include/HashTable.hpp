@@ -29,8 +29,8 @@ namespace HazardSystem {
                 } // end Node(const Key& key_, std::shared_ptr<T> data_, std::function<void(std::shared_ptr<T>)> deleter_)
                 //--------------------------
                 Key key;
-                atomic_unique_ptr<T> data;
-                atomic_unique_ptr<Node> next;
+                std::atomic<std::shared_ptr<T>> data;
+                std::atomic<std::shared_ptr<Node>> next;
                 //--------------------------
             }; // end struct Node
             //--------------------------------------------------------------
@@ -429,7 +429,7 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             std::atomic<size_t> m_size;
-            std::array<atomic_unique_ptr<Node>, N> m_table;
+            std::array<std::atomic<std::shared_ptr<Node>>, N> m_table;
             std::hash<Key> m_hasher;
         //--------------------------------------------------------------
     }; // end class HashTable
