@@ -89,20 +89,20 @@ namespace HazardSystem {
                 return find_data(key);
             } // end std::vector<std::shared_ptr<T>> find(const Key& key)
             //--------------------------
-            std::shared_ptr<T> find(const Key& key, T* data) const {
+            std::shared_ptr<T> find(const Key& key, std::shared_ptr<T> data) const {
                 return find_data(key, data);
-            } // end std::shared_ptr<T> find_data(const Key& key, T* data) const
+            } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<T> data) const
             //--------------------------
             std::shared_ptr<T> find_first(const Key& key) const {
                 return find_first_data(key);
             } // end std::shared_ptr<T> find_first(const Key& key)
             //--------------------------
-            bool contain(const Key& key, T* data) const {
-                return contain_data(key, data);
-            } // end bool contain(const Key& key, T* data) const
+            bool contain(const Key& key, std::unique_ptr<T> data) const {
+                return contain_data(key, std::move(data));
+            } // end bool contain(const Key& key, std::unique_ptr<T> data) const
             //--------------------------
             bool remove(const Key& key, std::unique_ptr<T> data) {
-                return remove_data(key, data);
+                return remove_data(key, std::move(data));
             } // end bool remove(const Key& key, std::unique_ptr<T> data)
             //--------------------------
             bool remove(const Key& key) {
@@ -121,7 +121,7 @@ namespace HazardSystem {
                 clear_data();
             } // end void clear(void)
             //--------------------------
-            void reclaim(const std::function<bool(const T*)>& is_hazard) {
+            void reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
                 scan_and_reclaim(is_hazard);
             } // end void reclaim(const std::function<bool(const std::shared_ptr<T>&)>& is_hazard)
             //--------------------------
@@ -284,7 +284,7 @@ namespace HazardSystem {
             //     //--------------------------
             // } // end std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<HazardPointer<T>> data) const
             //--------------------------
-            std::shared_ptr<T> find_data(const Key& key, T* data) const {
+            std::shared_ptr<T> find_data(const Key& key, std::shared_ptr<T> data) const {
                 //--------------------------
                 const size_t index  = hasher(key);
                 auto current        = m_table.at(index).shared(); // Get a shared_ptr to the current node
@@ -294,7 +294,7 @@ namespace HazardSystem {
                     // Compare keys and the contents of the unique_ptr or shared_ptr
                     //--------------------------
                     auto current_data = current->data.shared();  // Get a shared_ptr to the data
-                    if (current->key == key and current_data.get() == data) {
+                    if (current->key == key and current_data.get() == data.get()) {
                         // Return the shared_ptr safely
                         return current_data;
                     } // end if (current->key == key and current_data.get() == data)
@@ -324,7 +324,7 @@ namespace HazardSystem {
             //     //--------------------------
             // } // end bool contain_data(const Key& key, T* data) const
             //--------------------------
-            bool contain_data(const Key& key, T* data) const {
+            bool contain_data(const Key& key, std::unique_ptr<T> data) const {
                 //--------------------------
                 const size_t index = hasher(key);
                 auto current       = m_table.at(index).shared(); // Get a shared_ptr to the current node
@@ -334,7 +334,7 @@ namespace HazardSystem {
                     // Compare keys and use shared_ptr to check the data without transferring ownership
                     //--------------------------
                     auto current_data = current->data.shared(); // Use shared_ptr for safe access to data
-                    if (current->key == key and current_data.get() == data) {
+                    if (current->key == key and current_data.get() == data.get()) {
                         return true; // Found matching key and data
                     } // end if (current->key == key and current_data.get() == data)
                     //--------------------------
@@ -635,17 +635,17 @@ namespace HazardSystem {
             //     //--------------------------
             // } // end void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard)
             //--------------------------
-            void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard) {
+            void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    auto current = bucket.shared();  // Use shared pointer for safe access
+                    auto current = bucket.unique();  // Use shared pointer for safe access
                     std::unique_ptr<Node, std::function<void(Node*)>> prev(nullptr, [](Node*) {}); // Initialize an empty unique_ptr for prev
                     //--------------------------
                     while (current) {
                         //--------------------------
                         // Check if the data is a hazard using the raw pointer from shared data
-                        if (!is_hazard(current->data.load())) {
+                        if (!is_hazard(current->data.shared())) {
                             //--------------------------
                             // Data is not a hazard; reclaim the node
                             auto next_node = current->next.unique();  // Use unique() for exclusive access to next node
@@ -664,7 +664,7 @@ namespace HazardSystem {
                             current = std::move(next_node);  // Move to the next node
                         } else {
                             prev = std::move(current);       // Move current to prev for safe tracking
-                            current = current->next.shared();  // Move to the next node safely using shared ownership
+                            current = current->next.unique();  // Move to the next node safely using shared ownership
                         } // end if (!is_hazard(current->data.load()))
                         //--------------------------
                     } // end while (current)
@@ -672,6 +672,44 @@ namespace HazardSystem {
                 } // end for (auto& bucket : m_table)
                 //--------------------------
             } // end void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard)
+            //--------------------------
+            // void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
+            //     //--------------------------
+            //     for (auto& bucket : m_table) {
+            //         //--------------------------
+            //         auto current = bucket.shared();  // Use shared pointer for safe access
+            //         std::shared_ptr<Node> prev = nullptr;  // Use std::shared_ptr for previous node
+            //         //--------------------------
+            //         while (current) {
+            //             //--------------------------
+            //             // Check if the data is a hazard using the raw pointer from shared data
+            //             if (!is_hazard(current->data.shared())) {
+            //                 //--------------------------
+            //                 // Data is not a hazard; reclaim the node
+            //                 auto next_node = current->next.shared();  // Use shared() for safe access to the next node
+            //                 //--------------------------
+            //                 if (prev) {
+            //                     prev->next = next_node;  // Update prev to point to the next node
+            //                 } else {
+            //                     bucket = next_node;  // Update the bucket to point to the next node
+            //                 }
+            //                 //--------------------------
+            //                 current->next.reset();          // Safely delete the next node
+            //                 current->data.store(nullptr);   // Safely delete the data
+            //                 current.reset();                // Safely delete the current node
+            //                 m_size.fetch_sub(1UL);          // Decrement the size of the hash table
+            //                 //--------------------------
+            //                 current = std::move(next_node);  // Move to the next node
+            //             } else {
+            //                 prev = std::move(current);  // Move current to prev for safe tracking
+            //                 current = current->next.shared();  // Move to the next node safely using shared ownership
+            //             } // end if (!is_hazard(current->data.load()))
+            //             //--------------------------
+            //         } // end while (current)
+            //         //--------------------------
+            //     } // end for (auto& bucket : m_table)
+            //     //--------------------------
+            // } // end void scan_and_reclaim(const std::function<bool(const T*)>& is_hazard)
             //--------------------------
             // void clear_data(void) {
             //     //--------------------------

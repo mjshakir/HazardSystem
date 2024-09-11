@@ -185,9 +185,8 @@ namespace HazardSystem {
             //--------------------------
             bool is_hazard(std::shared_ptr<T> node) const {
                 //--------------------------
-                // auto hazardPtr = std::make_unique<HazardPointer<T>>(node);
-                HazardPointer<T> hazardPtr(node.get());
-                return m_hazard_pointers.contain(false, &hazardPtr);
+                auto hazardPtr = std::make_unique<HazardPointer<T>>(node.get());
+                return m_hazard_pointers.contain(false, std::move(hazardPtr));
                 //--------------------------
             }// end bool is_hazard(void* node)
             //--------------------------
