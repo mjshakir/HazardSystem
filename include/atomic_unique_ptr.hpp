@@ -109,11 +109,11 @@ namespace HazardSystem {
                 return get_data(order);
             } // end T* load(void) const noexcept
             //--------------------------
-            std::shared_ptr<T> shared(void) noexcept {
+            std::shared_ptr<T> shared(void) const noexcept {
                 return get_shared();
             } // end std::shared_ptr<T> get_shared(void)
             //--------------------------
-            std::unique_ptr<T, std::function<void(T*)>> unique(void) noexcept {
+            std::unique_ptr<T, std::function<void(T*)>> unique(void) const noexcept {
                 return get_unique();
             } // end std::unique_ptr<T> get_unique(void)
             //--------------------------
@@ -181,6 +181,10 @@ namespace HazardSystem {
                     return false;
                 } // end if (!p_old)
                 //--------------------------
+                // if(p_old) {
+                //     delete p_old;
+                // } // end if (p_old)
+                //--------------------------
                 delete p_old;
                 return true;
                 //--------------------------
@@ -204,7 +208,7 @@ namespace HazardSystem {
                 //--------------------------
             } // end T* get(void) const
             //--------------------------
-            std::shared_ptr<T> get_shared(void) noexcept {
+            std::shared_ptr<T> get_shared(void) const noexcept {
                 //--------------------------
                 T* ptr = m_ptr.load(std::memory_order_acquire);
                 //--------------------------
@@ -216,7 +220,7 @@ namespace HazardSystem {
             } // end std::shared_ptr<T> get_shared(void)
             //--------------------------
             // Method to return a unique_ptr without transferring ownership
-            std::unique_ptr<T, std::function<void(T*)>> get_unique(void) noexcept {
+            std::unique_ptr<T, std::function<void(T*)>> get_unique(void) const noexcept {
                 T* ptr = m_ptr.load(std::memory_order_acquire);
                 // Return a unique_ptr with a custom deleter that does nothing
                 return std::unique_ptr<T, std::function<void(T*)>>(ptr, [](T*) {
@@ -246,6 +250,9 @@ namespace HazardSystem {
             bool delete_data(void) {
                 //--------------------------
                 T* p_old = m_ptr.exchange(nullptr, std::memory_order_acq_rel);
+                if(!p_old) {
+                    return false;
+                } // end if (!p_old)
                 delete p_old;
                 return true;
                 //--------------------------
