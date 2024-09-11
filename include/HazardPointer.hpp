@@ -18,7 +18,13 @@ namespace HazardSystem {
             //--------------------------
         }// end HazardPointer(void)
         //--------------------------
-        HazardPointer(T* ptr) : pointer(ptr) {
+        // HazardPointer(T* ptr) : pointer(ptr) {
+        //     //--------------------------
+        // }// end HazardPointer(T* ptr)
+        //--------------------------
+        HazardPointer(T* ptr) {
+            //--------------------------
+            pointer.store(ptr);
             //--------------------------
         }// end HazardPointer(T* ptr)
         //--------------------------
@@ -32,7 +38,7 @@ namespace HazardSystem {
         //--------------------------
         ~HazardPointer(void) {
             //--------------------------
-            pointer.reset();
+            pointer.store(nullptr);
             //--------------------------
         }// end ~HazardPointer(void)
         //--------------------------

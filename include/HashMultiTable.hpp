@@ -136,7 +136,7 @@ class HashMultiTable {
             //--------------------------
             auto current = m_table.at(index).load();
             while (current) {
-                if (current->key == key && current->data.load() == new_node->data) {
+                if (current->key == key and current->data.load().get() == new_node->data.get()) {
                     return false;  // Duplicate key or data found
                 }
                 if (!current->next) {

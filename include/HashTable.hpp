@@ -106,13 +106,16 @@ class HashTable {
                     return false;
                 } // end if (current->key == key)
                 //--------------------------
-                if (!current->next) {
+                if (!current->next.load()) {
                     //--------------------------
                     std::shared_ptr<Node> expected_next = nullptr;
-                    if (current->next.compare_exchange_strong(expected_next, new_node)) {
-                        m_size.fetch_add(1UL);  // Increment the size of the hash table
-                        return true;
-                    }
+                    //--------------------------
+                    do{
+                        new_node->next.store(expected_next);
+                    } while (!current->next.compare_exchange_weak(expected_next, new_node));
+                    //--------------------------
+                    m_size.fetch_add(1UL);  // Increment the size of the hash table
+                    return true;
                 } 
                 current = current->next.load();
             } // end while (current)
@@ -170,8 +173,8 @@ class HashTable {
                         } else {
                             bucket.store(current->next.load());
                         }
-                        current->data.reset();
-                        current->next.reset();
+                        current->data.store(nullptr);
+                        current->next.store(nullptr);
                         m_size.fetch_sub(1UL);
                     } else {
                         prev = current;
@@ -185,8 +188,8 @@ class HashTable {
             for (auto& bucket : m_table) {
                 std::shared_ptr<Node> current = bucket.load();
                 while (current) {
-                    current->data.reset();
-                    current->next.reset();
+                    current->data.store(nullptr);  // Clear the atomic shared pointer for data
+                    current->next.store(nullptr);  // Clear the atomic shared pointer for next
                     current = current->next.load();
                 }
             }
