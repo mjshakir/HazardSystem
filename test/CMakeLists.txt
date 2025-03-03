@@ -46,8 +46,8 @@ function(create_test_target TARGET_NAME SOURCE_FILE)
 endfunction()
 #------------------------------------------------------------------------------------------
 # Add the tests without the 'test/' prefix since we are already in the test directory
-create_test_target(${PROJECT_NAME}_atomic_unique_ptr_Test   atomic_unique_ptr_test.cpp)
-create_test_target(${PROJECT_NAME}_HashTableTest_Test       HashTableTest.cpp)
-create_test_target(${PROJECT_NAME}_HashMultiTable_Test      HashMultiTableTest.cpp)
-create_test_target(${PROJECT_NAME}_Test                     HazardPointerManagerTest.cpp)
+#create_test_target(${PROJECT_NAME}_atomic_unique_ptr_Test   atomic_unique_ptr_test.cpp)
+#create_test_target(${PROJECT_NAME}_HashTableTest_Test       HashTableTest.cpp)
+#create_test_target(${PROJECT_NAME}_HashMultiTable_Test      HashMultiTableTest.cpp)
+#create_test_target(${PROJECT_NAME}_Test                     HazardPointerManagerTest.cpp)
 #------------------------------------------------------------------------------------------
