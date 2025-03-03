@@ -2,11 +2,13 @@
 //--------------------------------------------------------------
 // Standard cpp library
 //--------------------------------------------------------------
+#include <cstddef>
+#include <cstdbool>
 #include <atomic>
 #include <array>
+#include <vector>
 #include <memory>
 #include <functional>
-#include <vector>
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
@@ -146,6 +148,7 @@ class HashMultiTable {
                 }
 
                 if (!current->next.load()) {
+                    expected = nullptr;
                     if (current->next.compare_exchange_strong(expected, new_node)) {
                         m_size.fetch_add(1UL);  // Increment the size of the hash table
                         return true;
@@ -179,8 +182,9 @@ class HashMultiTable {
             auto current        = m_table.at(index).load();
             //--------------------------
             while (current) {
-                if (current->key == key && current->data.load() == data) {
-                    return current->data.load();
+                auto current_data = current->data.load();
+                if (current->key == key && current_data.get() == data.get()) {
+                    return current_data;
                 }
                 current = current->next.load();
             }
@@ -207,7 +211,8 @@ class HashMultiTable {
             auto current = m_table.at(index).load();
             //--------------------------
             while (current) {
-                if (current->key == key && current->data.load() == data) {
+                auto current_data = current->data.load();
+                if (current->key == key && current_data.get() == data.get()) {
                     return true;
                 }
                 current = current->next.load();
@@ -222,7 +227,8 @@ class HashMultiTable {
             std::shared_ptr<Node> prev = nullptr;
             //--------------------------
             while (current) {
-                if (current->key == key && current->data.load() == data) {
+                auto current_data = current->data.load();
+                if (current->key == key && current_data.get() == data.get()) {
                     if (prev) {
                         prev->next.store(current->next.load());
                     } else {
@@ -273,7 +279,8 @@ class HashMultiTable {
             auto current = m_table.at(index).load();
             //--------------------------
             while (current) {
-                if (current->key == old_key && current->data.load() == data) {
+                auto current_data = current->data.load();
+                if (current->key == old_key && current_data.get() == data.get()) {
                     current->key = new_key;
                     return true;
                 }
@@ -288,7 +295,8 @@ class HashMultiTable {
             auto current = m_table.at(index).load();
             //--------------------------
             while (current) {
-                if (current->key == key && current->data.load() == old_data) {
+                auto current_data = current->data.load();
+                if (current->key == key && current_data.get() == old_data.get()) {
                     current->data.store(std::move(new_data));
                     return true;
                 }
@@ -303,7 +311,8 @@ class HashMultiTable {
                 auto current = bucket.load();
                 std::shared_ptr<Node> prev = nullptr;
                 while (current) {
-                    if (!is_hazard(current->data.load())) {
+                    auto current_data = current->data.load();
+                    if (!is_hazard(current_data)) {
                         auto next_node = current->next.load();
                         if (prev) {
                             prev->next.store(next_node);
@@ -313,10 +322,11 @@ class HashMultiTable {
                         current->next.store(nullptr);
                         current->data.store(nullptr);
                         m_size.fetch_sub(1UL);
+                        current = next_node;
                     } else {
                         prev = current;
+                        current = current->next.load();
                     }
-                    current = current->next.load();
                 }
             }
         }

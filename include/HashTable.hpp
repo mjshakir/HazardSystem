@@ -2,7 +2,8 @@
 //--------------------------------------------------------------
 // Standard cpp library
 //--------------------------------------------------------------
-#include <iostream>
+#include <cstddef>
+#include <cstdbool>
 #include <atomic>
 #include <array>
 #include <memory>
@@ -110,12 +111,10 @@ class HashTable {
                     //--------------------------
                     std::shared_ptr<Node> expected_next = nullptr;
                     //--------------------------
-                    do{
-                        new_node->next.store(expected_next);
-                    } while (!current->next.compare_exchange_weak(expected_next, new_node));
-                    //--------------------------
-                    m_size.fetch_add(1UL);  // Increment the size of the hash table
-                    return true;
+                    if (current->next.compare_exchange_strong(expected_next, new_node)) {
+                        m_size.fetch_add(1UL);  // Increment the size of the hash table
+                        return true;
+                    }
                 } 
                 current = current->next.load();
             } // end while (current)
@@ -147,11 +146,15 @@ class HashTable {
             while (current) {
                 //--------------------------
                 if (current->key == key) {
+                    auto next_node = current->next.load();
                     if (prev) {
-                        prev->next.store(current->next.load());
+                        prev->next.store(next_node);
                     } else {
-                        m_table.at(index).store(current->next.load());
+                        m_table.at(index).store(next_node);
                     }
+                    // Clear the next and data pointers to help with cleanup
+                    current->next.store(nullptr);
+                    current->data.store(nullptr);
                     m_size.fetch_sub(1UL);
                     return true;
                 } 
@@ -167,19 +170,23 @@ class HashTable {
                 std::shared_ptr<Node> current = bucket.load();
                 std::shared_ptr<Node> prev = nullptr;
                 while (current) {
-                    if (!is_hazard(current->data.load())) {
+                    auto data = current->data.load();
+                    if (!is_hazard(data)) {
+                        auto next_node = current->next.load();
                         if (prev) {
-                            prev->next.store(current->next.load());
+                            prev->next.store(next_node);
                         } else {
-                            bucket.store(current->next.load());
+                            bucket.store(next_node);
                         }
+                        // Clear pointers before discarding the node
                         current->data.store(nullptr);
                         current->next.store(nullptr);
                         m_size.fetch_sub(1UL);
+                        current = next_node;
                     } else {
                         prev = current;
+                        current = current->next.load();
                     }
-                    current = current->next.load();
                 }
             }
         } // end void scan_and_reclaim
@@ -188,12 +195,15 @@ class HashTable {
             for (auto& bucket : m_table) {
                 std::shared_ptr<Node> current = bucket.load();
                 while (current) {
-                    current->data.store(nullptr);  // Clear the atomic shared pointer for data
-                    current->next.store(nullptr);  // Clear the atomic shared pointer for next
-                    current = current->next.load();
+                    auto next_node = current->next.load();
+                    // Clear the atomic pointers properly
+                    current->data.store(nullptr);
+                    current->next.store(nullptr);
+                    current = next_node;
                 }
+                bucket.store(nullptr);
             }
-            m_size.store(0UL);  
+            m_size.store(0UL);
         } // end void clear_data(void)
         //--------------------------
         const size_t hasher(const Key& key) const {
