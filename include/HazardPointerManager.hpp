@@ -65,8 +65,8 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
-        HazardPointerManager(void) : m_hazard_pointers(), m_retired_nodes() {
-            initialize_hazard_pointers();
+        HazardPointerManager(void) : m_hazard_pointers(), m_retired_nodes(), m_initialize(initialize()) {
+            //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
         HazardPointerManager(const HazardPointerManager&) = delete;
@@ -76,12 +76,12 @@ class HazardPointerManager {
         //--------------------------
         ~HazardPointerManager(void) = default;
         //--------------------------
-        void initialize_hazard_pointers(void) {
-            constexpr size_t c_point = HAZARD_POINTERS;
-            for (size_t i = 0; i < c_point; ++i) {
+        bool initialize(void) {
+            for (size_t i = 0; i < HAZARD_POINTERS; ++i) {
                 m_hazard_pointers.insert(true, std::make_shared<HazardPointer<T>>());
-            } // end for
-        } // end void initialize_hazard_pointers(void)
+            } // end for (size_t i = 0; i < HAZARD_POINTERS; ++i)
+            return true;
+        } // end bool initialize_hazard_pointers(void)
         //--------------------------
         std::shared_ptr<HazardPointer<T>> acquire_data(void) {
             //--------------------------
@@ -169,6 +169,7 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         HashMultiTable<bool, HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;  // Hash table for hazard pointers
         HashTable<T*, T, PER_THREAD> m_retired_nodes;  // Hash table for retired nodes
+        const bool m_initialize;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
