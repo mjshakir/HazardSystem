@@ -50,9 +50,7 @@ class HashTable {
         HashTable(HashTable&&)                  = default;
         HashTable& operator=(HashTable&&)       = default;
         //--------------------------
-        ~HashTable(void) {
-            clear_data();
-        } // end ~HashTable(void)
+        ~HashTable(void)                        = default;
         //--------------------------
         bool insert(const Key& key, std::shared_ptr<T> data) {
             return insert_data(key, std::move(data));
@@ -82,29 +80,31 @@ class HashTable {
         //--------------------------------------------------------------
         bool insert_data(const Key& key, std::shared_ptr<T> data) {
             const size_t index              = hasher(key);
-            auto new_node                   = std::make_unique<Node>(key, std::move(data));
-            std::shared_ptr<Node> expected  = nullptr;
-            Node* current                   = m_table.at(index).load().get();
+            Node* new_node                  = new Node(key, std::move(data));
+            std::shared_ptr<Node> expected  = nullptr;            
             //--------------------------
-            if (m_table.at(index).compare_exchange_strong(expected, std::move(new_node))) {
+            if (m_table.at(index).compare_exchange_strong(expected, std::shared_ptr<Node>(new_node))) {
                 m_size.fetch_add(1UL);
                 return true;
             }// end if (m_table.at(index).compare_exchange_strong(expected, std::move(new_node)))
             //--------------------------
-            // Node* current = m_table.at(index).load().get();
+            Node* current = m_table.at(index).load().get();
             while (current) {
                 if (current->key == key) {
                     return false;
                 }// end if (current->key == key)
                 if (!current->next) {
-                    current->next = std::move(new_node);
-                    current->next->prev = current;
+                    current->next.reset(new_node);
+                    if(current->next){
+                        current->next->prev = current;
+                    }// end if(current->next)
                     m_size.fetch_add(1UL);
                     return true;
                 }// end if (!current->next)
                 current = current->next.get();
             }// end while (current)
             //--------------------------
+            delete new_node;
             return false;
             //--------------------------
         }// end bool insert_data(const Key& key, std::shared_ptr<T> data)
@@ -157,16 +157,10 @@ class HashTable {
         //--------------------------
         void clear_data(void) {
             for (auto& bucket : m_table) {
-                Node* current = bucket.load().get();
-                while (current) {
-                    std::unique_ptr<Node> next_node = std::move(current->next);
-                    current->data.store(nullptr);
-                    current = next_node.release();
-                }// end while (current)
                 bucket.store(nullptr);
-            }// end for (auto& bucket : m_table)
+            }
             m_size.store(0UL);
-        }// end void clear_data(void)
+        }
         //--------------------------
         void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
             for (auto& bucket : m_table) {
@@ -203,7 +197,7 @@ class HashTable {
         }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)
         //--------------------------
         const size_t hasher(const Key& key) const {
-            return m_hasher(key) & N;
+            return m_hasher(key) % N;
         }// end size_t hasher(const Key& key) const
         //--------------------------------------------------------------
     private:
