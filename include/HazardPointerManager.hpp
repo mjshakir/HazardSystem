@@ -77,7 +77,7 @@ class HazardPointerManager {
         ~HazardPointerManager(void) = default;
         //--------------------------
         void initialize_hazard_pointers(void) {
-            constexpr size_t c_point = HAZARD_POINTERS * ThreadRegistry::threads_size();
+            constexpr size_t c_point = HAZARD_POINTERS;
             for (size_t i = 0; i < c_point; ++i) {
                 m_hazard_pointers.insert(true, std::make_shared<HazardPointer<T>>());
             } // end for
@@ -87,15 +87,13 @@ class HazardPointerManager {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
-            uint16_t thread_id = ThreadRegistry::instance().get_id();
-            if (!thread_id) {
+            if (!ThreadRegistry::instance().registered()) {
                 return nullptr;
             }
             //--------------------------
             auto hp = m_hazard_pointers.find_first(true);
             //--------------------------
             if (hp) {
-                // Reset the pointer and mark as in-use
                 hp->pointer.store(nullptr);
                 m_hazard_pointers.swap(true, false, hp);
                 return hp;
@@ -169,7 +167,7 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
-        HashMultiTable<bool, HazardPointer<T>, HAZARD_POINTERS*ThreadRegistry::threads_size()> m_hazard_pointers;  // Hash table for hazard pointers
+        HashMultiTable<bool, HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;  // Hash table for hazard pointers
         HashTable<T*, T, PER_THREAD> m_retired_nodes;  // Hash table for retired nodes
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
