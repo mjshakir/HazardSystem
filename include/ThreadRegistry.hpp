@@ -19,7 +19,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             static ThreadRegistry& instance(void);
             //--------------------------
-            void register_id(void);
+            bool register_id(void);
             //--------------------------
             bool unregister(void);
             //--------------------------
@@ -29,7 +29,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             ThreadRegistry(void);
             //--------------------------
-            void register_thread(void);
+            bool register_thread(void);
             //--------------------------
             bool unregister_thread(void);
             //--------------------------

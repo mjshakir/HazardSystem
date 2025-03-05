@@ -21,9 +21,9 @@ HazardSystem::ThreadRegistry& HazardSystem::ThreadRegistry::instance(void) {
     //--------------------------
 }// end HazardSystem::ThreadRegistry::instance(void)
 //--------------------------------------------------------------
-void HazardSystem::ThreadRegistry::register_id(void) {
+bool HazardSystem::ThreadRegistry::register_id(void) {
     //--------------------------
-    register_thread();
+    return register_thread();
     //--------------------------
 }// end HazardSystem::ThreadRegistry::register_id(void)
 //--------------------------------------------------------------
@@ -39,15 +39,15 @@ bool HazardSystem::ThreadRegistry::registered(void) const {
     //--------------------------
 }// end HazardSystem::ThreadRegistry::registered(void)
 //--------------------------------------------------------------
-void HazardSystem::ThreadRegistry::register_thread(void) {
+bool HazardSystem::ThreadRegistry::register_thread(void) {
     //--------------------------
     const std::thread::id _thread_id = std::this_thread::get_id();
     //--------------------------
     if (m_thread_table.contains(_thread_id)) {
-        return;
+        return true;
     }// end if (m_thread_table.contains(s_m_thread_id))
     //--------------------------
-    m_thread_table.insert(_thread_id);
+    return m_thread_table.insert(_thread_id);
     //--------------------------
 }// end HazardSystem::ThreadRegistry::register_thread(void)
 //--------------------------------------------------------------
