@@ -10,8 +10,6 @@
 //--------------------------------------------------------------
 // Initialize Static Variables
 //--------------------------------------------------------------
-thread_local std::thread::id HazardSystem::ThreadRegistry::s_m_thread_id;
-//--------------------------------------------------------------
 HazardSystem::ThreadRegistry::ThreadRegistry(void) : m_thread_table(1024UL) {
     //--------------------------
 }// end HazardSystem::ThreadRegistry(void)
@@ -43,26 +41,23 @@ bool HazardSystem::ThreadRegistry::registered(void) const {
 //--------------------------------------------------------------
 void HazardSystem::ThreadRegistry::register_thread(void) {
     //--------------------------
-    if (m_thread_table.contains(s_m_thread_id)) {
+    const std::thread::id _thread_id = std::this_thread::get_id();
+    //--------------------------
+    if (m_thread_table.contains(_thread_id)) {
         return;
     }// end if (m_thread_table.contains(s_m_thread_id))
     //--------------------------
-    s_m_thread_id = std::this_thread::get_id();
-    m_thread_table.insert(s_m_thread_id);
+    m_thread_table.insert(_thread_id);
     //--------------------------
 }// end HazardSystem::ThreadRegistry::register_thread(void)
 //--------------------------------------------------------------
 bool HazardSystem::ThreadRegistry::unregister_thread(void) {
     //--------------------------
-    return m_thread_table.remove(s_m_thread_id);
+    return m_thread_table.remove(std::this_thread::get_id());
     //--------------------------
 }// end HazardSystem::ThreadRegistry::unregister_thread(void)
 //--------------------------------------------------------------
 bool HazardSystem::ThreadRegistry::is_registered(void) const {
-    //--------------------------
-    if (s_m_thread_id != std::thread::id()) {
-        return m_thread_table.contains(s_m_thread_id);
-    }// end if (s_m_thread_id != std::thread::id())
     //--------------------------
     return m_thread_table.contains(std::this_thread::get_id());
     //--------------------------

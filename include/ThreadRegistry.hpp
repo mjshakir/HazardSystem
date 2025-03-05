@@ -42,8 +42,6 @@ namespace HazardSystem {
             ThreadRegistry(ThreadRegistry&&)                    = delete;
             ThreadRegistry& operator=(ThreadRegistry&&)         = delete;
             //--------------------------
-            static thread_local std::thread::id s_m_thread_id;
-            //--------------------------
             HashSet<std::thread::id> m_thread_table;
         //--------------------------------------------------------------
     };// end class ThreadRegistry
