@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 #------------------------------------------------------------------------------------------
 # Determine if HazardSystem is built as a standalone project or included by other projects
 set(HAZARDSYSTEM_STANDALONE_PROJECT OFF)
@@ -78,6 +78,7 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
 )
 #------------------------------------------------------------------------------------------
 # Check if the library should be built as a shared library
