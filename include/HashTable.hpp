@@ -1,6 +1,6 @@
 #pragma once
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard C++ library
 //--------------------------------------------------------------
 #include <cstddef>
 #include <cstdbool>
@@ -8,203 +8,197 @@
 #include <array>
 #include <memory>
 #include <functional>
+#include <utility>
+#include <optional>
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
 template<typename Key, typename T, size_t N>
 class HashTable {
-    private:
-        //--------------------------------------------------------------
-        struct Node {
-            //--------------------------
-            Node(void) : data(nullptr), next(nullptr), prev(nullptr), next_bucket(nullptr), prev_bucket(nullptr) {
-                    //--------------------------
-            }// end Node(void)
-            //--------------------------
-            Node(const Key& key_, std::shared_ptr<T> data_) :   key(key_),
-                                                                data(data_),
-                                                                next(nullptr),
-                                                                prev(nullptr),
-                                                                next_bucket(nullptr),
-                                                                prev_bucket(nullptr) {
-                    //--------------------------
-            }// end Node(const Key& key_, std::shared_ptr<T> data_)
-            //--------------------------
-            Key key;
-            std::atomic<std::shared_ptr<T>> data;
-            std::unique_ptr<Node> next;
-            Node* prev;
-            std::unique_ptr<Node> next_bucket;
-            Node* prev_bucket;
-            //--------------------------
-        }; // end struct Node
-        //--------------------------------------------------------------
-    public:
-        //--------------------------------------------------------------
-        HashTable(void) : m_size(0UL) {
-            //--------------------------
-        } // end HashTable(void)
+private:
+    //--------------------------------------------------------------
+    struct Node {
         //--------------------------
-        HashTable(const HashTable&)             = delete;
-        HashTable& operator=(const HashTable&)  = delete;
-        HashTable(HashTable&&)                  = default;
-        HashTable& operator=(HashTable&&)       = default;
-        //--------------------------
-        ~HashTable(void)                        = default;
-        //--------------------------
-        bool insert(const Key& key, std::shared_ptr<T> data) {
-            return insert_data(key, std::move(data));
+        Node(void) : data(nullptr), next(nullptr), prev() {
+            //--------------------------
         }
         //--------------------------
-        std::shared_ptr<T> find(const Key& key) const {
-            return find_data(key);
+        Node(const Key& key_, std::shared_ptr<T> data_) 
+            : key(key_), data(data_), next(nullptr), prev() {}
+        //--------------------------
+        Key key;
+        std::atomic<std::shared_ptr<T>> data;
+        std::atomic<std::shared_ptr<Node>> next;
+        std::atomic<std::weak_ptr<Node>> prev;
+    }; // end struct Node
+    //--------------------------------------------------------------
+public:
+    //--------------------------------------------------------------
+    HashTable(void) : m_size(0UL) {
+        //--------------------------
+    }
+    //--------------------------
+    HashTable(const HashTable&) = delete;
+    HashTable& operator=(const HashTable&) = delete;
+    HashTable(HashTable&&) = default;
+    HashTable& operator=(HashTable&&) = default;
+    //--------------------------
+    ~HashTable(void) = default;
+    //--------------------------
+    bool insert(const Key& key, std::shared_ptr<T> data) {
+        return insert_data(key, std::move(data));
+    }
+    //--------------------------
+    std::shared_ptr<T> find(const Key& key) const {
+        return find_data(key);
+    }
+    //--------------------------
+    bool remove(const Key& key) {
+        return remove_data(key);
+    }
+    //--------------------------
+    void clear(void) {
+        clear_data();
+    }
+    //--------------------------
+    void reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
+        scan_and_reclaim(is_hazard);
+    }
+    //--------------------------
+    size_t size(void) const {
+        return m_size.load(std::memory_order_acquire);
+    }
+    //--------------------------------------------------------------
+protected:
+    //--------------------------------------------------------------
+    bool insert_data(const Key& key, std::shared_ptr<T> data) {
+        if (!data) return false;
+
+        const size_t index = hasher(key);
+        auto new_node = std::make_shared<Node>(key, data);
+
+        std::shared_ptr<Node> head = m_table.at(index).load(std::memory_order_acquire);
+
+        // Check for duplicate key
+        Node* current = head.get();
+        while (current) {
+            if (current->key == key) {
+                return false; // Duplicate key found
+            }
+            current = current->next.load(std::memory_order_acquire).get();
         }
-        //--------------------------
-        bool remove(const Key& key) {
-            return remove_data(key);
+
+        // Insert with atomic CAS
+        do {
+            new_node->next.store(head, std::memory_order_release);
+            if (head) {
+                new_node->prev.store(head, std::memory_order_release);
+            }
+        } while (!m_table.at(index).compare_exchange_weak(
+                    head, new_node, std::memory_order_acq_rel));
+
+        m_size.fetch_add(1, std::memory_order_acq_rel);
+        return true;
+    }
+    //--------------------------
+    std::shared_ptr<T> find_data(const Key& key) const {
+        const size_t index = hasher(key);
+        Node* current = m_table.at(index).load(std::memory_order_acquire).get();
+
+        while (current) {
+            if (current->key == key) {
+                return current->data.load(std::memory_order_acquire);
+            }
+            current = current->next.load(std::memory_order_acquire).get();
         }
-        //--------------------------
-        void clear(void) {
-            clear_data();
-        }
-        //--------------------------
-        void reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
-            scan_and_reclaim(is_hazard);
-        }
-        //--------------------------
-        size_t size(void) const {
-            return m_size.load();
-        }
-        //--------------------------------------------------------------
-    protected:
-        //--------------------------------------------------------------
-        bool insert_data(const Key& key, std::shared_ptr<T> data) {
-            const size_t index              = hasher(key);
-            Node* new_node                  = new Node(key, std::move(data));
-            std::shared_ptr<Node> expected  = nullptr;            
-            //--------------------------
-            if (m_table.at(index).compare_exchange_strong(expected, std::shared_ptr<Node>(new_node))) {
-                m_size.fetch_add(1UL);
-                return true;
-            }// end if (m_table.at(index).compare_exchange_strong(expected, std::move(new_node)))
-            //--------------------------
-            Node* current = m_table.at(index).load().get();
-            while (current) {
-                if (current->key == key) {
-                    return false;
-                }// end if (current->key == key)
-                if (!current->next) {
-                    current->next.reset(new_node);
-                    if(current->next){
-                        current->next->prev = current;
-                    }// end if(current->next)
-                    m_size.fetch_add(1UL);
-                    return true;
-                }// end if (!current->next)
-                current = current->next.get();
-            }// end while (current)
-            //--------------------------
-            delete new_node;
-            return false;
-            //--------------------------
-        }// end bool insert_data(const Key& key, std::shared_ptr<T> data)
-        //--------------------------
-        std::shared_ptr<T> find_data(const Key& key) const {
-            //--------------------------
-            const size_t index      = hasher(key);
-            Node* current           = m_table.at(index).load().get();
-            //--------------------------
-            while (current) {
-                if (current->key == key) {
-                    return current->data.load();
-                }// end if (current->key == key)
-                current = current->next.get();
-            }// end while (current)
-            //--------------------------
-            return nullptr;
-            //--------------------------
-        }// end std::shared_ptr<T> find_data(const Key& key) const
-        //--------------------------
-        bool remove_data(const Key& key) {
-            //--------------------------
-            const size_t index  = hasher(key);  
-            Node* current       = m_table.at(index).load().get();
-            //--------------------------
-            while (current) {
-                if (current->key == key) {
-                    std::unique_ptr<Node> next_node = std::move(current->next);
-                    Node* prev_node                 = current->prev;
-                    //--------------------------
+
+        return nullptr;
+    }
+
+    //--------------------------
+    bool remove_data(const Key& key) {
+        const size_t index = hasher(key);
+        std::shared_ptr<Node> head = m_table.at(index).load(std::memory_order_acquire);
+    
+        while (head) {
+            if (head->key == key) {
+                std::shared_ptr<Node> next = head->next.load(std::memory_order_acquire);
+                std::weak_ptr<Node> prev = head->prev.load(std::memory_order_acquire);
+    
+                if (prev.expired()) {
+                    // Update head of the bucket
+                    do {
+                        // Retry until successful
+                    } while (!m_table.at(index).compare_exchange_weak(head, next, std::memory_order_acq_rel));
+                } else {
+                    std::shared_ptr<Node> prev_node = prev.lock();
                     if (prev_node) {
-                        prev_node->next = std::move(next_node);
-                    } else {
-                        m_table.at(index).store(std::shared_ptr<Node>(next_node.release()));
-                    }// end if (prev_node)
-                    //--------------------------
-                    if (next_node) {
-                        next_node->prev = prev_node;
-                    }// end if (next_node)
-                    //--------------------------
-                    current->prev = nullptr;
-                    current->data.store(nullptr);
-                    m_size.fetch_sub(1UL);
-                    return true;
-                }// end if (current->key == key)
-                current = current->next.get();
+                        static_cast<void>(prev_node->next.compare_exchange_weak(head, next, std::memory_order_acq_rel));
+                    }
+                }
+    
+                if (next) {
+                    next->prev.store(prev, std::memory_order_release);
+                }
+    
+                m_size.fetch_sub(1, std::memory_order_acq_rel);
+                return true;
             }
-            return false;
-        }// end bool remove_data(const Key& key)
-        //--------------------------
-        void clear_data(void) {
-            for (auto& bucket : m_table) {
-                bucket.store(nullptr);
-            }
-            m_size.store(0UL);
+            head = head->next.load(std::memory_order_acquire);
         }
-        //--------------------------
-        void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
-            for (auto& bucket : m_table) {
-                Node* current   = bucket.load().get();
-                Node* prev      = nullptr;
-                while (current) {
-                    auto data = current->data.load();
-                    if (!is_hazard(data)) {
-                        //--------------------------
-                        std::unique_ptr<Node> next_node = std::move(current->next);
-                        Node* next_raw                  = next_node.get();
-                        //--------------------------
-                        if (prev) {
-                            prev->next = std::move(next_node);
-                        } else {
-                            bucket.store(std::shared_ptr<Node>(next_raw));
-                        }// end if (prev)
-                        //--------------------------
-                        if (next_raw) {
-                            next_raw->prev = prev;
-                        }// end if (next_raw)
-                        //--------------------------
-                        current->prev = nullptr;
-                        current->data.store(nullptr);
-                        m_size.fetch_sub(1UL);
-                        current = next_raw;
-                        //--------------------------
+    
+        return false;
+    }    
+    //--------------------------
+    void clear_data() {
+        for (auto& bucket : m_table) { 
+            bucket.store(nullptr, std::memory_order_release);
+        }
+        m_size.store(0UL, std::memory_order_release);
+    }
+    //--------------------------
+    void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
+        for (auto& bucket : m_table) {
+            std::shared_ptr<Node> head = bucket.load(std::memory_order_acquire);
+            std::shared_ptr<Node> prev = nullptr;
+    
+            while (head) {
+                std::shared_ptr<T> data = head->data.load(std::memory_order_acquire);
+    
+                if (!is_hazard(data)) {
+                    std::shared_ptr<Node> next = head->next.load(std::memory_order_acquire);
+    
+                    if (!prev) {
+                        do {
+                            // Ensure CAS operation succeeds
+                        } while (!bucket.compare_exchange_weak(head, next, std::memory_order_acq_rel));
                     } else {
-                        prev = current;
-                        current = current->next.get();
-                    }// end if (!is_hazard(data))
-                }// end while (current)
-            }// end for (auto& bucket : m_table)
-        }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)
-        //--------------------------
-        const size_t hasher(const Key& key) const {
-            return m_hasher(key) % N;
-        }// end size_t hasher(const Key& key) const
-        //--------------------------------------------------------------
-    private:
-        //--------------------------------------------------------------
-        std::atomic<size_t> m_size;
-        std::array<std::atomic<std::shared_ptr<Node>>, N> m_table;
-        std::hash<Key> m_hasher;
+                        static_cast<void>(prev->next.compare_exchange_weak(head, next, std::memory_order_acq_rel));
+                    }
+    
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }
+    
+                    m_size.fetch_sub(1, std::memory_order_acq_rel);
+                } else {
+                    prev = head;
+                }
+    
+                head = head->next.load(std::memory_order_acquire);
+            }
+        }
+    }    
+    //--------------------------
+    const size_t hasher(const Key& key) const {
+        return m_hasher(key) % N;
+    }
+    //--------------------------------------------------------------
+private:
+    //--------------------------------------------------------------
+    std::atomic<size_t> m_size;
+    std::array<std::atomic<std::shared_ptr<Node>>, N> m_table;
+    std::hash<Key> m_hasher;
     //--------------------------------------------------------------
 }; // end class HashTable
 //--------------------------------------------------------------
