@@ -135,15 +135,15 @@ else()
         "$<$<CONFIG:Release>:-O3>"
     )
     # Conditionally include AddressSanitizer flags only if standalone and in Debug mode
-    if(HAZARDSYSTEM_STANDALONE_PROJECT AND "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang|GNU")
-        set(SANITIZE_FLAGS "$<$<CONFIG:Debug>:-fsanitize=address>")
-        target_compile_options(${PROJECT_NAME} PRIVATE 
-            "$<$<CONFIG:Debug>:-g>"
-            "$<$<CONFIG:Debug>:-O0>"
-            ${SANITIZE_FLAGS}
-        )
-        target_link_options(${PROJECT_NAME} PRIVATE ${SANITIZE_FLAGS})
-    endif()
+    # if(HAZARDSYSTEM_STANDALONE_PROJECT AND "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang|GNU")
+    #     set(SANITIZE_FLAGS "$<$<CONFIG:Debug>:-fsanitize=address>")
+    #     target_compile_options(${PROJECT_NAME} PRIVATE 
+    #         "$<$<CONFIG:Debug>:-g>"
+    #         "$<$<CONFIG:Debug>:-O0>"
+    #         ${SANITIZE_FLAGS}
+    #     )
+    #     target_link_options(${PROJECT_NAME} PRIVATE ${SANITIZE_FLAGS})
+    # endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Enable testing and add the test directory if this is a standalone project
@@ -153,9 +153,9 @@ if(BUILD_HAZARDSYSTEM_TESTS AND HAZARDSYSTEM_STANDALONE_PROJECT)
 endif()
 #------------------------------------------------------------------------------------------
 # Enable benchmarks and add the benchmark directory if this is a standalone project
-# if(BUILD_HAZARDSYSTEM_BENCHMARK AND HAZARDSYSTEM_STANDALONE_PROJECT)
-#     add_subdirectory(benchmark)
-# endif()
+if(BUILD_HAZARDSYSTEM_BENCHMARK AND HAZARDSYSTEM_STANDALONE_PROJECT)
+    add_subdirectory(benchmark)
+endif()
 #------------------------------------------------------------------------------------------
 # Export the library targets (only if it's a standalone project)
 if(HAZARDSYSTEM_STANDALONE_PROJECT)
