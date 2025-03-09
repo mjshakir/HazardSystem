@@ -149,14 +149,15 @@ template<typename Key, typename T, size_t N>
                 //--------------------------
                 const size_t index          = hasher(key);
                 std::shared_ptr<Node> head  = m_table.at(index).load(std::memory_order_acquire);
+                Node *current               = head.get();
                 //--------------------------
-                while (head) {
-                    if (head->key == key) {
+                while (current) {
+                    if (current->key == key) {
                         //--------------------------
-                        std::shared_ptr<Node> next  = head->next.load(std::memory_order_acquire);
-                        std::weak_ptr<Node> prev    = head->prev.load(std::memory_order_acquire);
+                        std::shared_ptr<Node> next  = current->next.load(std::memory_order_acquire);
+                        std::weak_ptr<Node> prev    = current->prev.load(std::memory_order_acquire);
                         //--------------------------
-                        head->data.store(nullptr, std::memory_order_release);
+                        current->data.store(nullptr, std::memory_order_release);
                         //--------------------------
                         if (prev.expired()) {
                             do {
@@ -176,9 +177,9 @@ template<typename Key, typename T, size_t N>
                         m_size.fetch_sub(1, std::memory_order_acq_rel);
                         return true;
                         //--------------------------
-                    }// end if (head->key == key)
-                    head = head->next.load(std::memory_order_acquire);
-                }// end while (head)
+                    }// end if (current->key == key)
+                    current = current->next.load(std::memory_order_acquire).get();
+                }// end while (current)
                 //--------------------------
                 return false;
                 //--------------------------
