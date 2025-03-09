@@ -400,7 +400,7 @@ class HashMultiTable {
         }        
         //--------------------------
         const size_t hasher(const Key& key) const {
-            return m_hasher(key) & N;
+            return m_hasher(key) % N;
         } // end size_t hasher(const Key& key) const
         //--------------------------------------------------------------
     private:
