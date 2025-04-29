@@ -1,5 +1,7 @@
 #pragma once
-
+//--------------------------------------------------------------
+// Standard C++ library
+//--------------------------------------------------------------
 #include <vector>
 #include <atomic>
 #include <memory>
@@ -7,7 +9,7 @@
 #include <thread>
 #include <functional>
 #include <bit>
-
+//--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     template<typename Key>
