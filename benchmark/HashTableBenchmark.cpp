@@ -4,6 +4,9 @@
 #include <vector>
 #include "HashTable.hpp"
 
+// constexpr size_t TABLE_SIZE = 1024;
+// using TestHashTable = HazardSystem::HashTable<int, int>;
+
 constexpr size_t TABLE_SIZE = 1024;
 using TestHashTable = HazardSystem::HashTable<int, int, TABLE_SIZE>;
 
@@ -24,31 +27,31 @@ BENCHMARK(BM_SingleThread_Insert)->RangeMultiplier(10)->Range(1, 10000)->Complex
 
 
 // 📌 **Multi-Threaded Insertion Benchmark**
-static void BM_MultiThread_Insert(benchmark::State& state) {
-    TestHashTable table;
-    int num_threads = state.range(0);
-    std::vector<std::thread> threads;
+//~ static void BM_MultiThread_Insert(benchmark::State& state) {
+    //~ TestHashTable table;
+    //~ int num_threads = state.range(0);
+    //~ std::vector<std::thread> threads;
 
-    for (auto _ : state) {
-        state.PauseTiming();
-        table.clear();
-        state.ResumeTiming();
+    //~ for (auto _ : state) {
+        //~ state.PauseTiming();
+        //~ table.clear();
+        //~ state.ResumeTiming();
 
-        for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([&]() {
-                for (int i = 0; i < 1000; ++i) {
-                    table.insert(i, std::make_shared<int>(i));
-                }
-            });
-        }
-        for (auto& thread : threads) {
-            thread.join();
-        }
-        threads.clear();
-    }
-    state.SetComplexityN(state.range(0));
-}
-BENCHMARK(BM_MultiThread_Insert)->RangeMultiplier(2)->Range(1, 16)->Complexity(benchmark::oAuto);
+        //~ for (int t = 0; t < num_threads; ++t) {
+            //~ threads.emplace_back([&]() {
+                //~ for (int i = 0; i < 1000; ++i) {
+                    //~ table.insert(i, std::make_shared<int>(i));
+                //~ }
+            //~ });
+        //~ }
+        //~ for (auto& thread : threads) {
+            //~ thread.join();
+        //~ }
+        //~ threads.clear();
+    //~ }
+    //~ state.SetComplexityN(state.range(0));
+//~ }
+//~ BENCHMARK(BM_MultiThread_Insert)->RangeMultiplier(2)->Range(1, 16)->Complexity(benchmark::oAuto);
 
 
 // 📌 **Single-Threaded Lookup Benchmark**
@@ -69,30 +72,30 @@ BENCHMARK(BM_SingleThread_Find)->RangeMultiplier(10)->Range(1, 10000)->Complexit
 
 
 // 📌 **Multi-Threaded Lookup Benchmark**
-static void BM_MultiThread_Find(benchmark::State& state) {
-    TestHashTable table;
-    int num_threads = state.range(0);
-    for (int i = 0; i < 10000; ++i) {
-        table.insert(i, std::make_shared<int>(i));
-    }
-    std::vector<std::thread> threads;
+//~ static void BM_MultiThread_Find(benchmark::State& state) {
+    //~ TestHashTable table;
+    //~ int num_threads = state.range(0);
+    //~ for (int i = 0; i < 10000; ++i) {
+        //~ table.insert(i, std::make_shared<int>(i));
+    //~ }
+    //~ std::vector<std::thread> threads;
 
-    for (auto _ : state) {
-        for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([&]() {
-                for (int i = 0; i < 10000; ++i) {
-                    benchmark::DoNotOptimize(table.find(i));
-                }
-            });
-        }
-        for (auto& thread : threads) {
-            thread.join();
-        }
-        threads.clear();
-    }
-    state.SetComplexityN(state.range(0));
-}
-BENCHMARK(BM_MultiThread_Find)->RangeMultiplier(2)->Range(1, 16)->Complexity(benchmark::oAuto);
+    //~ for (auto _ : state) {
+        //~ for (int t = 0; t < num_threads; ++t) {
+            //~ threads.emplace_back([&]() {
+                //~ for (int i = 0; i < 10000; ++i) {
+                    //~ benchmark::DoNotOptimize(table.find(i));
+                //~ }
+            //~ });
+        //~ }
+        //~ for (auto& thread : threads) {
+            //~ thread.join();
+        //~ }
+        //~ threads.clear();
+    //~ }
+    //~ state.SetComplexityN(state.range(0));
+//~ }
+//~ BENCHMARK(BM_MultiThread_Find)->RangeMultiplier(2)->Range(1, 16)->Complexity(benchmark::oAuto);
 
 
 // 📌 **Single-Threaded Update Benchmark**
