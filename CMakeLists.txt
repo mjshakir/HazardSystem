@@ -72,6 +72,7 @@ set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
 set(HAZARDSYSTEM_SOURCES
     # ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/Hasher.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashMultiTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
