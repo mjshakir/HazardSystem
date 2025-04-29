@@ -2,11 +2,12 @@
 //--------------------------------------------------------------
 // Standard cpp library
 //--------------------------------------------------------------
-#include <iostream>
+#include <atomic>
+#include <memory>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
-#include "atomic_unique_ptr.hpp"
+// #include "atomic_unique_ptr.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -17,21 +18,21 @@ namespace HazardSystem {
             //--------------------------
         }// end HazardPointer(void)
         //--------------------------
-        HazardPointer(T* ptr) : pointer(ptr) {
+        HazardPointer(T* ptr) : pointer(std::shared_ptr<T>(ptr)) {
             //--------------------------
         }// end HazardPointer(T* ptr)
         //--------------------------
-        HazardPointer(std::unique_ptr<T> ptr) : pointer(ptr.release()) {
+        HazardPointer(std::unique_ptr<T> ptr) : pointer(std::move(ptr)) {
             //--------------------------
         }// end HazardPointer(std::unique_ptr<T> ptr)
         //--------------------------
-        HazardPointer(std::shared_ptr<T> ptr) : pointer(ptr.get()) {
+        HazardPointer(std::shared_ptr<T> ptr) : pointer(std::move(ptr)) {
             //--------------------------
         }// end HazardPointer(std::shared_ptr<T> ptr)
         //--------------------------
         ~HazardPointer(void) {
             //--------------------------
-            pointer.reset();
+            pointer.store(nullptr);
             //--------------------------
         }// end ~HazardPointer(void)
         //--------------------------
@@ -40,7 +41,7 @@ namespace HazardSystem {
         HazardPointer(HazardPointer&&) noexcept         = default;
         HazardPointer& operator=(HazardPointer&&)       = default;
         //--------------------------
-        atomic_unique_ptr<T> pointer;
+        std::atomic<std::shared_ptr<T>> pointer;
         //--------------------------
     }; // end struct HazardPointer    
     //--------------------------------------------------------------

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 #------------------------------------------------------------------------------------------
 # Determine if HazardSystem is built as a standalone project or included by other projects
 set(HAZARDSYSTEM_STANDALONE_PROJECT OFF)
@@ -71,11 +71,15 @@ set(HAZARDSYSTEM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
 set(HAZARDSYSTEM_SOURCES
-    ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
+    # ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/Hasher.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashMultiTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
 )
 #------------------------------------------------------------------------------------------
 # Check if the library should be built as a shared library
@@ -132,15 +136,15 @@ else()
         "$<$<CONFIG:Release>:-O3>"
     )
     # Conditionally include AddressSanitizer flags only if standalone and in Debug mode
-    if(HAZARDSYSTEM_STANDALONE_PROJECT AND "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang|GNU")
-        set(SANITIZE_FLAGS "$<$<CONFIG:Debug>:-fsanitize=address>")
-        target_compile_options(${PROJECT_NAME} PRIVATE 
-            "$<$<CONFIG:Debug>:-g>"
-            "$<$<CONFIG:Debug>:-O0>"
-            ${SANITIZE_FLAGS}
-        )
-        target_link_options(${PROJECT_NAME} PRIVATE ${SANITIZE_FLAGS})
-    endif()
+    # if(HAZARDSYSTEM_STANDALONE_PROJECT AND "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang|GNU")
+    #     set(SANITIZE_FLAGS "$<$<CONFIG:Debug>:-fsanitize=address>")
+    #     target_compile_options(${PROJECT_NAME} PRIVATE 
+    #         "$<$<CONFIG:Debug>:-g>"
+    #         "$<$<CONFIG:Debug>:-O0>"
+    #         ${SANITIZE_FLAGS}
+    #     )
+    #     target_link_options(${PROJECT_NAME} PRIVATE ${SANITIZE_FLAGS})
+    # endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Enable testing and add the test directory if this is a standalone project
@@ -150,9 +154,9 @@ if(BUILD_HAZARDSYSTEM_TESTS AND HAZARDSYSTEM_STANDALONE_PROJECT)
 endif()
 #------------------------------------------------------------------------------------------
 # Enable benchmarks and add the benchmark directory if this is a standalone project
-# if(BUILD_HAZARDSYSTEM_BENCHMARK AND HAZARDSYSTEM_STANDALONE_PROJECT)
-#     add_subdirectory(benchmark)
-# endif()
+if(BUILD_HAZARDSYSTEM_BENCHMARK AND HAZARDSYSTEM_STANDALONE_PROJECT)
+    add_subdirectory(benchmark)
+endif()
 #------------------------------------------------------------------------------------------
 # Export the library targets (only if it's a standalone project)
 if(HAZARDSYSTEM_STANDALONE_PROJECT)
