@@ -65,7 +65,7 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
-        HazardPointerManager(void) : m_hazard_pointers(), m_retired_nodes(), m_initialize(initialize()) {
+        HazardPointerManager(void) : m_hazard_pointers(), m_initialize(initialize()) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
