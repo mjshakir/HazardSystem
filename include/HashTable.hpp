@@ -10,6 +10,10 @@
 #include <functional>
 #include <utility>
 //--------------------------------------------------------------
+// User Defined Headers
+//--------------------------------------------------------------
+// #include "Hasher.hpp"
+//--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
 template<typename Key, typename T, size_t N>
@@ -212,7 +216,16 @@ template<typename Key, typename T, size_t N>
                 }// end for (auto& bucket)
             }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)                        
             //--------------------------
-            const size_t hasher(const Key& key) const {
+            // uint64_t hash_function(const Key& key) const {
+            //     constexpr uint32_t c_seed = 0x9747b28cU;
+            //     return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
+            // }// end uint64_t hash_function(const Key& key) const
+            // //--------------------------
+            // size_t hasher(const Key& key) const {
+            //     return static_cast<size_t>(hash_function(key)) % N;
+            // }// end size_t hasher(const Key& key) const
+            //--------------------------
+            size_t hasher(const Key& key) const {
                 return std::hash<Key>{}(key) % N;
             }// end const size_t hasher(const Key& key) const
             //--------------------------------------------------------------
