@@ -81,6 +81,7 @@
         "stop_token": "cpp",
         "thread": "cpp",
         "cinttypes": "cpp",
-        "cstdbool": "cpp"
+        "cstdbool": "cpp",
+        "shared_mutex": "cpp"
     }
 }
