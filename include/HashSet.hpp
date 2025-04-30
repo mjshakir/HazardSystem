@@ -10,6 +10,10 @@
 #include <functional>
 #include <bit>
 //--------------------------------------------------------------
+// User Defined Headers
+//--------------------------------------------------------------
+#include "Hasher.hpp"
+//--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     template<typename Key>
@@ -202,9 +206,18 @@ namespace HazardSystem {
                 return m_size.load() > (m_capacity * 0.75);
             }// end bool should_resize(void) const
             //--------------------------
-            const size_t hasher(const Key& key) const {
-                return m_hasher(key) & (m_capacity - 1);
-            }// end const size_t hasher(const Key& key) const
+            // const size_t hasher(const Key& key) const {
+            //     return m_hasher(key) & (m_capacity - 1);
+            // }// end const size_t hasher(const Key& key) const
+            //--------------------------
+            uint64_t hash_function(const Key& key) const {
+                constexpr uint32_t c_seed = 0x9747b28cU;
+                return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
+            }
+            //--------------------------
+            size_t hasher(const Key& key) const {
+                return static_cast<size_t>(hash_function(key)) % (m_capacity - 1);
+            }
             //--------------------------
             constexpr size_t next_power_of_two(const size_t& n) {
                 return std::bit_ceil(n);
