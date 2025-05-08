@@ -82,6 +82,8 @@
         "thread": "cpp",
         "cinttypes": "cpp",
         "cstdbool": "cpp",
-        "shared_mutex": "cpp"
+        "shared_mutex": "cpp",
+        "chrono": "cpp",
+        "future": "cpp"
     }
 }
