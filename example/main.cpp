@@ -5,6 +5,8 @@
 #include <mutex>
 #include "HazardPointerManager.hpp"
 
+constexpr size_t HAZARD_POINTERS = 50UL, PER_THREAD = 25UL;
+
 // For output synchronization
 std::mutex cout_mutex;
 #define SYNC_COUT(x) { std::lock_guard<std::mutex> lock(cout_mutex); std::cout << x; }
@@ -24,7 +26,7 @@ struct TestNode {
 std::atomic<std::shared_ptr<TestNode>> shared_node{nullptr};
 
 // A function to periodically update the shared node
-void update_shared_node(HazardSystem::HazardPointerManager<TestNode, 10, 5>& manager) {
+void update_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager) {
     for (int i = 0; i < 10; ++i) {
         // Create a new node
         auto new_node = std::make_shared<TestNode>(i);
@@ -49,7 +51,7 @@ void update_shared_node(HazardSystem::HazardPointerManager<TestNode, 10, 5>& man
 }
 
 // A function to read from the shared node using hazard pointers
-void read_shared_node(HazardSystem::HazardPointerManager<TestNode, 10, 5>& manager, int thread_id) {
+void read_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager, int thread_id) {
     for (int i = 0; i < 15; ++i) {
         // Acquire a hazard pointer
         auto hp = manager.acquire();
@@ -95,7 +97,7 @@ void read_shared_node(HazardSystem::HazardPointerManager<TestNode, 10, 5>& manag
 
 int main() {
     // Create a shared instance of HazardPointerManager
-    auto& manager = HazardSystem::HazardPointerManager<TestNode, 10, 5>::instance();
+    auto& manager = HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>::instance();
 
     SYNC_COUT("Starting hazard pointer test.\n");
     
