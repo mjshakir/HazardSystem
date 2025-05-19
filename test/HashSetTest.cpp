@@ -1,0 +1,493 @@
+#include <gtest/gtest.h>
+#include <vector>
+#include <thread>
+#include <set>
+#include <random>
+#include <chrono>
+#include <string>
+#include <algorithm>
+#include <atomic>
+#include <future>
+#include "HashSet.hpp"
+
+namespace HazardSystem {
+namespace testing {
+
+// Basic Tests
+class HashSetTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        hashset = std::make_unique<HashSet<int>>(64);
+    }
+
+    void TearDown() override {
+        hashset.reset();
+    }
+
+    std::unique_ptr<HashSet<int>> hashset;
+};
+
+// Test inserting a single element
+TEST_F(HashSetTest, InsertSingleElement) {
+    EXPECT_TRUE(hashset->insert(42));
+    EXPECT_TRUE(hashset->contains(42));
+    EXPECT_EQ(hashset->size(), 1);
+}
+
+// Test inserting duplicate elements
+TEST_F(HashSetTest, InsertDuplicateElement) {
+    EXPECT_TRUE(hashset->insert(42));
+    EXPECT_FALSE(hashset->insert(42));
+    EXPECT_EQ(hashset->size(), 1);
+}
+
+// Test inserting multiple elements
+TEST_F(HashSetTest, InsertMultipleElements) {
+    const int num_elements = 1000;
+    for (int i = 0; i < num_elements; ++i) {
+        EXPECT_TRUE(hashset->insert(i));
+    }
+    EXPECT_EQ(hashset->size(), num_elements);
+    for (int i = 0; i < num_elements; ++i) {
+        EXPECT_TRUE(hashset->contains(i));
+    }
+}
+
+// TEST_F(HashSetTest, InsertMultipleElements) {
+//     const int num_elements = 100; // Reduced from 1000 for debugging
+//     int success_count = 0;
+//     std::set<int> failed_inserts;
+    
+//     for (int i = 0; i < num_elements; ++i) {
+//         bool result = hashset->insert(i);
+//         if (result) {
+//             success_count++;
+//         } else {
+//             failed_inserts.insert(i);
+//         }
+//         // Don't use EXPECT_TRUE to avoid early test termination
+//     }
+    
+//     std::cout << "Inserted " << success_count << " out of " << num_elements << " elements" << std::endl;
+//     if (!failed_inserts.empty()) {
+//         std::cout << "Failed to insert: ";
+//         for (auto val : failed_inserts) {
+//             std::cout << val << " ";
+//         }
+//         std::cout << std::endl;
+//     }
+    
+//     // Check final size
+//     EXPECT_EQ(hashset->size(), success_count) 
+//         << "HashSet size " << hashset->size() << " should match successful insertions " << success_count;
+    
+//     // Verify all successful elements are contained
+//     int found_count = 0;
+//     for (int i = 0; i < num_elements; ++i) {
+//         if (failed_inserts.find(i) == failed_inserts.end()) {
+//             // Only check elements we successfully inserted
+//             bool contained = hashset->contains(i);
+//             if (contained) {
+//                 found_count++;
+//             } else {
+//                 std::cout << "Element " << i << " was inserted but not found" << std::endl;
+//             }
+//         }
+//     }
+    
+//     EXPECT_EQ(found_count, success_count) 
+//         << "Number of elements found (" << found_count 
+//         << ") doesn't match number of successful insertions (" << success_count << ")";
+// }
+
+// Test removing an existing element
+TEST_F(HashSetTest, RemoveElement) {
+    EXPECT_TRUE(hashset->insert(42));
+    EXPECT_TRUE(hashset->contains(42));
+    EXPECT_TRUE(hashset->remove(42));
+    EXPECT_FALSE(hashset->contains(42));
+    EXPECT_EQ(hashset->size(), 0);
+}
+
+// Test removing a non-existing element
+TEST_F(HashSetTest, RemoveNonExistingElement) {
+    EXPECT_FALSE(hashset->remove(42));
+    EXPECT_EQ(hashset->size(), 0);
+}
+
+// Test resizing behavior (private method called indirectly)
+TEST_F(HashSetTest, ResizeBehavior) {
+    // Initial capacity is 64, will resize at 48 elements (75% load factor)
+    const int threshold = 64 * 0.75;
+    for (int i = 0; i < threshold + 10; ++i) {
+        EXPECT_TRUE(hashset->insert(i));
+    }
+    
+    // Check all elements are still there after resizing
+    for (int i = 0; i < threshold + 10; ++i) {
+        EXPECT_TRUE(hashset->contains(i));
+    }
+    
+    EXPECT_EQ(hashset->size(), threshold + 10);
+}
+
+// Test with different types
+
+// Edge case tests
+class HashSetEdgeCaseTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Use a very small initial capacity to test resize quickly
+        small_set = std::make_unique<HashSet<int>>(2);
+        
+        // Use a large capacity to test performance with many elements
+        large_set = std::make_unique<HashSet<int>>(1 << 16); // 65536
+    }
+
+    std::unique_ptr<HashSet<int>> small_set;
+    std::unique_ptr<HashSet<int>> large_set;
+};
+
+// Test with very small initial capacity
+TEST_F(HashSetEdgeCaseTest, SmallInitialCapacity) {
+    // Insert enough elements to force multiple resizes
+    const int count = 100;
+    for (int i = 0; i < count; ++i) {
+        EXPECT_TRUE(small_set->insert(i));
+    }
+    
+    EXPECT_EQ(small_set->size(), count);
+    
+    // Verify all elements are still accessible
+    for (int i = 0; i < count; ++i) {
+        EXPECT_TRUE(small_set->contains(i));
+    }
+}
+
+// Test with large number of elements
+TEST_F(HashSetEdgeCaseTest, LargeNumberOfElements) {
+    const int count = 10000; // High enough to test performance
+    for (int i = 0; i < count; ++i) {
+        EXPECT_TRUE(large_set->insert(i));
+    }
+    
+    EXPECT_EQ(large_set->size(), count);
+    
+    // Remove half the elements
+    for (int i = 0; i < count; i += 2) {
+        EXPECT_TRUE(large_set->remove(i));
+    }
+    
+    EXPECT_EQ(large_set->size(), count / 2);
+    
+    // Verify remaining elements
+    for (int i = 1; i < count; i += 2) {
+        EXPECT_TRUE(large_set->contains(i));
+    }
+}
+
+// Test with minimum value
+TEST_F(HashSetEdgeCaseTest, MinValue) {
+    EXPECT_TRUE(large_set->insert(std::numeric_limits<int>::min()));
+    EXPECT_TRUE(large_set->contains(std::numeric_limits<int>::min()));
+    EXPECT_EQ(large_set->size(), 1);
+}
+
+// Test with maximum value
+TEST_F(HashSetEdgeCaseTest, MaxValue) {
+    EXPECT_TRUE(large_set->insert(std::numeric_limits<int>::max()));
+    EXPECT_TRUE(large_set->contains(std::numeric_limits<int>::max()));
+    EXPECT_EQ(large_set->size(), 1);
+}
+
+// Test with mixed extreme values
+TEST_F(HashSetEdgeCaseTest, MixedExtremeValues) {
+    EXPECT_TRUE(large_set->insert(std::numeric_limits<int>::min()));
+    EXPECT_TRUE(large_set->insert(std::numeric_limits<int>::max()));
+    EXPECT_TRUE(large_set->insert(0));
+    EXPECT_TRUE(large_set->contains(std::numeric_limits<int>::min()));
+    EXPECT_TRUE(large_set->contains(std::numeric_limits<int>::max()));
+    EXPECT_TRUE(large_set->contains(0));
+    EXPECT_EQ(large_set->size(), 3);
+}
+
+// Pattern of values that might lead to hash collisions
+TEST_F(HashSetEdgeCaseTest, HashCollisionPattern) {
+    HashSet<int> collision_set(16);  // Small size to increase collision chance
+    
+    // These values are chosen to potentially create collisions in common hash implementations
+    std::vector<int> collision_prone = {0, 16, 32, 48, 64, 80, 96, 112, 128};
+    
+    for (auto val : collision_prone) {
+        EXPECT_TRUE(collision_set.insert(val));
+    }
+    
+    EXPECT_EQ(collision_set.size(), collision_prone.size());
+    
+    for (auto val : collision_prone) {
+        EXPECT_TRUE(collision_set.contains(val));
+    }
+}
+
+// Multithreaded tests
+class HashSetThreadTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        mt_set = std::make_unique<HashSet<int>>(1024);
+    }
+
+    std::unique_ptr<HashSet<int>> mt_set;
+    
+    // Helper method to perform random operations concurrently
+    void RandomOperations(int thread_id, int ops_per_thread, std::atomic<int>& net_insertions) {
+        std::mt19937 gen(thread_id); // Thread-local RNG
+        std::uniform_int_distribution<> value_dist(0, 10000);  // Random values
+        std::uniform_int_distribution<> op_dist(0, 99);        // 0-59 insert, 60-89 contains, 90-99 remove
+    
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int value = value_dist(gen);
+            int op = op_dist(gen);
+    
+            if (op < 60) { // 60% insert
+                if (mt_set->insert(value)) {
+                    net_insertions.fetch_add(1, std::memory_order_relaxed);
+                }
+            } else if (op < 90) { // 30% contains
+                mt_set->contains(value);
+            } else { // 10% remove
+                if (mt_set->remove(value)) {
+                    net_insertions.fetch_sub(1, std::memory_order_relaxed);
+                }
+            }
+        }
+    }    
+};
+
+// Test concurrent insert operations
+TEST_F(HashSetThreadTest, ConcurrentInsert) {
+    const int num_threads = 8;
+    const int values_per_thread = 1000;
+    
+    std::vector<std::thread> threads;
+    std::vector<int> thread_values[num_threads];
+    
+    // Prepare unique values for each thread
+    for (int t = 0; t < num_threads; ++t) {
+        thread_values[t].reserve(values_per_thread);
+        for (int i = 0; i < values_per_thread; ++i) {
+            thread_values[t].push_back(t * values_per_thread + i);
+        }
+    }
+    
+    // Launch threads
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([this, t, &thread_values]() {
+            for (int val : thread_values[t]) {
+                mt_set->insert(val);
+            }
+        });
+    }
+    
+    // Join threads
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // Verify all values were inserted
+    EXPECT_EQ(mt_set->size(), num_threads * values_per_thread);
+    
+    for (int t = 0; t < num_threads; ++t) {
+        for (int val : thread_values[t]) {
+            EXPECT_TRUE(mt_set->contains(val));
+        }
+    }
+}
+
+// Test concurrent mixed operations
+// TEST_F(HashSetThreadTest, ConcurrentMixedOperations) {
+//     const int num_threads = 8;
+//     const int ops_per_thread = 10000;
+//     std::atomic<int> success_count(0);
+    
+//     std::vector<std::thread> threads;
+    
+//     // Launch threads with random operations
+//     for (int t = 0; t < num_threads; ++t) {
+//         threads.emplace_back([this, t, ops_per_thread, &success_count]() {
+//             RandomOperations(t, ops_per_thread, success_count);
+//         });
+//     }
+    
+//     // Join threads
+//     for (auto& thread : threads) {
+//         thread.join();
+//     }
+    
+//     // The exact final size is unpredictable due to concurrent operations,
+//     // but it should be related to the success count
+//     EXPECT_EQ(mt_set->size(), success_count);
+// }
+
+
+TEST_F(HashSetThreadTest, ConcurrentMixedOperations) {
+    const int num_threads = 8;
+    const int ops_per_thread = 10000;
+    std::atomic<int> net_insertions(0); // Track net effect: insert - remove
+
+    std::vector<std::thread> threads;
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([this, t, ops_per_thread, &net_insertions]() {
+            RandomOperations(t, ops_per_thread, net_insertions);
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    EXPECT_EQ(mt_set->size(), net_insertions);
+}
+
+
+// Test contention on the same key
+TEST_F(HashSetThreadTest, ContentionOnSameKey) {
+    const int num_threads = 8;
+    std::atomic<int> insert_success(0);
+    std::atomic<int> remove_success(0);
+    
+    // First thread inserts key 42
+    mt_set->insert(42);
+    
+    std::vector<std::thread> threads;
+    
+    // Launch threads that all try to insert and remove the same key
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([this, &insert_success, &remove_success]() {
+            // Try to insert key 42 (should fail except for the first thread)
+            if (mt_set->insert(42)) {
+                insert_success++;
+            }
+            
+            // Try to remove key 42 (only one thread should succeed)
+            if (mt_set->remove(42)) {
+                remove_success++;
+            }
+            
+            // Try to insert again (should succeed for one thread)
+            if (mt_set->insert(42)) {
+                insert_success++;
+            }
+        });
+    }
+    
+    // Join threads
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    
+    // There should be exactly one successful insertion initially,
+    // one successful removal, and one re-insertion
+    EXPECT_GE(insert_success, 1);
+    EXPECT_GE(remove_success, 1);
+    EXPECT_TRUE(mt_set->contains(42));
+    EXPECT_EQ(mt_set->size(), 1);
+
+    EXPECT_LE(insert_success, num_threads * 2); // Max 2 inserts per thread
+    EXPECT_LE(remove_success, num_threads);     // Max 1 remove per thread
+
+
+}
+
+// Stress test with high load
+TEST_F(HashSetThreadTest, StressTestHighLoad) {
+    const int num_threads = 16;
+    const int ops_per_thread = 50000;
+    std::atomic<int> success_count(0);
+    
+    std::vector<std::future<void>> futures;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    // Launch threads with async to better utilize all cores
+    for (int t = 0; t < num_threads; ++t) {
+        futures.push_back(std::async(std::launch::async, [this, t, ops_per_thread, &success_count]() {
+            RandomOperations(t, ops_per_thread, success_count);
+        }));
+    }
+    
+    // Wait for all operations to complete
+    for (auto& future : futures) {
+        future.wait();
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    
+    std::cout << "Stress test completed in " << duration.count() << " ms" << std::endl;
+    std::cout << "Final set size: " << mt_set->size() << ", Success count: " << success_count << std::endl;
+    
+    // Verify final size matches successful operations
+    EXPECT_EQ(mt_set->size(), success_count);
+}
+
+// Test for lock-free property
+// TEST_F(HashSetThreadTest, LockFreeProperty) {
+//     const int num_threads = 4;
+//     const int ops_per_thread = 10000;
+
+//     std::vector<std::thread> threads;
+//     std::atomic<bool> stop_flag(false);
+//     std::atomic<int> progress_counter(0);
+//     std::atomic<int> stall_count(0);
+
+//     for (int t = 0; t < num_threads; ++t) {
+//         threads.emplace_back([this, t, ops_per_thread, &stop_flag, &progress_counter]() {
+//             std::mt19937 gen(t);
+//             std::uniform_int_distribution<> val_dist(0, 10000);
+
+//             for (int i = 0; i < ops_per_thread && !stop_flag.load(); ++i) {
+//                 int val = val_dist(gen);
+//                 switch (i % 3) {
+//                     case 0: if (mt_set->insert(val)) progress_counter++; break;
+//                     case 1: mt_set->contains(val); break;
+//                     case 2: if (mt_set->remove(val)) progress_counter++; break;
+//                 }
+//             }
+//         });
+//     }
+
+//     std::thread monitor_thread([&]() {
+//         const int check_interval_ms = 100;
+//         const int max_checks = 10;
+
+//         for (int check = 0; check < max_checks && !stop_flag.load(); ++check) {
+//             int before = progress_counter.load();
+//             std::this_thread::sleep_for(std::chrono::milliseconds(check_interval_ms));
+//             int after = progress_counter.load();
+
+//             if (before == after) {
+//                 stall_count++;
+//             }
+//         }
+
+//         stop_flag.store(true);
+//     });
+
+//     monitor_thread.join();
+//     for (auto& thread : threads) {
+//         thread.join();
+//     }
+
+//     EXPECT_LE(stall_count, 3);
+//     std::cout << "Stall count in lock-free test: " << stall_count << std::endl;
+// }
+
+
+} // namespace testing
+} // namespace HazardSystem
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
