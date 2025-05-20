@@ -34,6 +34,7 @@ template<typename Key, typename T, size_t N>
                 std::atomic<std::shared_ptr<T>> data;
                 std::atomic<std::shared_ptr<Node>> next;
                 std::atomic<std::weak_ptr<Node>> prev;
+                //--------------------------
             }; // end struct Node
             //--------------------------------------------------------------
         public:
