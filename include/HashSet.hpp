@@ -9,7 +9,7 @@
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
-#include "Hasher.hpp"
+// #include "Hasher.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
@@ -208,14 +208,18 @@ namespace HazardSystem {
             //     return m_size.load() > (m_capacity * 0.75);
             // }
             //--------------------------------------------------------------
-            uint64_t hash_function(const Key& key) const {
-                constexpr uint32_t c_seed = 0x9747b28cU;
-                return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
-            }// end uint64_t hash_function(const Key& key) const
+            // uint64_t hash_function(const Key& key) const {
+            //     constexpr uint32_t c_seed = 0x9747b28cU;
+            //     return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
+            // }// end uint64_t hash_function(const Key& key) const
+            // //--------------------------------------------------------------
+            // size_t hasher(const Key& key) const {
+            //     return static_cast<size_t>(hash_function(key)) % m_capacity;
+            // }// end size_t hasher(const Key& key) const
             //--------------------------------------------------------------
             size_t hasher(const Key& key) const {
-                return static_cast<size_t>(hash_function(key)) % m_capacity;
-            }// end size_t hasher(const Key& key) const
+                return std::hash<Key>{}(key) % m_capacity;
+            }// end const size_t hasher(const Key& key) const
             //--------------------------------------------------------------
             constexpr size_t next_power_of_two(const size_t& n) {
                 return std::bit_ceil(n);
