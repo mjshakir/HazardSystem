@@ -5,7 +5,7 @@
 #include <mutex>
 #include "HazardPointerManager.hpp"
 
-constexpr size_t HAZARD_POINTERS = 50UL, PER_THREAD = 25UL;
+constexpr size_t HAZARD_POINTERS = 9UL, PER_THREAD = 3UL;
 
 // For output synchronization
 std::mutex cout_mutex;

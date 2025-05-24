@@ -10,10 +10,6 @@
 #include <functional>
 #include <utility>
 //--------------------------------------------------------------
-// User Defined Headers
-//--------------------------------------------------------------
-// #include "Hasher.hpp"
-//--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
 template<typename Key, typename T, size_t N>
@@ -34,6 +30,7 @@ template<typename Key, typename T, size_t N>
                 std::atomic<std::shared_ptr<T>> data;
                 std::atomic<std::shared_ptr<Node>> next;
                 std::atomic<std::weak_ptr<Node>> prev;
+                //--------------------------
             }; // end struct Node
             //--------------------------------------------------------------
         public:
@@ -87,22 +84,21 @@ template<typename Key, typename T, size_t N>
                 //--------------------------
                 const size_t index          = hasher(key);
                 auto new_node               = std::make_shared<Node>(key, std::move(data));
-                std::shared_ptr<Node> head  = m_table.at(index).load(std::memory_order_acquire);
+                std::shared_ptr<Node> current  = m_table.at(index).load(std::memory_order_acquire);
                 //--------------------------
-                Node* current = head.get();
                 while (current) {
                     if (current->key == key) {
                         return update_data(current, new_node->data);
                     }// end if (current->key == key)
-                    current = current->next.load(std::memory_order_acquire).get();
+                    current = current->next.load(std::memory_order_acquire);
                 }// end while (current)
                 //--------------------------
                 do {
-                    new_node->next.store(head, std::memory_order_release);
-                    if (head) {
-                        new_node->prev.store(head, std::memory_order_release);
+                    new_node->next.store(current, std::memory_order_release);
+                    if (current) {
+                        new_node->prev.store(current, std::memory_order_release);
                     }
-                } while (!m_table.at(index).compare_exchange_weak(head, new_node, std::memory_order_acq_rel));
+                } while (!m_table.at(index).compare_exchange_weak(current, new_node, std::memory_order_acq_rel));
                 //--------------------------
                 // std::atomic_thread_fence(std::memory_order_release);  // Ensure visibility before deletion
                 m_size.fetch_add(1, std::memory_order_acq_rel);
@@ -113,36 +109,36 @@ template<typename Key, typename T, size_t N>
             //--------------------------
             bool update_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* head          = m_table.at(index).load(std::memory_order_acquire).get();
+                const size_t index          = hasher(key);
+                std::shared_ptr<Node> head  = m_table.at(index).load(std::memory_order_acquire);
                 //--------------------------
                 while (head) {
                     if (head->key == key) {
                         head->data.store(data, std::memory_order_release);
                         return true;
                     }// end if (head->key == key)
-                    head = head->next.load(std::memory_order_acquire).get();
+                    head = head->next.load(std::memory_order_acquire);
                 }// end while (head)
                 //--------------------------
                 return false;
                 //--------------------------
             }// end bool update_data(const Key& key, std::shared_ptr<T> data)
             //--------------------------
-            bool update_data(Node* head, std::shared_ptr<T> data) {
+            bool update_data(std::shared_ptr<Node> head, std::shared_ptr<T> data) {
                 head->data.store(data, std::memory_order_release);
                 return true;
             }// end bool update_data(Node* head, std::shared_ptr<T> data)
             //--------------------------
             std::shared_ptr<T> find_data(const Key& key) const {
                 //--------------------------
-                const size_t index  = hasher(key);
-                Node* current       = m_table.at(index).load(std::memory_order_acquire).get();
+                const size_t index              = hasher(key);
+                std::shared_ptr<Node> current   = m_table.at(index).load(std::memory_order_acquire);
                 //--------------------------
                 while (current) {
                     if (current->key == key) {
                         return current->data.load(std::memory_order_acquire);
                     }// end if (current->key == key)
-                    current = current->next.load(std::memory_order_acquire).get();
+                    current = current->next.load(std::memory_order_acquire);
                 }// end while (current)
                 //--------------------------
                 return nullptr;
@@ -151,9 +147,8 @@ template<typename Key, typename T, size_t N>
             //--------------------------
             bool remove_data(const Key& key) {
                 //--------------------------
-                const size_t index          = hasher(key);
-                std::shared_ptr<Node> head  = m_table.at(index).load(std::memory_order_acquire);
-                Node *current               = head.get();
+                const size_t index              = hasher(key);
+                std::shared_ptr<Node> current   = m_table.at(index).load(std::memory_order_acquire);
                 //--------------------------
                 while (current) {
                     if (current->key == key) {
@@ -166,11 +161,11 @@ template<typename Key, typename T, size_t N>
                         if (prev.expired()) {
                             do {
                                 // Retry until successful
-                            } while (!m_table.at(index).compare_exchange_weak(head, next, std::memory_order_acq_rel));
+                            } while (!m_table.at(index).compare_exchange_weak(current, next, std::memory_order_acq_rel));
                         } else {
                             std::shared_ptr<Node> prev_node = prev.lock();
                             if (prev_node) {
-                                static_cast<void>(prev_node->next.compare_exchange_weak(head, next, std::memory_order_acq_rel));
+                                static_cast<void>(prev_node->next.compare_exchange_weak(current, next, std::memory_order_acq_rel));
                             }// end if (prev_node)
                         }// end if (prev.expired())
                         //--------------------------
@@ -178,11 +173,11 @@ template<typename Key, typename T, size_t N>
                             next->prev.store(prev, std::memory_order_release);
                         }// end if (next)
                         //--------------------------
-                        m_size.fetch_sub(1, std::memory_order_acq_rel);
+                        safe_decrement_size();
                         return true;
                         //--------------------------
                     }// end if (current->key == key)
-                    current = current->next.load(std::memory_order_acquire).get();
+                    current = current->next.load(std::memory_order_acquire);
                 }// end while (current)
                 //--------------------------
                 return false;
@@ -200,11 +195,11 @@ template<typename Key, typename T, size_t N>
                 //--------------------------
                 for (auto& bucket : m_table) {
                     //--------------------------
-                    Node* head = bucket.load(std::memory_order_acquire).get();
+                    std::shared_ptr<Node> head = bucket.load(std::memory_order_acquire);
                     //--------------------------
                     while (head) {
                         //--------------------------
-                        Node* next = head->next.load(std::memory_order_acquire).get();
+                        std::shared_ptr<Node> next = head->next.load(std::memory_order_acquire);
                         //--------------------------
                         if (is_hazard(head->data.load(std::memory_order_acquire))) {
                             static_cast<void>(remove_data(head->key));
@@ -214,16 +209,19 @@ template<typename Key, typename T, size_t N>
                         //--------------------------
                     }// end while (head)
                 }// end for (auto& bucket)
-            }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)                        
+            }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)
             //--------------------------
-            // uint64_t hash_function(const Key& key) const {
-            //     constexpr uint32_t c_seed = 0x9747b28cU;
-            //     return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
-            // }// end uint64_t hash_function(const Key& key) const
-            // //--------------------------
-            // size_t hasher(const Key& key) const {
-            //     return static_cast<size_t>(hash_function(key)) % N;
-            // }// end size_t hasher(const Key& key) const
+            void safe_decrement_size(void) {
+                //--------------------------
+                size_t old_size = m_size.load(std::memory_order_acquire);
+                //--------------------------
+                do {
+                    if (old_size == 0) {
+                        return;
+                    }// end if (old_size == 0)
+                } while (old_size > 0 and !m_size.compare_exchange_weak(old_size, old_size - 1, std::memory_order_acq_rel));
+                //--------------------------
+            }// end void safe_decrement_size(void)
             //--------------------------
             size_t hasher(const Key& key) const {
                 return std::hash<Key>{}(key) % N;
