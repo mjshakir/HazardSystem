@@ -484,6 +484,69 @@ TEST_F(HashSetThreadTest, StressTestHighLoad) {
 // }
 
 
+TEST_F(HashSetThreadTest, RealWorldMixedOperations) {
+    // constexpr int num_threads = 12;
+    constexpr int ops_per_thread = 25000;
+    constexpr int value_space = 5000;
+
+    std::atomic<int> net_inserts{0}; // Track net insertions for optional assertion
+    std::atomic<bool> running{true};
+
+    // Each thread will randomly choose to insert, remove, contains, or query size
+    auto worker = [&](int thread_id) {
+        std::mt19937 rng(thread_id ^ static_cast<int>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::uniform_int_distribution<int> dist(0, value_space - 1);
+        std::uniform_int_distribution<int> op_dist(0, 99); // 0-29 insert, 30-69 contains, 70-89 remove, 90-99 size
+
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int val = dist(rng);
+            int op  = op_dist(rng);
+            if (op < 30) {
+                if (mt_set->insert(val)) {
+                    net_inserts.fetch_add(1, std::memory_order_relaxed);
+                }
+            } else if (op < 70) {
+                mt_set->contains(val); // Just test for presence
+            } else if (op < 90) {
+                if (mt_set->remove(val)) {
+                    net_inserts.fetch_sub(1, std::memory_order_relaxed);
+                }
+            } else {
+                [[maybe_unused]] auto sz = mt_set->size();
+            }
+        }
+    };
+
+    const size_t num_threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back(worker, t);
+    }
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    // Print out the results (optionally)
+    std::cout << "RealWorldMixedOperations finished. Final set size: "
+              << mt_set->size() << ", Net inserts: " << net_inserts.load() << std::endl;
+
+    EXPECT_GE(mt_set->size(), 0);
+    EXPECT_LE(mt_set->size(), value_space);
+
+    EXPECT_NEAR(mt_set->size(), net_inserts.load(), num_threads * 2);
+
+    size_t count_present = 0;
+    for (int v = 0; v < value_space; ++v) {
+        if (mt_set->contains(v)) {
+            ++count_present;
+        }
+    }
+    EXPECT_EQ(count_present, mt_set->size());
+}
+
 } // namespace testing
 } // namespace HazardSystem
 
