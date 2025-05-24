@@ -7,10 +7,6 @@
 #include <memory>
 #include <bit>
 //--------------------------------------------------------------
-// User Defined Headers
-//--------------------------------------------------------------
-// #include "Hasher.hpp"
-//--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
     template<typename Key>
@@ -90,9 +86,9 @@ namespace HazardSystem {
                 while (current) {
                     //--------------------------
                     auto data_ptr = current->data.load(std::memory_order_acquire).get();
-                    if (data_ptr && *data_ptr == key) {
+                    if (data_ptr and *data_ptr == key) {
                         return false;
-                    }// end if (data_ptr && *data_ptr == key)
+                    }// end if (data_ptr and *data_ptr == key)
                     //--------------------------
                     auto next_node = current->next.load(std::memory_order_acquire);
                     if (!next_node) {
@@ -105,9 +101,9 @@ namespace HazardSystem {
                                 current     = expected_next;
                                 // auto data   = current->data.load(std::memory_order_acquire).get();
                                 //--------------------------
-                                // if (data && *data == key) {
+                                // if (data and *data == key) {
                                 //     return false;
-                                // }// end if (data && *data == key)
+                                // }// end if (data and *data == key)
                                 //--------------------------
                                 continue;
                                 //--------------------------
@@ -207,15 +203,6 @@ namespace HazardSystem {
             // bool should_resize(void) const {
             //     return m_size.load() > (m_capacity * 0.75);
             // }
-            //--------------------------------------------------------------
-            // uint64_t hash_function(const Key& key) const {
-            //     constexpr uint32_t c_seed = 0x9747b28cU;
-            //     return Hasher::murmur_hash(static_cast<const void*>(&key), sizeof(Key), c_seed);
-            // }// end uint64_t hash_function(const Key& key) const
-            // //--------------------------------------------------------------
-            // size_t hasher(const Key& key) const {
-            //     return static_cast<size_t>(hash_function(key)) % m_capacity;
-            // }// end size_t hasher(const Key& key) const
             //--------------------------------------------------------------
             size_t hasher(const Key& key) const {
                 return std::hash<Key>{}(key) % m_capacity;
