@@ -167,6 +167,26 @@ namespace HazardSystem {
                 //--------------------------
             }//end bool insert_data(const Key& key, std::shared_ptr<T> data)
             //--------------------------------------------------------------
+            bool insert_node(size_t bucket_index, std::shared_ptr<Node> node) {
+                //--------------------------
+                std::shared_ptr<Node> head;
+                //--------------------------
+                do {
+                    //--------------------------
+                    head = m_table.at(bucket_index).load(std::memory_order_acquire);
+                    node->next.store(head, std::memory_order_release);
+                    //--------------------------
+                    if (head) {
+                        head->prev.store(node, std::memory_order_release);
+                    }// end if (head)
+                    //--------------------------
+                } while (!m_table.at(bucket_index).compare_exchange_weak(head, node,
+                                std::memory_order_acq_rel, std::memory_order_acquire));
+                //--------------------------
+                return true;
+                //--------------------------
+            }// end void insert_node(size_t bucket_index, std::shared_ptr<Node> node)
+            //--------------------------------------------------------------
             bool update_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
                 std::shared_ptr<Node> node;
@@ -185,7 +205,7 @@ namespace HazardSystem {
                 auto nodes      = find_all_nodes(key);
                 size_t updated  = 0UL;
                 //--------------------------
-                for (auto& [node, _] : nodes) {
+                for (auto& node : nodes) {
                     if (node) {
                         node->data.store(data, std::memory_order_release);
                         ++updated;
@@ -295,307 +315,374 @@ namespace HazardSystem {
                 //--------------------------
             }// end std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>> find_node(const Key& key) const
             //--------------------------------------------------------------
-            std::vector<std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>> find_all_nodes(const Key& key) const {
-                std::vector<std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>> results;
+            std::vector<std::shared_ptr<Node>> find_all_nodes(const Key& key) const {
+                //--------------------------
+                std::vector<std::shared_ptr<Node>> results;
                 results.reserve(N);
-                std::weak_ptr<Node> prev;
+                //--------------------------
                 std::shared_ptr<Node> current = m_table.at(hasher(key)).load(std::memory_order_acquire);
+                //--------------------------
                 while (current) {
+                    //--------------------------
                     if (current->key == key) {
-                        results.emplace_back(current, prev);
-                    }
-                    prev = current;
+                        results.push_back(current);
+                    }// end if (current->key == key) 
+                    //--------------------------
                     current = current->next.load(std::memory_order_acquire);
-                }
+                    //--------------------------
+                }// end while (current)
+                //--------------------------
                 return results;
-            }
-
+                //--------------------------
+            }// end std::vector<std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>> find_all_nodes(const Key& key) const
+            //--------------------------------------------------------------
             bool contain_data(const Key& key, std::shared_ptr<T> data) const {
+                //--------------------------
                 Node* current = m_table.at(hasher(key)).load(std::memory_order_acquire).get();
+                //--------------------------
                 while (current) {
+                    //--------------------------
                     if (current->key == key and current->data.load(std::memory_order_acquire) == data) {
                         return true;
-                    }
+                    }// end if (current->key == key and current->data.load(std::memory_order_acquire) == data)
+                    //--------------------------
                     current = current->next.load(std::memory_order_acquire).get();
-                }
+                    //--------------------------
+                }// while (current)
+                //--------------------------
                 return false;
-            }
-
+                //--------------------------
+            }// end bool contain_data(const Key& key, std::shared_ptr<T> data) const
+            //--------------------------------------------------------------
             bool remove_data(const Key& key, std::shared_ptr<T> data) {
-                const size_t index = hasher(key);
-                auto [current, prev_weak] = find_node(key, data);
-                if (!current) return false;
-
+                //--------------------------
+                const size_t index          = hasher(key);
+                auto [current, prev_weak]   = find_node(key, data);
+                //--------------------------
+                if (!current) {
+                    return false;
+                }// end if (!current)
+                //--------------------------
                 std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
                 std::shared_ptr<Node> prev = prev_weak.lock();
+                //--------------------------
                 if (prev) {
+                    //--------------------------
                     prev->next.store(next, std::memory_order_release);
-                    if (next) next->prev.store(prev, std::memory_order_release);
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
                 } else {
+                    //--------------------------
                     std::shared_ptr<Node> expected = current;
+                    //--------------------------
                     do {
-                        if (expected != current) return false;
-                    } while (!m_table.at(index).compare_exchange_weak(
-                        expected, next, std::memory_order_acq_rel, std::memory_order_acquire
-                    ));
-                    if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                }
+                        //--------------------------
+                        if (expected != current) {
+                            return false;
+                        }// end if (expected != current)
+                        //--------------------------
+                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
+                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                }// end if (prev)
+                //--------------------------
                 current->next.store(nullptr, std::memory_order_release);
                 current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                 current->data.store(nullptr, std::memory_order_release);
                 m_size.fetch_sub(1UL, std::memory_order_relaxed);
+                //--------------------------
                 return true;
-            }
-
+                //--------------------------
+            }// end bool remove_data(const Key& key, std::shared_ptr<T> data)
+            //--------------------------------------------------------------
             bool remove_data(std::shared_ptr<T> data) {
-                auto [node, prev_weak] = find_data_node(data);
-                if (!node) return false;
-
-                // Figure out bucket index (needed for CAS at head)
-                const size_t index = hasher(node->key);
-                std::shared_ptr<Node> next = node->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev = prev_weak.lock();
-
+                //--------------------------
+                auto [current, prev_weak] = find_data_node(data);
+                //--------------------------
+                if (!current) {
+                    return false;
+                }// end if (!node)
+                //--------------------------
+                const size_t index          = hasher(current->key);
+                std::shared_ptr<Node> next  = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> prev  = prev_weak.lock();
+                //--------------------------
                 if (prev) {
+                    //--------------------------
                     prev->next.store(next, std::memory_order_release);
-                    if (next) next->prev.store(prev, std::memory_order_release);
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
                 } else {
-                    std::shared_ptr<Node> expected = node;
-                    do {
-                        if (expected != node) return false;
-                    } while (!m_table.at(index).compare_exchange_weak(
-                        expected, next, std::memory_order_acq_rel, std::memory_order_acquire
-                    ));
-                    if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                }
-
-                node->next.store(nullptr, std::memory_order_release);
-                node->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                node->data.store(nullptr, std::memory_order_release);
-                m_size.fetch_sub(1UL, std::memory_order_relaxed);
-                return true;
-            }
-
-            bool remove_first_data(const Key& key) {
-                const size_t index = hasher(key);
-                auto [current, prev_weak] = find_node(key);
-                if (!current) return false;
-
-                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev = prev_weak.lock();
-                if (prev) {
-                    prev->next.store(next, std::memory_order_release);
-                    if (next) next->prev.store(prev, std::memory_order_release);
-                } else {
+                    //--------------------------
                     std::shared_ptr<Node> expected = current;
+                    //--------------------------
                     do {
-                        if (expected != current) return false;
-                    } while (!m_table.at(index).compare_exchange_weak(
-                        expected, next, std::memory_order_acq_rel, std::memory_order_acquire
-                    ));
-                    if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                }
+                        if (expected != current) {
+                            return false;
+                        }// end if (expected != current)
+                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
+                                    std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                }// end if (prev)
+                //--------------------------
                 current->next.store(nullptr, std::memory_order_release);
                 current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                 current->data.store(nullptr, std::memory_order_release);
                 m_size.fetch_sub(1UL, std::memory_order_relaxed);
+                //--------------------------
                 return true;
-            }
-
-            bool remove_last_data(const Key& key) {
-                const size_t index = hasher(key);
-                auto [last, last_prev_weak] = find_last_node(key);
-                if (!last) return false;
-
-                std::shared_ptr<Node> next = last->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> last_prev = last_prev_weak.lock();
-                if (last_prev) {
-                    last_prev->next.store(next, std::memory_order_release);
-                    if (next) next->prev.store(last_prev, std::memory_order_release);
+                //--------------------------
+            }// end bool remove_data(std::shared_ptr<T> data)
+            //--------------------------------------------------------------
+            bool remove_first_data(const Key& key) {
+                //--------------------------
+                const size_t index          = hasher(key);
+                auto [current, prev_weak]   = find_node(key);
+                //--------------------------
+                if (!current) {
+                    return false;
+                }// end if (!current)
+                //--------------------------
+                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> prev = prev_weak.lock();
+                //--------------------------
+                if (prev) {
+                    //--------------------------
+                    prev->next.store(next, std::memory_order_release);
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
                 } else {
-                    std::shared_ptr<Node> expected = last;
+                    //--------------------------
+                    std::shared_ptr<Node> expected = current;
+                    //--------------------------
                     do {
-                        if (expected != last) return false;
-                    } while (!m_table.at(index).compare_exchange_weak(
-                        expected, next, std::memory_order_acq_rel, std::memory_order_acquire
-                    ));
-                    if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                }
-                last->next.store(nullptr, std::memory_order_release);
-                last->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                last->data.store(nullptr, std::memory_order_release);
+                        if (expected != current) {
+                            return false;
+                        }// end if (expected != current)
+                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
+                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                }// end if (prev)
+                //--------------------------
+                current->next.store(nullptr, std::memory_order_release);
+                current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                current->data.store(nullptr, std::memory_order_release);
                 m_size.fetch_sub(1UL, std::memory_order_relaxed);
+                //--------------------------
                 return true;
-            }
-
-
+                //--------------------------
+            }// end bool remove_first_data(const Key& key)
+            //--------------------------------------------------------------
+            bool remove_last_data(const Key& key) {
+                //--------------------------
+                const size_t index          = hasher(key);
+                auto [current, prev_weak]   = find_last_node(key);
+                //--------------------------
+                if (!current) {
+                    return false;
+                }// end if (!current)
+                //--------------------------
+                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> prev = prev_weak.lock();
+                //--------------------------
+                if (prev) {
+                    //--------------------------
+                    prev->next.store(next, std::memory_order_release);
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                } else {
+                    //--------------------------
+                    std::shared_ptr<Node> expected = current;
+                    //--------------------------
+                    do {
+                        if (expected != current) {
+                            return false;
+                        }// end if (expected != current)
+                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
+                                        std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                }// end if (prev)
+                //--------------------------
+                current->next.store(nullptr, std::memory_order_release);
+                current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                current->data.store(nullptr, std::memory_order_release);
+                m_size.fetch_sub(1UL, std::memory_order_relaxed);
+                //--------------------------
+                return true;
+                //--------------------------
+            }// end bool remove_last_data(const Key& key)
+            //--------------------------------------------------------------
             bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
-                const size_t old_index = hasher(old_key);
-                const size_t new_index = hasher(new_key);
-
-                std::shared_ptr<Node> prev_node;
-                std::shared_ptr<Node> current_node = m_table.at(old_index).load(std::memory_order_acquire);
-                Node* prev = nullptr;
-                Node* current = current_node.get();
-
-                while (current) {
-                    if (current->key == old_key and current->data.load(std::memory_order_acquire) == data) {
-                        std::shared_ptr<Node> next_node = current->next.load(std::memory_order_acquire);
-                        Node* next = next_node.get();
-
-                        if (prev) {
-                            prev->next.compare_exchange_strong(current_node, next_node,
-                                std::memory_order_acq_rel, std::memory_order_acquire);
-                            if (next) next->prev.store(prev_node, std::memory_order_release);
-                        } else {
-                            std::shared_ptr<Node> expected = current_node;
-                            while (!m_table.at(old_index).compare_exchange_weak(
-                                    expected, next_node, std::memory_order_acq_rel, std::memory_order_acquire)) {
-                                current_node = m_table.at(old_index).load(std::memory_order_acquire);
-                                current = current_node.get();
-                                prev_node.reset();
-                                prev = nullptr;
-                                while (current and !(current->key == old_key and
-                                                    current->data.load(std::memory_order_acquire) == data)) {
-                                    prev_node = current_node;
-                                    prev = current;
-                                    current_node = current->next.load(std::memory_order_acquire);
-                                    current = current_node.get();
-                                }
-                                if (!current) return false;
-                                expected = current_node;
-                                next_node = current->next.load(std::memory_order_acquire);
-                                next = next_node.get();
-                            }
-                            if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                        }
-
-                        current->next.store(nullptr, std::memory_order_release);
-                        current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                        current->key = new_key;
-
-                        std::shared_ptr<Node> new_head = m_table[new_index].load(std::memory_order_acquire);
-                        do {
-                            current->next.store(new_head, std::memory_order_release);
-                            if (new_head) new_head->prev.store(current_node, std::memory_order_release);
-                        } while (!m_table[new_index].compare_exchange_weak(
-                            new_head, current_node, std::memory_order_acq_rel, std::memory_order_acquire
-                        ));
-
-                        return true;
-                    }
-                    prev_node = current_node;
-                    prev = current;
-                    current_node = current->next.load(std::memory_order_acquire);
-                    current = current_node.get();
-                }
-                return false;
-            }
-
+                //--------------------------
+                const size_t index_old = hasher(old_key);
+                const size_t index_new = hasher(new_key);
+                //--------------------------
+                auto [current, prev_weak] = find_node(old_key, data);
+                if (!current) {
+                    return false;
+                }// end if (!current)
+                //--------------------------
+                std::shared_ptr<Node> prev = prev_weak.lock();
+                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
+                //--------------------------
+                if (prev) {
+                    //--------------------------
+                    do {
+                        //--------------------------
+                    } while (!prev->next.compare_exchange_weak(current, next,
+                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(prev, std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                } else {
+                    //--------------------------
+                    std::shared_ptr<Node> expected = current;
+                    //--------------------------
+                    do {
+                        //--------------------------
+                        if (expected != current) {
+                            return false;
+                        }// end if (expected != current)
+                        //--------------------------
+                    } while (!m_table.at(index_old).compare_exchange_weak(expected, next,
+                                        std::memory_order_acq_rel, std::memory_order_acquire));
+                    //--------------------------
+                    if (next) {
+                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    }// end if (next)
+                    //--------------------------
+                }// end if (prev)
+                //--------------------------
+                current->next.store(nullptr, std::memory_order_release);
+                current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                current->key = new_key;
+                //--------------------------
+                return insert_node(index_new, current);
+                //--------------------------
+            }// end bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data)
+            //--------------------------------------------------------------
             bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
+                //--------------------------
                 std::shared_ptr<Node> current;
                 std::tie(current, std::ignore) = find_node(key, old_data);
+                //--------------------------
                 if (current) {
                     current->data.store(new_data, std::memory_order_release);
                     return true;
-                }
+                }// end if (current)
+                //--------------------------
                 return false;
-            }
-
-            // void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
-            //     for (auto& bucket : m_table) {
-            //         std::shared_ptr<Node> prev;
-            //         std::shared_ptr<Node> current = bucket.load(std::memory_order_acquire);
-
-            //         while (current) {
-            //             if (!is_hazard(current->data.load(std::memory_order_acquire))) {
-            //                 std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-            //                 if (prev) {
-            //                     prev->next.store(next, std::memory_order_release);
-            //                     if (next) next->prev.store(prev, std::memory_order_release);
-            //                 } else {
-            //                     std::shared_ptr<Node> expected = current;
-            //                     do {
-            //                         if (expected != current) {
-            //                             current = expected;
-            //                             break;
-            //                         }
-            //                     } while (!bucket.compare_exchange_weak(
-            //                         expected, next, std::memory_order_acq_rel, std::memory_order_acquire
-            //                     ));
-            //                     if (expected != current) continue;
-            //                     if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-            //                 }
-            //                 current->next.store(nullptr, std::memory_order_release);
-            //                 current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-            //                 current->data.store(nullptr, std::memory_order_release);
-            //                 m_size.fetch_sub(1UL, std::memory_order_relaxed);
-            //                 current = next;
-            //             } else {
-            //                 prev = current;
-            //                 current = current->next.load(std::memory_order_acquire);
-            //             }
-            //         }
-            //     }
-            // }
-
+                //--------------------------
+            }// end bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data)
+            //--------------------------------------------------------------
             void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
+                //--------------------------
                 for (auto& bucket : m_table) {
+                    //--------------------------
                     std::shared_ptr<Node> prev;
                     std::shared_ptr<Node> current = bucket.load(std::memory_order_acquire);
-
+                    //--------------------------
                     while (current) {
+                        //--------------------------
                         std::shared_ptr<T> _current_data = current->data.load(std::memory_order_acquire);
-
+                        //--------------------------
                         if (_current_data and !is_hazard(_current_data)) {
+                            //--------------------------
                             std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-
+                            //--------------------------
                             if (prev) {
-                                // Try to atomically unlink current from prev
+                                //--------------------------
                                 std::shared_ptr<Node> expected = current;
+                                //--------------------------
                                 do {
+                                    //--------------------------
                                     if (prev->next.load(std::memory_order_acquire) != current) {
                                         // Someone else removed it, skip to next
                                         break;
-                                    }
+                                    }// end if (prev->next.load(std::memory_order_acquire) != current)
+                                    //--------------------------
                                 } while (!prev->next.compare_exchange_weak(expected, next,
                                                             std::memory_order_acq_rel, std::memory_order_acquire));
-                                if (next) next->prev.store(prev, std::memory_order_release);
+                                //--------------------------
+                                if (next) {
+                                    next->prev.store(prev, std::memory_order_release);
+                                }// end if (next)
+                                //--------------------------
                             } else {
-                                // Remove from bucket head if possible
+                                //--------------------------
                                 std::shared_ptr<Node> expected = current;
+                                //--------------------------
                                 do {
-                                    if (expected != current) break; // Someone else changed head
+                                    if (expected != current) {
+                                        break;
+                                    }// end if (expected != current)
                                 } while (!bucket.compare_exchange_weak(expected, next,
                                                     std::memory_order_acq_rel, std::memory_order_acquire));
-                                if (next) next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                            }
-
-                            // Unlink the current node
+                                //--------------------------
+                                if (next) {
+                                    next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                                }// end if (next)
+                                //--------------------------
+                            }// end if (prev)
+                            //--------------------------
                             current->next.store(nullptr, std::memory_order_release);
                             current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                             current->data.store(nullptr, std::memory_order_release);
                             m_size.fetch_sub(1UL, std::memory_order_relaxed);
-
+                            //--------------------------
                             current = next;
+                            //--------------------------
                         } else {
-                            prev = current;
+                            //--------------------------
+                            prev    = current;
                             current = current->next.load(std::memory_order_acquire);
-                        }
-                    }
-                }
-            }
-
+                            //--------------------------
+                        }// end if (_current_data and !is_hazard(_current_data))
+                    }// end while (current)
+                }// end for (auto& bucket : m_table)
+            }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)
+            //--------------------------------------------------------------
             void clear_data(void) {
+                //--------------------------
                 for (auto& bucket : m_table) {
                     bucket.store(nullptr, std::memory_order_release);
-                }
+                }// end for (auto& bucket : m_table)
+                //--------------------------
                 m_size.store(0UL, std::memory_order_relaxed);
-            }
-
+                //--------------------------
+            }// end void clear_data(void)
+            //--------------------------------------------------------------
             size_t hasher(const Key& key) const {
                 return std::hash<Key>{}(key) % N;
-            }
+            }// end size_t hasher(const Key& key) const
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
