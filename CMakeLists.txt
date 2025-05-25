@@ -80,6 +80,7 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/ProtectedPointer.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/BitmaskTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
     
 )
