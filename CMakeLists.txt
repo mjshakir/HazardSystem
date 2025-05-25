@@ -75,11 +75,13 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/Hasher.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashMultiTable.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/ProtectedPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
+    
 )
 #------------------------------------------------------------------------------------------
 # Check if the library should be built as a shared library
