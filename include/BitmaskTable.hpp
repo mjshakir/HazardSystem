@@ -73,17 +73,57 @@ namespace HazardSystem {
                 return release_data(index);
             }// end bool release(const IndexType& index)
             //--------------------------
+            bool release(const std::optional<IndexType>& index) {
+                //--------------------------
+                if(!index.has_value()) {
+                    return false;
+                }// end if(!index.has_value())
+                //--------------------------
+                return release_data(index.value());
+                //--------------------------
+            }// end bool release(const std::optional<IndexType>& index)
+            //--------------------------
             bool set(const IndexType& index, std::shared_ptr<T> ptr) {
                 return set_data(index, std::move(ptr));
             }// end bool set(const IndexType& index, std::shared_ptr<T> ptr)
             //--------------------------
-            std::optional<std::shared_ptr<T>> at(const IndexType& index) const {
+            bool set(const std::optional<IndexType>& index, std::shared_ptr<T> ptr) {
+                //--------------------------
+                if(!index.has_value()) {
+                    return false;
+                }// end if(!index.has_value())
+                //--------------------------
+                return set_data(index.value(), std::move(ptr));
+                //--------------------------
+            }// end bool set(const std::optional<IndexType>& index, std::shared_ptr<T> ptr)
+            //--------------------------
+            std::shared_ptr<T> at(const IndexType& index) const {
                 return at_data(index);
             }// end std::optional<std::shared_ptr<T>> at_data(const IndexType& index) const
+            //--------------------------
+            std::shared_ptr<T> at(const std::optional<IndexType>& index) const {
+                //--------------------------
+                if(!index.has_value()) {
+                    return nullptr;
+                }// end if(!index.has_value())
+                //--------------------------
+                return at_data(index.value());
+                //--------------------------
+            }// end std::optional<std::shared_ptr<T>> at_data(const std::optional<IndexType>& index) const
             //--------------------------
             bool active(const IndexType& index) const {
                 return active_data(index);
             }// end bool active(const IndexType& index) const
+            //--------------------------
+            bool active(const std::optional<IndexType>& index) const {
+                //--------------------------
+                if(!index.has_value()) {
+                    return false;
+                }// end if(!index.has_value())
+                //--------------------------
+                return active_data(index.value());
+                //--------------------------
+            }// end bool active(const std::optional<IndexType>& index) const
             //--------------------------
             template<typename Func>
             void for_each(Func&& fn) const {
@@ -97,7 +137,7 @@ namespace HazardSystem {
             //--------------------------
             void clear(void) {
                 clear_data();
-            }
+            }// end void clear(void)
             //--------------------------
             IndexType size(void) const {
                 return size_data();
@@ -198,37 +238,52 @@ namespace HazardSystem {
                 }// end if constexpr (N <= 64)
             }// end bool release_data(const IndexType& index)
             //--------------------------
-            bool set_data(const IndexType& index, std::shared_ptr<T> ptr) {
+            template<uint16_t M = N>
+            std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr) {
                 //--------------------------
                 if (index >= static_cast<IndexType>(N)) {
                     return false;
                 }// end if (index >= static_cast<IndexType>(N))
                 //--------------------------
-                const bool was_null = !m_slots.at(index).load(std::memory_order_acquire);
                 m_slots.at(index).store(ptr, std::memory_order_release);
                 //--------------------------
-                if (ptr and was_null) {
-                    if constexpr (N <= 64) {
-                        m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
-                    } else {
-                        uint16_t part = part_index(index);
-                        uint16_t bit  = bit_index(index);
-                        m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);
-                    }// end if constexpr (N <= 64)
-                }// end if (ptr and was_null)
+                if (ptr) {
+                    m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
+                } else {
+                    m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
+                }// end  if (ptr)
+                return true;
+            }// end std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr)
+            //--------------------------
+            template<uint16_t M = N>
+            std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr) {
+                //--------------------------
+                if (index >= static_cast<IndexType>(N)) {
+                    return false;
+                }// end if (index >= static_cast<IndexType>(N))
+                //--------------------------
+                m_slots.at(index).store(ptr, std::memory_order_release);
+                //--------------------------
+                uint16_t part = part_index(index);
+                uint16_t bit  = bit_index(index);
+                //--------------------------
+                if (ptr) {
+                    m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);         
+                } else {
+                    m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                }// end if (ptr)
                 //--------------------------
                 return true;
                 //--------------------------
-            }// end bool set_data(const IndexType& index, std::shared_ptr<T> ptr)
+            }// end std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr)
             //--------------------------
-            std::optional<std::shared_ptr<T>> at_data(const IndexType& index) const {
+            std::shared_ptr<T> at_data(const IndexType& index) const {
                 //--------------------------
                 if (index >= static_cast<IndexType>(N)) {
-                    return std::nullopt;
+                    return nullptr;
                 }// end if (index >= static_cast<IndexType>(N))
                 //--------------------------
-                auto ptr = m_slots.at(index).load(std::memory_order_acquire);
-                return (ptr) ? std::optional<std::shared_ptr<T>>(ptr) : std::nullopt;
+                return m_slots.at(index).load(std::memory_order_acquire);
                 //--------------------------
             }// end std::optional<std::shared_ptr<T>> at_data(const IndexType& index) const
             //--------------------------
@@ -251,6 +306,7 @@ namespace HazardSystem {
                 }// end if constexpr (N <= 64)
                 //--------------------------
                 return (mask & (1ULL << index)) != 0;
+                //--------------------------
             }// end bool active_data(const IndexType& index) const
             //--------------------------
             uint16_t active_count_data(void) const {
