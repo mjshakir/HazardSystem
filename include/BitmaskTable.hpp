@@ -83,19 +83,19 @@ namespace HazardSystem {
                 //--------------------------
             }// end bool release(const std::optional<IndexType>& index)
             //--------------------------
-            bool set(const IndexType& index, std::shared_ptr<T> ptr) {
-                return set_data(index, std::move(ptr));
-            }// end bool set(const IndexType& index, std::shared_ptr<T> ptr)
+            bool set(const IndexType& index, std::shared_ptr<T> sp_data) {
+                return set_data(index, std::move(sp_data));
+            }// end bool set(const IndexType& index, std::shared_ptr<T> sp_data)
             //--------------------------
-            bool set(const std::optional<IndexType>& index, std::shared_ptr<T> ptr) {
+            bool set(const std::optional<IndexType>& index, std::shared_ptr<T> sp_data) {
                 //--------------------------
                 if(!index.has_value()) {
                     return false;
                 }// end if(!index.has_value())
                 //--------------------------
-                return set_data(index.value(), std::move(ptr));
+                return set_data(index.value(), std::move(sp_data));
                 //--------------------------
-            }// end bool set(const std::optional<IndexType>& index, std::shared_ptr<T> ptr)
+            }// end bool set(const std::optional<IndexType>& index, std::shared_ptr<T> sp_data)
             //--------------------------
             std::shared_ptr<T> at(const IndexType& index) const {
                 return at_data(index);
@@ -239,43 +239,43 @@ namespace HazardSystem {
             }// end bool release_data(const IndexType& index)
             //--------------------------
             template<uint16_t M = N>
-            std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr) {
+            std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data) {
                 //--------------------------
                 if (index >= static_cast<IndexType>(N)) {
                     return false;
                 }// end if (index >= static_cast<IndexType>(N))
                 //--------------------------
-                m_slots.at(index).store(ptr, std::memory_order_release);
+                m_slots.at(index).store(sp_data, std::memory_order_release);
                 //--------------------------
-                if (ptr) {
+                if (sp_data) {
                     m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
                 } else {
                     m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
-                }// end  if (ptr)
+                }// end  if (sp_data)
                 return true;
-            }// end std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr)
+            }// end std::enable_if_t<(M <= 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data)
             //--------------------------
             template<uint16_t M = N>
-            std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr) {
+            std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data) {
                 //--------------------------
                 if (index >= static_cast<IndexType>(N)) {
                     return false;
                 }// end if (index >= static_cast<IndexType>(N))
                 //--------------------------
-                m_slots.at(index).store(ptr, std::memory_order_release);
+                m_slots.at(index).store(sp_data, std::memory_order_release);
                 //--------------------------
                 uint16_t part = part_index(index);
                 uint16_t bit  = bit_index(index);
                 //--------------------------
-                if (ptr) {
+                if (sp_data) {
                     m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);         
                 } else {
                     m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
-                }// end if (ptr)
+                }// end if (sp_data)
                 //--------------------------
                 return true;
                 //--------------------------
-            }// end std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> ptr)
+            }// end std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data)
             //--------------------------
             std::shared_ptr<T> at_data(const IndexType& index) const {
                 //--------------------------
@@ -336,8 +336,8 @@ namespace HazardSystem {
                     for (IndexType index = 0; index < N; ++index) {
                         //--------------------------
                         if (mask & (1ULL << index)) {
-                            auto ptr = m_slots[index].load(std::memory_order_acquire);
-                            if (ptr) fn(index, ptr);
+                            auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                            if (sp_data) fn(index, sp_data);
                         }// end if (mask & (1ULL << index))
                         //--------------------------
                     }// end for (IndexType index = 0; index < N; ++index)
@@ -357,8 +357,8 @@ namespace HazardSystem {
                             }// end if (index >= static_cast<IndexType>(N))
                             //--------------------------
                             if (mask & (1ULL << bit)) {
-                                auto ptr = m_slots[index].load(std::memory_order_acquire);
-                                if (ptr) fn(index, ptr);
+                                auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                                if (sp_data) fn(index, sp_data);
                             }// end if (mask & (1ULL << bit))
                             //--------------------------
                         }// end for (uint8_t bit = 0; bit < bits_per_mask; ++bit)
@@ -378,8 +378,8 @@ namespace HazardSystem {
                         uint8_t idx = static_cast<uint8_t>(std::countr_zero(mask));
                         //--------------------------
                         if (idx < static_cast<IndexType>(N)) {
-                            auto ptr = m_slots[idx].load(std::memory_order_acquire);
-                            if (ptr) fn(idx, ptr);
+                            auto sp_data = m_slots[idx].load(std::memory_order_acquire);
+                            if (sp_data) fn(idx, sp_data);
                         }// end if (idx < static_cast<IndexType>(N))
                         //--------------------------
                         mask &= mask - 1; // Clear the lowest set bit
@@ -400,11 +400,11 @@ namespace HazardSystem {
                             //--------------------------
                             if (idx < static_cast<IndexType>(N)) {
                                 //--------------------------
-                                auto ptr = m_slots[idx].load(std::memory_order_acquire);
+                                auto sp_data = m_slots[idx].load(std::memory_order_acquire);
                                 //--------------------------
-                                if (ptr) {
-                                    fn(idx, ptr);
-                                }// end if (ptr)
+                                if (sp_data) {
+                                    fn(idx, sp_data);
+                                }// end if (sp_data)
                                 //--------------------------
                             }// end if (idx < static_cast<IndexType>(N))
                             //--------------------------
@@ -483,3 +483,4 @@ namespace HazardSystem {
     };// end class BitmaskTable
     //--------------------------------------------------------------
 } // namespace HazardSystem
+//--------------------------------------------------------------
