@@ -18,16 +18,16 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             ProtectedPointer(void) = default;
             //--------------------------
-            ProtectedPointer(   std::shared_ptr<HazardPointer<T>> hazard_ptr,
-                                std::shared_ptr<T> protected_ptr,
-                                std::function<bool(std::shared_ptr<HazardPointer<T>>)> release) :  m_hazard_ptr(std::move(hazard_ptr)),
-                                                                                                    m_protected_ptr(std::move(protected_ptr)),
+            ProtectedPointer(   std::shared_ptr<HazardPointer<T>> hazard_pointer,
+                                std::shared_ptr<T> protected_pointer,
+                                std::function<bool(std::shared_ptr<HazardPointer<T>>)> release) :  m_hazard_pointer(std::move(hazard_pointer)),
+                                                                                                    m_protected_pointer(std::move(protected_pointer)),
                                                                                                     m_release(std::move(release)) {
                 //--------------------------
             }// end ProtectedPointer
             //--------------------------
-            ProtectedPointer(ProtectedPointer&& other) noexcept :   m_hazard_ptr(std::move(other.m_hazard_ptr)),
-                                                                    m_protected_ptr(std::move(other.m_protected_ptr)),
+            ProtectedPointer(ProtectedPointer&& other) noexcept :   m_hazard_pointer(std::move(other.m_hazard_pointer)),
+                                                                    m_protected_pointer(std::move(other.m_protected_pointer)),
                                                                     m_release(std::move(other.m_release)) {
                 //--------------------------
             }// end ProtectedPointer(ProtectedPointer&& other) noexcep
@@ -40,8 +40,8 @@ namespace HazardSystem {
                 //--------------------------
                 release_data();
                 //--------------------------
-                m_hazard_ptr    = std::move(other.m_hazard_ptr);
-                m_protected_ptr = std::move(other.m_protected_ptr);
+                m_hazard_pointer    = std::move(other.m_hazard_pointer);
+                m_protected_pointer = std::move(other.m_protected_pointer);
                 m_release       = std::move(other.m_release);
                 //--------------------------
                 return *this;
@@ -56,23 +56,23 @@ namespace HazardSystem {
             }// end ~ProtectedPointer(void)
             //--------------------------
             T* operator->(void) const noexcept {
-                return m_protected_ptr.get();
+                return m_protected_pointer.get();
             }// end T* operator->(void) const noexcept
             //--------------------------
             T& operator*(void) const noexcept {
-                return *m_protected_ptr;
+                return *m_protected_pointer;
             }// end T& operator*(void) const noexcept
             //--------------------------
             T* get(void) const noexcept {
-                return m_protected_ptr.get();
+                return m_protected_pointer.get();
             }// end T* get(void) const noexcept
             //--------------------------
             explicit operator bool(void) const noexcept {
-                return m_protected_ptr != nullptr;
+                return m_protected_pointer != nullptr;
             }// end explicit operator bool(void) const noexcept
             //--------------------------
             std::shared_ptr<T> shared_ptr(void) const {
-                return m_protected_ptr;
+                return m_protected_pointer;
             }// end std::shared_ptr<T> shared_ptr(void) const
             //--------------------------
             void reset(void) {
@@ -83,19 +83,19 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             void release_data(void) {
                 //--------------------------
-                if (m_hazard_ptr and m_release) {
-                    m_release(m_hazard_ptr);
-                }// end if (m_hazard_ptr and m_release)
+                if (m_hazard_pointer and m_release) {
+                    m_release(m_hazard_pointer);
+                }// end if (m_hazard_pointer and m_release)
                 //--------------------------
-                m_hazard_ptr.reset();
-                m_protected_ptr.reset();
+                m_hazard_pointer.reset();
+                m_protected_pointer.reset();
                 //--------------------------
             }// end void release_data(void)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            std::shared_ptr<HazardPointer<T>> m_hazard_ptr;
-            std::shared_ptr<T> m_protected_ptr;
+            std::shared_ptr<HazardPointer<T>> m_hazard_pointer;
+            std::shared_ptr<T> m_protected_pointer;
             std::function<bool(std::shared_ptr<HazardPointer<T>>)> m_release;
         //--------------------------------------------------------------
     };// end class ProtectedPointer

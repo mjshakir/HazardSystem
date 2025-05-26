@@ -189,7 +189,7 @@ int main() {
 
     // Print statistics
     SYNC_COUT("=== Final Statistics ===\n");
-    SYNC_COUT("Active hazard pointers: " << manager.hazards_pointer_size() << "\n");
+    SYNC_COUT("Active hazard pointers: " << manager.hazard_size() << "\n");
     SYNC_COUT("Retired nodes: " << manager.retire_size() << "\n");
 
     // Final reclamation
@@ -207,7 +207,7 @@ int main() {
     
     // Final statistics after cleanup
     SYNC_COUT("=== After Cleanup Statistics ===\n");
-    SYNC_COUT("Active hazard pointers: " << manager.hazards_pointer_size() << "\n");
+    SYNC_COUT("Active hazard pointers: " << manager.hazard_size() << "\n");
     SYNC_COUT("Retired nodes: " << manager.retire_size() << "\n");
     
     return 0;
