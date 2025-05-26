@@ -239,14 +239,17 @@ class HazardPointerManager {
             bool found = false;
             //--------------------------
             m_hazard_pointers.for_each_fast([&found, &node](IndexType, const std::shared_ptr<HazardPointer<T>>& hp) {
+                //--------------------------
                 if (!hp) {
                     found = false;
                     return;
                 }// end if (!hp)
+                //--------------------------
                 auto hp_ptr = hp->pointer.load();
                 if (hp_ptr and hp_ptr.get() == node.get()){
                     found = true;
                 }// end if (hp_ptr and hp_ptr.get() == node.get())
+                //--------------------------
             });
             //--------------------------
             return found;
