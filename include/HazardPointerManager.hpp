@@ -4,11 +4,12 @@
 //--------------------------------------------------------------
 #include <cstddef>
 #include <cstdbool>
-#include <array>
+#include <cassert>
+#include <vector>
 #include <functional>
 #include <atomic>
 #include <memory>
-#include <cassert>
+#include <algorithm>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -23,12 +24,10 @@
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
-template<typename T, size_t HAZARD_POINTERS = 12UL, size_t PER_THREAD = 2UL>
+template<typename T, size_t HAZARD_POINTERS = 12UL>
 class HazardPointerManager {
     //--------------------------------------------------------------
     static_assert(HAZARD_POINTERS > 0, "HAZARD_POINTERS must be greater than 0");
-    static_assert(PER_THREAD > 0, "PER_THREAD must be greater than 0");
-    static_assert(HAZARD_POINTERS >= PER_THREAD, "HAZARD_POINTERS must be >= PER_THREAD");
     //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
@@ -40,8 +39,8 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     public:
         //--------------------------------------------------------------
-        static HazardPointerManager& instance(void) {
-            static HazardPointerManager instance;
+        static HazardPointerManager& instance(const size_t& retired_size = 2UL) {
+            static HazardPointerManager instance(retired_size);
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
@@ -93,7 +92,8 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
-        HazardPointerManager(void) : m_retired_nodes(PER_THREAD * 8) {
+        HazardPointerManager(const size_t& retired_size) :  m_retired_size(retired_limiter(retired_size)),
+                                                            m_retired_nodes(retired_size * 8) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -216,23 +216,6 @@ class HazardPointerManager {
             //--------------------------
         } // end bool release_data(const HazardHandle<IndexType, HazardPointer<T>>& hp)
         //--------------------------
-        // bool retire_node(std::shared_ptr<T> node) {
-        //     //--------------------------
-        //     if (!node) {
-        //         return false;
-        //     }// end if (!node)
-        //     //--------------------------
-        //     T* raw_ptr = node.get();
-        //     m_retired_nodes.insert(raw_ptr, std::move(node));
-        //     //--------------------------
-        //     if (m_retired_nodes.size() >= PER_THREAD) {
-        //         reclaim();
-        //     }// end if (m_retired_nodes.size() >= PER_THREAD)
-        //     //--------------------------
-        //     return true;
-        //     //--------------------------
-        // } // end bool retire_node(std::shared_ptr<T> node)
-        //--------------------------
         bool retire_node(std::shared_ptr<T> node) {
             //--------------------------
             if (!node) {
@@ -242,9 +225,9 @@ class HazardPointerManager {
             // T* raw_ptr = node.get();
             m_retired_nodes.insert(node);
             //--------------------------
-            if (m_retired_nodes.size() >= PER_THREAD) {
+            if (m_retired_nodes.size() >= m_retired_size) {
                 scan_and_reclaim();
-            }// end if (m_retired_nodes.size() >= PER_THREAD)
+            }// end if (m_retired_nodes.size() >= m_retired_size)
             //--------------------------
             return true;
             //--------------------------
@@ -276,14 +259,7 @@ class HazardPointerManager {
         } // end bool is_hazard(std::shared_ptr<T> node)
         //--------------------------
         void scan_and_reclaim(void) {
-            //--------------------------
             m_retired_nodes.reclaim(std::bind(&HazardPointerManager::is_hazard, this, std::placeholders::_1));
-            //--------------------------
-            // m_retired_nodes.reclaim(
-            //     [this](const std::shared_ptr<T>& ptr) {
-            //         return is_hazard(ptr);
-            //     }
-            // );
         } // end void scan_and_reclaim(void)
         //--------------------------
         void scan_and_reclaim_all(void) {
@@ -294,9 +270,15 @@ class HazardPointerManager {
             m_hazard_pointers.clear();
             m_retired_nodes.clear();
         } // end void clear_data(void)
+        //--------------------------
+        constexpr size_t retired_limiter(size_t size) const {
+            constexpr size_t c_limiter = 2UL;
+            return std::max(c_limiter, size);
+        }
         //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
+        const size_t m_retired_size;
         HashSet<std::shared_ptr<T>> m_retired_nodes;  // Hash table for retired nodes
         //--------------------------------------------------------------
     }; // end class HazardPointerManager

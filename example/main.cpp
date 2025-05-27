@@ -27,7 +27,7 @@ struct TestNode {
 std::atomic<std::shared_ptr<TestNode>> shared_node{nullptr};
 
 // A function to periodically update the shared node - MUCH SIMPLER NOW!
-void update_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager) {
+void update_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager) {
     for (int i = 0; i < 10; ++i) {
         // Create a new node
         auto new_node = std::make_shared<TestNode>(i);
@@ -55,7 +55,7 @@ void update_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POIN
 }
 
 // A function to read from the shared node - DRAMATICALLY SIMPLIFIED!
-void read_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager, int thread_id) {
+void read_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager, int thread_id) {
     for (int i = 0; i < 15; ++i) {
         // ONE LINE! Automatic protection and cleanup
         auto protected_node = manager.protect(shared_node);
@@ -75,7 +75,7 @@ void read_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTE
 }
 
 // Alternative implementation showing retry logic for high contention
-void read_shared_node_with_retries(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager, int thread_id) {
+void read_shared_node_with_retries(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager, int thread_id) {
     for (int i = 0; i < 15; ++i) {
         // Use the retry version for high-contention scenarios
         auto protected_node = manager.try_protect(shared_node, 50); // Max 50 retries
@@ -95,7 +95,7 @@ void read_shared_node_with_retries(HazardSystem::HazardPointerManager<TestNode, 
 }
 
 // Example showing different usage patterns
-void demonstrate_usage_patterns(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>& manager) {
+void demonstrate_usage_patterns(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager) {
     SYNC_COUT("=== Demonstrating different usage patterns ===\n");
     
     // Pattern 1: Direct pointer-like usage
@@ -157,7 +157,7 @@ void demonstrate_usage_patterns(HazardSystem::HazardPointerManager<TestNode, HAZ
 
 int main() {
     // Create a shared instance of HazardPointerManager
-    auto& manager = HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS, PER_THREAD>::instance();
+    auto& manager = HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>::instance(PER_THREAD);
 
     SYNC_COUT("Starting hazard pointer test with ProtectedPointer.\n");
     
