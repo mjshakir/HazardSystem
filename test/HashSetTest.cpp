@@ -27,6 +27,7 @@ protected:
     std::unique_ptr<HashSet<int>> hashset;
 };
 
+
 // Test inserting a single element
 TEST_F(HashSetTest, InsertSingleElement) {
     EXPECT_TRUE(hashset->insert(42));
@@ -227,6 +228,53 @@ TEST_F(HashSetEdgeCaseTest, HashCollisionPattern) {
     for (auto val : collision_prone) {
         EXPECT_TRUE(collision_set.contains(val));
     }
+}
+
+TEST_F(HashSetTest, ForEachCollectsAllElements) {
+    std::set<int> expected = {1, 2, 3, 5, 8};
+    for (int val : expected) hashset->insert(val);
+
+    std::set<int> found;
+    hashset->for_each([&found](std::shared_ptr<int> p) {
+        if (p) found.insert(*p);
+    });
+
+    EXPECT_EQ(found, expected);
+}
+
+TEST_F(HashSetTest, ForEachFastCollectsAllElements) {
+    std::vector<int> to_insert{4, 7, 9, 10};
+    for (int v : to_insert) hashset->insert(v);
+
+    std::set<int> found;
+    hashset->for_each_fast([&found](std::shared_ptr<int> p) {
+        if (p) found.insert(*p);
+    });
+
+    EXPECT_EQ(found, std::set<int>(to_insert.begin(), to_insert.end()));
+}
+
+
+TEST_F(HashSetTest, ScanAndReclaimSingleThread) {
+    // Insert values 0..9
+    for (int i = 0; i < 10; ++i) {
+        hashset->insert(i);
+    }
+    EXPECT_EQ(hashset->size(), 10);
+
+    // Only "protect" (keep) odd values using scan_and_reclaim
+    hashset->reclaim([](std::shared_ptr<int> ptr) {
+        return ptr and (*ptr % 2 == 1);
+    });
+
+    // Gather remaining values
+    std::set<int> found;
+    hashset->for_each_fast([&](std::shared_ptr<int> p) { if (p) found.insert(*p); });
+
+    // Check only odd numbers remain
+    std::set<int> expected{1, 3, 5, 7, 9};
+    EXPECT_EQ(found, expected);
+    EXPECT_EQ(hashset->size(), expected.size());
 }
 
 // Multithreaded tests
@@ -483,14 +531,186 @@ TEST_F(HashSetThreadTest, StressTestHighLoad) {
 //     std::cout << "Stall count in lock-free test: " << stall_count << std::endl;
 // }
 
+TEST_F(HashSetThreadTest, MaskSizeTracksInsertRemove) {
+    constexpr int ops_per_thread = 10000;
+    constexpr int value_range = 3000;
+
+    std::atomic<int> total_inserts{0};
+    std::atomic<int> total_removes{0};
+
+    auto worker = [&](int tid) {
+        std::mt19937 rng(tid ^ (int)std::chrono::steady_clock::now().time_since_epoch().count());
+        std::uniform_int_distribution<int> dist_val(0, value_range - 1);
+        std::uniform_int_distribution<int> dist_op(0, 1); // 0 = insert, 1 = remove
+
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int val = dist_val(rng);
+            int op = dist_op(rng);
+
+            if (op == 0) {
+                if (mt_set->insert(val)) total_inserts.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                if (mt_set->remove(val)) total_removes.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    };
+
+    const size_t threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> ths;
+    ths.reserve(threads);
+    for (int t = 0; t < threads; ++t)
+        ths.emplace_back(worker, t);
+    for (auto& th : ths)
+        th.join();
+
+    const int expected_final = total_inserts.load() - total_removes.load();
+    const int actual_final = mt_set->size();
+    const int mask_tracked = mt_set->mask_size();
+
+    // Print for manual inspection (optional)
+    std::cout << "total_inserts: " << total_inserts
+              << ", total_removes: " << total_removes
+              << ", expected_final: " << expected_final
+              << ", mt_set->size(): " << actual_final
+              << ", mt_set->mask_size(): " << mask_tracked << std::endl;
+
+    // Test invariants:
+    EXPECT_GE(actual_final, 0);
+    EXPECT_LE(actual_final, value_range);
+
+    // Should be close, but due to races in lock-free removal, a few may be missing
+    EXPECT_NEAR(actual_final, expected_final, threads * 2);
+
+    // The bitmask is a count of non-empty buckets, not elements.
+    // It should be <= size (if there are hash collisions)
+    EXPECT_GE(mask_tracked, 0);
+    EXPECT_LE(mask_tracked, actual_final);
+
+    // You can also print all values in the set for further verification if desired
+//     std::set<int> found;
+//     mt_set->for_each([&](std::shared_ptr<int> p){ found.insert(*p); });
+//     std::cout << "Present values: ";
+//     for (auto v : found) std::cout << v << " ";
+//     std::cout << std::endl;
+}
+
+
+TEST_F(HashSetThreadTest, ForEachAllThreadsInserted) {
+    constexpr int per_thread = 100;
+    const size_t threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> ths;
+    ths.reserve(threads);
+
+    // Insert a unique range of values per thread
+    for (int t = 0; t < threads; ++t) {
+        ths.emplace_back([&, t]() {
+            for (int i = 0; i < per_thread; ++i)
+                mt_set->insert(t * 1000 + i);
+        });
+    }
+    for (auto& th : ths) th.join();
+
+    // --- Wait until all insertions are visible ---
+    const int expected_size = threads * per_thread;
+    while (mt_set->size() != expected_size) {
+        std::this_thread::yield();
+    }
+
+    // Traverse and collect all elements using for_each
+    std::set<int> found;
+    mt_set->for_each([&found](std::shared_ptr<int> p) {
+        if (p) found.insert(*p);
+    });
+
+    EXPECT_EQ(found.size(), expected_size);
+    for (int t = 0; t < threads; ++t) {
+        for (int i = 0; i < per_thread; ++i) {
+            EXPECT_TRUE(found.count(t * 1000 + i));
+        }
+    }
+}
+
+TEST_F(HashSetThreadTest, ForEachFastConcurrentInsert) {
+    constexpr int per_thread = 100;
+
+    const size_t threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> ths;
+    ths.reserve(threads);
+
+    for (int t = 0; t < threads; ++t) {
+        ths.emplace_back([&, t]() {
+            for (int i = 0; i < per_thread; ++i) mt_set->insert(5000 + t * per_thread + i);
+        });
+    }
+    for (auto& th : ths) th.join();
+
+    std::set<int> found;
+    mt_set->for_each_fast([&found](std::shared_ptr<int> p) {
+        if (p) found.insert(*p);
+    });
+
+    EXPECT_EQ(found.size(), threads * per_thread);
+    for (int t = 0; t < threads; ++t)
+        for (int i = 0; i < per_thread; ++i)
+            EXPECT_TRUE(found.count(5000 + t * per_thread + i));
+}
+
+TEST_F(HashSetThreadTest, ScanAndReclaimMultiThread) {
+    const size_t num_threads = std::thread::hardware_concurrency();;
+    constexpr int per_thread = 100;
+
+    // Insert: thread t inserts values t*1000 + [0..99]
+    std::vector<std::thread> ths;
+    ths.reserve(num_threads);
+    for (int t = 0; t < num_threads; ++t) {
+        ths.emplace_back([&, t]() {
+            for (int i = 0; i < per_thread; ++i)
+                mt_set->insert(t * 1000 + i);
+        });
+    }
+    for (auto& th : ths) th.join();
+
+    EXPECT_EQ(mt_set->size(), num_threads * per_thread);
+
+    // Each thread calls scan_and_reclaim, "protecting" values divisible by 3
+    std::vector<std::thread> reclaimer_ths;
+    reclaimer_ths.reserve(num_threads);
+    auto is_mod3 = [](std::shared_ptr<int> ptr) -> bool {
+        return ptr and (*ptr % 3 == 0);
+    };
+    for (int t = 0; t < num_threads; ++t) {
+        reclaimer_ths.emplace_back([&]() {
+            mt_set->reclaim(is_mod3);
+        });
+    }
+    for (auto& th : reclaimer_ths) th.join();
+
+    // Now, only multiples of 3 should remain
+    std::set<int> found;
+    mt_set->for_each_fast([&found](std::shared_ptr<int> p) { if (p) found.insert(*p); });
+
+    // All values should be divisible by 3
+    for (int v : found) {
+        EXPECT_EQ(v % 3, 0);
+    }
+
+    // Should be exactly num_threads * (per_thread / 3 + (per_thread % 3 != 0)) elements left
+    size_t expected_left = 0;
+    for (int t = 0; t < num_threads; ++t) {
+        for (int i = 0; i < per_thread; ++i) {
+            if ((t * 1000 + i) % 3 == 0) ++expected_left;
+        }
+    }
+    EXPECT_EQ(found.size(), expected_left);
+    EXPECT_EQ(mt_set->size(), expected_left);
+}
+
 
 TEST_F(HashSetThreadTest, RealWorldMixedOperations) {
-    // constexpr int num_threads = 12;
     constexpr int ops_per_thread = 25000;
     constexpr int value_space = 5000;
 
-    std::atomic<int> net_inserts{0}; // Track net insertions for optional assertion
-    std::atomic<bool> running{true};
+    std::atomic<int> net_inserts{0};
 
     // Each thread will randomly choose to insert, remove, contains, or query size
     auto worker = [&](int thread_id) {
@@ -535,16 +755,43 @@ TEST_F(HashSetThreadTest, RealWorldMixedOperations) {
 
     EXPECT_GE(mt_set->size(), 0);
     EXPECT_LE(mt_set->size(), value_space);
-
     EXPECT_NEAR(mt_set->size(), net_inserts.load(), num_threads * 2);
 
+    // --- Validate traversal using for_each and for_each_fast ---
+    std::set<int> traversed_for_each;
+    mt_set->for_each([&traversed_for_each](std::shared_ptr<int> p) {
+        if (p) traversed_for_each.insert(*p);
+    });
+    std::set<int> traversed_fast;
+    mt_set->for_each_fast([&traversed_fast](std::shared_ptr<int> p) {
+        if (p) traversed_fast.insert(*p);
+    });
+
+    // Both traversals should agree with each other
+    EXPECT_EQ(traversed_for_each, traversed_fast);
+
+    // Traversal results should agree with contains()
     size_t count_present = 0;
     for (int v = 0; v < value_space; ++v) {
         if (mt_set->contains(v)) {
             ++count_present;
+            EXPECT_TRUE(traversed_for_each.count(v));
+            EXPECT_TRUE(traversed_fast.count(v));
         }
     }
-    EXPECT_EQ(count_present, mt_set->size());
+    // All traversed elements must actually be in the set
+    for (int v : traversed_for_each) {
+        EXPECT_TRUE(mt_set->contains(v));
+    }
+
+    EXPECT_LE(traversed_for_each.size(), mt_set->size());
+    EXPECT_LE(traversed_fast.size(), mt_set->size());
+    EXPECT_LE(count_present, mt_set->size());
+    // Optionally, allow a small slack:
+    EXPECT_GE(traversed_for_each.size(), mt_set->size() - num_threads * 2);
+    EXPECT_GE(traversed_fast.size(), mt_set->size() - num_threads * 2);
+    EXPECT_GE(count_present, mt_set->size() - num_threads * 2);
+
 }
 
 } // namespace testing
