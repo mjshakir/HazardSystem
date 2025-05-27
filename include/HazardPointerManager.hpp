@@ -29,10 +29,6 @@ class HazardPointerManager {
     //--------------------------------------------------------------
     static_assert(HAZARD_POINTERS > 0, "HAZARD_POINTERS must be greater than 0");
     //--------------------------------------------------------------
-    private:
-        //--------------------------------------------------------------
-        BitmaskTable<HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;
-        //--------------------------------------------------------------
     public:
         //--------------------------------------------------------------
         using IndexType = typename BitmaskTable<HazardPointer<T>, HAZARD_POINTERS>::IndexType;
@@ -279,7 +275,8 @@ class HazardPointerManager {
     private:
         //--------------------------------------------------------------
         const size_t m_retired_size;
-        HashSet<std::shared_ptr<T>> m_retired_nodes;  // Hash table for retired nodes
+        HashSet<std::shared_ptr<T>> m_retired_nodes;
+        BitmaskTable<HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
