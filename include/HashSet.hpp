@@ -12,42 +12,6 @@
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
-    // Helper trait: is Key a std::shared_ptr<T>?
-    template <typename>
-    struct is_std_shared_ptr : std::false_type {};
-
-    template <typename T>
-    struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_type {};
-
-    template <typename T>
-    constexpr bool is_std_shared_ptr_v = is_std_shared_ptr<T>::value;
-
-    // template <typename Predicate, typename Key>
-    // constexpr bool call_is_hazard(Predicate&& pred, const std::shared_ptr<Key>& ptr) {
-    //     if constexpr (HazardSystem::is_std_shared_ptr_v<Key>) {
-    //         // Key = std::shared_ptr<T> ⇒ ptr = std::shared_ptr<std::shared_ptr<T>>
-    //         return ptr && pred(*ptr); // pass the inner pointer
-    //     } else {
-    //         // Key = int or any other type ⇒ ptr = std::shared_ptr<int> etc
-    //         return pred(ptr);
-    //     }
-    // }
-
-    template <typename Predicate, typename T>
-    constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
-        -> decltype(pred(*ptr), bool()) {
-        // If the predicate accepts T (value), call with *ptr
-        return ptr && pred(*ptr);
-    }
-
-    // Helper for pointer types (predicate accepts shared_ptr)
-    template <typename Predicate, typename T>
-    constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
-        -> decltype(pred(ptr), bool()) {
-        // If the predicate accepts std::shared_ptr<T>, call with ptr
-        return pred(ptr);
-    }
-    //--------------------------------------------------------------
     template<typename Key>
     class HashSet {
         //--------------------------------------------------------------
@@ -328,135 +292,29 @@ namespace HazardSystem {
                 }// end for (size_t mask_index = 0; mask_index < m_bitmask.size(); ++mask_index)
             }// end void for_each_fast(Func&& fn) const
             //--------------------------------------------------------------
-            // void scan_and_reclaim(const std::function<bool(const std::function<bool(Key)>& is_hazard)>& is_hazard) {
-            //     //--------------------------
-            //     for (size_t mask_index = 0; mask_index < m_bitmask.size(); ++mask_index) {
-            //         //--------------------------
-            //         uint64_t mask = m_bitmask[mask_index].load(std::memory_order_acquire);
-            //         if (!mask) {
-            //             continue;
-            //         }// end if (!mask)
-            //         //--------------------------
-            //         const size_t base = mask_index * C_BITS_PER_MASK;
-            //         //--------------------------
-            //         while (mask) {
-            //             //--------------------------
-            //             const size_t bit            = std::countr_zero(mask);
-            //             const size_t bucket_index   = base + bit;
-            //             //--------------------------
-            //             if (bucket_index >= m_capacity) {
-            //                 break;
-            //             }// end if (bucket_index >= m_capacity)
-            //             //--------------------------
-            //             std::shared_ptr<Node> prev;
-            //             auto current = m_table[bucket_index].load(std::memory_order_acquire);
-            //             //--------------------------
-            //             while (current) {
-            //                 //--------------------------
-            //                 auto data_ptr   = current->data.load(std::memory_order_acquire);
-            //                 auto next       = current->next.load(std::memory_order_acquire);
-            //                 //--------------------------
-            //                 if (!data_ptr or !is_hazard(data_ptr)) {
-            //                     //--------------------------
-            //                     current->data.store(nullptr, std::memory_order_release);
-            //                     //--------------------------
-            //                     if (prev) {
-            //                         prev->next.store(next, std::memory_order_release);
-            //                         if (next) next->prev.store(prev, std::memory_order_release);
-            //                     } else {
-            //                         m_table[bucket_index].store(next, std::memory_order_release);
-            //                     }// end if (prev)
-            //                     //--------------------------
-            //                     if (!next) {
-            //                         clear_bit(bucket_index);
-            //                     }// end if (!next)
-            //                     //--------------------------
-            //                 } else {
-            //                     prev = current;
-            //                 }// end if (!data_ptr or !is_hazard(data_ptr))
-            //                 //--------------------------
-            //                 current = next;
-            //                 //--------------------------
-            //             }// end while (current)
-            //             //--------------------------
-            //             mask &= ~(1ULL << bit);
-            //             //--------------------------
-            //         }// end while (mask)
-            //     }// end for (size_t mask_index = 0; mask_index < m_bitmask.size(); ++mask_index)
-            // }// end void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard)
-            //--------------------------------------------------------------
-            // void scan_and_reclaim(const std::function<bool(const Key&)>& is_hazard) {
-            //     std::vector<Key> to_remove;
-            //     to_remove.reserve(m_capacity);
-            //     for_each_fast([&](const Key& ptr) {
-            //         if (!is_hazard(ptr)) {
-            //             to_remove.push_back(ptr);
-            //         }
-            //     });
-            //     for (auto& key : to_remove) remove(key);
-            // }
-            //--------------------------------------------------------------
-            // template <typename Predicate>
-            // void scan_and_reclaim(Predicate&& is_hazard) {
-            //     for (size_t mask_index = 0; mask_index < m_bitmask.size(); ++mask_index) {
-            //         uint64_t mask = m_bitmask[mask_index].load(std::memory_order_acquire);
-            //         if (!mask) continue;
-            //         const size_t base = mask_index * C_BITS_PER_MASK;
-            //         while (mask) {
-            //             const size_t bit = std::countr_zero(mask);
-            //             const size_t bucket_index = base + bit;
-            //             if (bucket_index >= m_capacity) break;
-            //             std::shared_ptr<Node> prev;
-            //             auto current = m_table[bucket_index].load(std::memory_order_acquire);
-            //             while (current) {
-            //                 auto data_ptr = current->data.load(std::memory_order_acquire);
-            //                 auto next = current->next.load(std::memory_order_acquire);
-            //                 // bool remove = false;
-
-            //                 // if constexpr (is_std_shared_ptr_v<Key>) {
-            //                 //     // Key is std::shared_ptr<T> -- data_ptr is std::shared_ptr<std::shared_ptr<T>>
-            //                 //     remove = (!data_ptr || !is_hazard(*data_ptr));
-            //                 // } else {
-            //                 //     // Key is int or any other type -- data_ptr is std::shared_ptr<Key>
-            //                 //     remove = (!data_ptr || !is_hazard(data_ptr));
-            //                 // }
-
-            //                 if (!data_ptr or !call_is_hazard(is_hazard, data_ptr)) {
-            //                     current->data.store(nullptr, std::memory_order_release);
-            //                     if (prev) {
-            //                         prev->next.store(next, std::memory_order_release);
-            //                         if (next) next->prev.store(prev, std::memory_order_release);
-            //                     } else {
-            //                         m_table[bucket_index].store(next, std::memory_order_release);
-            //                     }
-            //                     if (!next) clear_bit(bucket_index);
-            //                 } else {
-            //                     prev = current;
-            //                 }
-            //                 current = next;
-            //             }
-            //             mask &= ~(1ULL << bit);
-            //         }
-            //     }
-            // }
-            //--------------------------------------------------------------
             template <typename Predicate>
             void scan_and_reclaim(Predicate&& is_hazard) {
+                //--------------------------
                 std::vector<Key> to_remove;
                 to_remove.reserve(m_capacity);
-
+                //--------------------------
                 for_each_fast([&](const std::shared_ptr<Key>& data_ptr) {
-                    // Always skip empty/nullptr nodes!
-                    if (!data_ptr) return;
-
-                    // Use the helper to correctly call the predicate
+                    //--------------------------
+                    if (!data_ptr) {
+                        return;
+                    }// end if (!data_ptr)
+                    //--------------------------
                     if (!call_is_hazard(is_hazard, data_ptr)) {
                         to_remove.push_back(*data_ptr);
-                    }
+                    }// end if (!call_is_hazard(is_hazard, data_ptr))
+                    //--------------------------
                 });
-
-                for (const auto& key : to_remove) remove(key);
-            }
+                //--------------------------
+                for (const auto& key : to_remove) {
+                    remove(key);
+                }// end for (const auto& key : to_remove)
+                //--------------------------
+            }// end void scan_and_reclaim(Predicate&& is_hazard)
             //--------------------------------------------------------------
             // bool should_resize(void) const {
             //     return m_size.load() > (m_capacity * 0.75);
@@ -530,6 +388,20 @@ namespace HazardSystem {
                 clear_data();
                 clear_mask();
             }// end void clear_all(void)
+            //--------------------------
+            template <typename Predicate, typename T>
+            constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
+                -> decltype(pred(*ptr), bool()) {
+                return ptr and pred(*ptr);
+            }// end constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
+            //--------------------------
+            // Helper for pointer types (predicate accepts shared_ptr)
+            template <typename Predicate, typename T>
+            constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
+                -> decltype(pred(ptr), bool()) {
+                // If the predicate accepts std::shared_ptr<T>, call with ptr
+                return pred(ptr);
+            }// end constexpr auto call_is_hazard(Predicate&& pred, const std::shared_ptr<T>& ptr)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
