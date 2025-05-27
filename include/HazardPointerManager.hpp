@@ -270,7 +270,7 @@ class HazardPointerManager {
         constexpr size_t retired_limiter(size_t size) const {
             constexpr size_t c_limiter = 2UL;
             return std::max(c_limiter, size);
-        }
+        }// end constexpr size_t retired_limiter(size_t size) const
         //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
