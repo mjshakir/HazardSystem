@@ -105,7 +105,7 @@ class HazardPointerManager {
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_size(retired_limiter(retired_size)),
                                                                 m_retired_nodes(retired_size * 8UL),
-                                                                m_hazard_pointers(hazards_size){
+                                                                m_hazard_pointers(hazard_limiter(hazards_size)){
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -275,6 +275,11 @@ class HazardPointerManager {
             m_hazard_pointers.clear();
             m_retired_nodes.clear();
         } // end void clear_data(void)
+        //--------------------------
+        constexpr size_t hazard_limiter(size_t size) const {
+            constexpr size_t c_min_limit = 1UL;
+            return std::max(c_min_limit, size);
+        }// end constexpr size_t retired_limiter(size_t size) const
         //--------------------------
         constexpr size_t retired_limiter(size_t size) const {
             constexpr size_t c_limiter = 2UL;
