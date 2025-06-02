@@ -165,71 +165,8 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            // template<uint16_t M = N>
-            // std::enable_if_t<(M > 0) and (M <= 64), std::optional<IndexType>> acquire_data(void) {
-            //     //--------------------------
-            //     uint64_t mask   = m_bitmask.load(std::memory_order_acquire);
-            //     IndexType index = static_cast<IndexType>(std::countr_zero(~mask));
-            //     //--------------------------
-            //     if (index >= get_capacity()) {
-            //         return std::nullopt;
-            //     }// end if (index >= get_capacity())
-            //     //--------------------------
-            //     uint64_t flag = 1ULL << index;
-            //     uint64_t desired;
-            //     //--------------------------
-            //     do {
-            //         desired = mask | flag;
-            //     } while (!m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel) and
-            //                 (index = static_cast<IndexType>(std::countr_zero(mask))) < N and
-            //                 (flag = 1ULL << index, true));
-            //     //--------------------------
-            //     return (index < get_capacity()) ? std::optional<IndexType>(index) : std::nullopt;
-            //     //--------------------------
-            // }// end std::optional<IndexType> acquire_data(void)
-            //--------------------------
-            // template<uint16_t M = N>
-            // std::enable_if_t<(M == 0) or (M > 64), std::optional<IndexType>> acquire_data(void) {
-            //     //--------------------------
-            //     const IndexType _capacity = get_capacity();
-            //     //--------------------------
-            //     for (uint16_t part = 0; part < get_mask_count(); ++part) {
-            //         //--------------------------
-            //         uint64_t mask = m_bitmask.at(part).load(std::memory_order_acquire);
-            //         //--------------------------
-            //         if (mask == ~0ULL) {
-            //             continue;
-            //         }// end if (mask == ~0ULL)
-            //         //--------------------------
-            //         IndexType base  = static_cast<IndexType>(part * C_BITS_PER_MASK);
-            //         IndexType index = static_cast<IndexType>(std::countr_zero(~mask));
-            //         //--------------------------
-            //         if (base + index >= _capacity) {
-            //             continue;
-            //         }// end if (base + index >= _capacity)
-            //         //--------------------------
-            //         uint64_t flag = 1ULL << index;
-            //         uint64_t desired;
-            //         //--------------------------
-            //         do {
-            //             desired = mask | flag;
-            //         } while (!m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel) and
-            //                     (index = static_cast<IndexType>(std::countr_zero(mask))) < C_BITS_PER_MASK and
-            //                     (base + index) < _capacity and
-            //                     (flag = 1ULL << index, true));
-            //         //--------------------------
-            //         if (base + index < get_capacity()) {
-            //             return base + index;
-            //         }// end if (base + index < get_capacity())
-            //         //--------------------------
-            //     }// end for (uint16_t part = 0; part < C_MASK_COUNT; ++part)
-            //     //--------------------------
-            //     return std::nullopt;
-            //     //--------------------------
-            // }// end std::optional<IndexType> acquire_data(void)
-            //--------------------------
             template<uint16_t M = N>
-            std::enable_if_t<(M > 0) && (M <= 64), std::optional<IndexType>> acquire_data(void) {
+            std::enable_if_t<(M > 0) and (M <= 64), std::optional<IndexType>> acquire_data(void) {
                 //--------------------------
                 uint64_t mask = m_bitmask.load(std::memory_order_acquire);
                 //--------------------------
