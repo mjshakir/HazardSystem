@@ -51,5 +51,6 @@ create_test_target(${PROJECT_NAME}_HashTable_Test           HashTableTest.cpp)
 create_test_target(${PROJECT_NAME}_HashSet_Test             HashSetTest.cpp)
 create_test_target(${PROJECT_NAME}_HashMultiTable_Test      HashMultiTableTest.cpp)
 create_test_target(${PROJECT_NAME}_BitmaskTable_Test        BitmaskTableTest.cpp)
+create_test_target(${PROJECT_NAME}_BitmaskTableDynamic_Test BitmaskTableDynamicTest.cpp)
 #create_test_target(${PROJECT_NAME}_Test                     HazardPointerManagerTest.cpp)
 #------------------------------------------------------------------------------------------
