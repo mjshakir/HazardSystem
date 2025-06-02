@@ -97,7 +97,6 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
         HazardPointerManager(const size_t& retired_size) :  m_retired_size(retired_limiter(retired_size)),
-                                                            m_hazard_size(std::nullopt),
                                                             m_retired_nodes(retired_size * 8UL) {
             //--------------------------
         } // end HazardPointerManager(void)
@@ -105,9 +104,8 @@ class HazardPointerManager {
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N == 0), int> = 0>
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_size(retired_limiter(retired_size)),
-                                                                m_hazard_size(hazard_limiter(hazards_size)),
                                                                 m_retired_nodes(retired_size * 8UL),
-                                                                m_hazard_pointers(m_hazard_size.value()){
+                                                                m_hazard_pointers(hazards_size){
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -278,11 +276,6 @@ class HazardPointerManager {
             m_retired_nodes.clear();
         } // end void clear_data(void)
         //--------------------------
-        constexpr size_t hazard_limiter(size_t size) const {
-            const size_t _c_limiter = std::thread::hardware_concurrency();
-            return std::clamp(size, 1UL, _c_limiter);
-        }// end constexpr size_t retired_limiter(size_t size) const
-        //--------------------------
         constexpr size_t retired_limiter(size_t size) const {
             constexpr size_t c_limiter = 2UL;
             return std::max(c_limiter, size);
@@ -291,7 +284,6 @@ class HazardPointerManager {
     private:
         //--------------------------------------------------------------
         const size_t m_retired_size;
-        const std::optional<size_t> m_hazard_size;
         HashSet<std::shared_ptr<T>> m_retired_nodes;
         BitmaskTable<HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;
         //--------------------------------------------------------------
