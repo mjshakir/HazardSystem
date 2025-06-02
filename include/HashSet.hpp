@@ -6,6 +6,7 @@
 #include <vector>
 #include <atomic>
 #include <memory>
+#include <limits>
 #include <bit>
 #include <functional>
 #include <type_traits>
@@ -329,7 +330,7 @@ namespace HazardSystem {
             }// end constexpr size_t next_power_of_two(const size_t& n)
             //--------------------------------------------------------------
             constexpr size_t bitmask_table_calculator(size_t capacity) {
-                return (capacity + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK;
+                return static_cast<size_t>((capacity + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK);
             }// end constexpr size_t bitmask_table_calculator(size_t capacity)
             //--------------------------------------------------------------
             void set_bit(const size_t& index) {
@@ -411,7 +412,7 @@ namespace HazardSystem {
             std::vector<std::atomic<uint64_t>> m_bitmask;
             const bool m_initialized;
             //--------------------------
-            static constexpr size_t C_BITS_PER_MASK = 64UL;
+            static constexpr uint8_t C_BITS_PER_MASK = std::numeric_limits<uint64_t>::digits;
         //--------------------------------------------------------------
     };// end class
 //--------------------------------------------------------------
