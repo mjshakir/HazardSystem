@@ -183,22 +183,15 @@ class HazardPointerManager {
             //--------------------------
             if (!ThreadRegistry::instance().registered()) {
                 return {std::nullopt, nullptr};
-            }
+            }// end if (!ThreadRegistry::instance().registered())
             //--------------------------
-            std::optional<IndexType> index = m_hazard_pointers.acquire();
+            std::optional<std::pair<IndexType, std::shared_ptr<HazardPointer<T>>>> _data = m_hazard_pointers.emplace_return();
             //--------------------------
-            if (!index.has_value()) {
+            if (!_data.has_value()) {
                 return {std::nullopt, nullptr};
             }// end if (!idx_opt.has_value())
             //--------------------------
-            auto hp_opt = m_hazard_pointers.at(index);
-            //--------------------------
-            if (!hp_opt) {
-                m_hazard_pointers.set(index, std::make_shared<HazardPointer<T>>());
-            } else {
-                hp_opt->pointer.store(nullptr, std::memory_order_relaxed);
-            }
-            return {index.value(), m_hazard_pointers.at(index)};
+            return {_data->first, _data->second};
             //--------------------------
         } // end std HazardHandle<IndexType, HazardPointer<T>> acquire_data(void)
         //--------------------------
