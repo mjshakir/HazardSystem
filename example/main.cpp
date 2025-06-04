@@ -4,6 +4,8 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <string>
+#include <memory>
 #include "HazardPointerManager.hpp"
 
 constexpr size_t HAZARD_POINTERS = 9UL, PER_THREAD = 3UL;
@@ -12,120 +14,80 @@ constexpr size_t HAZARD_POINTERS = 9UL, PER_THREAD = 3UL;
 std::mutex cout_mutex;
 #define SYNC_COUT(x) { std::lock_guard<std::mutex> lock(cout_mutex); std::cout << x; }
 
-// Define a simple class to use with HazardPointerManager
 struct TestNode {
     int data;
-    TestNode(int d) : data(d) {
-        SYNC_COUT("TestNode with data " << data << " created.\n");
-    }
-    ~TestNode() {
-        SYNC_COUT("TestNode with data " << data << " deleted.\n");
-    }
+    TestNode(int d) : data(d) { SYNC_COUT("TestNode with data " << data << " created.\n"); }
+    ~TestNode() { SYNC_COUT("TestNode with data " << data << " deleted.\n"); }
 };
 
-// Shared data structure that we'll protect with hazard pointers
-std::atomic<std::shared_ptr<TestNode>> shared_node{nullptr};
-
-// A function to periodically update the shared node - MUCH SIMPLER NOW!
-void update_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager) {
+// ----- Thread Functions -----
+template <typename Manager>
+void update_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node) {
     for (int i = 0; i < 10; ++i) {
-        // Create a new node
         auto new_node = std::make_shared<TestNode>(i);
-        
-        // Safely get the old node using protection
         auto old_protected = manager.protect(shared_node);
-        
-        // Swap the new node with the old one
         shared_node.store(new_node);
-        
-        // Retire the old node if it exists
         if (old_protected) {
             SYNC_COUT("Retiring node with data " << old_protected->data << "\n");
             manager.retire(old_protected.shared_ptr());
         }
-        
-        // Periodically reclaim retired nodes
         if (i % 3 == 0) {
             SYNC_COUT("Reclaiming retired nodes in update thread.\n");
             manager.reclaim();
         }
-        
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
 
-// A function to read from the shared node - DRAMATICALLY SIMPLIFIED!
-void read_shared_node(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager, int thread_id) {
+template <typename Manager>
+void read_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, int thread_id) {
     for (int i = 0; i < 15; ++i) {
-        // ONE LINE! Automatic protection and cleanup
         auto protected_node = manager.protect(shared_node);
-        
-        // If we have a protected node, use it
         if (protected_node) {
-            SYNC_COUT("Thread " << thread_id << ": Reading node with data " 
+            SYNC_COUT("Thread " << thread_id << ": Reading node with data "
                      << protected_node->data << "\n");
-            
-            // Simulate some work with the node
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        
-        // No manual release needed - automatic cleanup when protected_node goes out of scope!
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 }
 
-// Alternative implementation showing retry logic for high contention
-void read_shared_node_with_retries(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager, int thread_id) {
+template <typename Manager>
+void read_shared_node_with_retries(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, int thread_id) {
     for (int i = 0; i < 15; ++i) {
-        // Use the retry version for high-contention scenarios
-        auto protected_node = manager.try_protect(shared_node, 50); // Max 50 retries
-        
+        auto protected_node = manager.try_protect(shared_node, 50);
         if (protected_node) {
-            SYNC_COUT("Thread " << thread_id << ": Reading node with data " 
+            SYNC_COUT("Thread " << thread_id << ": Reading node with data "
                      << protected_node->data << " (with retries)\n");
-            
-            // Simulate some work with the node
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         } else {
             SYNC_COUT("Thread " << thread_id << ": Failed to protect node after retries\n");
         }
-        
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 }
 
-// Example showing different usage patterns
-void demonstrate_usage_patterns(HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>& manager) {
-    SYNC_COUT("=== Demonstrating different usage patterns ===\n");
-    
-    // Pattern 1: Direct pointer-like usage
+// Usage pattern function, taking shared_node by ref
+template <typename Manager>
+void demonstrate_usage_patterns(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, const std::string& label) {
+    SYNC_COUT("=== [" << label << "] Demonstrating usage patterns ===\n");
     {
         auto protected_ptr = manager.protect(shared_node);
         if (protected_ptr) {
             SYNC_COUT("Pattern 1 - Direct access: " << protected_ptr->data << "\n");
-            
-            // Can use it like a regular pointer
             TestNode& node_ref = *protected_ptr;
             SYNC_COUT("Pattern 1 - Reference access: " << node_ref.data << "\n");
-            
-            // Get raw pointer if needed
             TestNode* raw_ptr = protected_ptr.get();
             SYNC_COUT("Pattern 1 - Raw pointer access: " << raw_ptr->data << "\n");
         }
-    } // Automatic cleanup here
-    
-    // Pattern 2: Convert to shared_ptr when needed
+    }
     {
         auto protected_ptr = manager.protect(shared_node);
         if (protected_ptr) {
             std::shared_ptr<TestNode> shared = protected_ptr.shared_ptr();
             SYNC_COUT("Pattern 2 - Converted to shared_ptr: " << shared->data << "\n");
-            // Both protected_ptr and shared are valid here
-            // Protection remains active until protected_ptr destructs
         }
     }
-    
-    // Pattern 3: Protect a non-atomic shared_ptr
     {
         std::shared_ptr<TestNode> some_node = std::make_shared<TestNode>(999);
         auto protected_ptr = manager.protect(some_node);
@@ -133,82 +95,161 @@ void demonstrate_usage_patterns(HazardSystem::HazardPointerManager<TestNode, HAZ
             SYNC_COUT("Pattern 3 - Protected non-atomic: " << protected_ptr->data << "\n");
         }
     }
-    
-    // Pattern 4: Move semantics
-    auto get_protected_node = [&]() {
-        return manager.protect(shared_node); // Returns by value, efficient move
-    };
-    
-    auto moved_ptr = get_protected_node(); // Moved, no copies
-    if (moved_ptr) {
-        SYNC_COUT("Pattern 4 - Moved protection: " << moved_ptr->data << "\n");
+    {
+        auto get_protected_node = [&]() {
+            return manager.protect(shared_node);
+        };
+        auto moved_ptr = get_protected_node();
+        if (moved_ptr) {
+            SYNC_COUT("Pattern 4 - Moved protection: " << moved_ptr->data << "\n");
+        }
     }
-    
-    // Pattern 5: Reset protection manually
     {
         auto protected_ptr = manager.protect(shared_node);
         if (protected_ptr) {
             SYNC_COUT("Pattern 5 - Before reset: " << protected_ptr->data << "\n");
-            protected_ptr.reset(); // Manual release
+            protected_ptr.reset();
             SYNC_COUT("Pattern 5 - After reset, ptr is now invalid\n");
         }
     }
 }
 
-int main() {
-    // Create a shared instance of HazardPointerManager
-    auto& manager = HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>::instance(PER_THREAD);
-
-    SYNC_COUT("Starting hazard pointer test with ProtectedPointer.\n");
-    
-    // Set initial shared node
+// ---- Test Harness -----
+template <typename Manager>
+void run_hazard_pointer_test(Manager& manager, const std::string& label) {
+    std::atomic<std::shared_ptr<TestNode>> shared_node;
     shared_node.store(std::make_shared<TestNode>(0));
+    demonstrate_usage_patterns(manager, shared_node, label);
 
-    // Demonstrate usage patterns first
-    demonstrate_usage_patterns(manager);
+    std::thread updater(update_shared_node<Manager>, std::ref(manager), std::ref(shared_node));
 
-    // Launch update thread and multiple reader threads
-    std::thread updater(update_shared_node, std::ref(manager));
-    
+    const size_t threads_size = std::thread::hardware_concurrency() - 1;
     std::vector<std::thread> readers;
-    readers.reserve(2);
-    
-    // Mix of regular readers and retry-enabled readers
-    for (int i = 0; i < 2; ++i) {
-        readers.emplace_back(read_shared_node, std::ref(manager), i);
-    }
-    
-    // One reader with retry logic
-    readers.emplace_back(read_shared_node_with_retries, std::ref(manager), 2);
+    readers.reserve(threads_size);
 
-    // Join all threads
+    for (int i = 0; i < threads_size; ++i)
+        readers.emplace_back(read_shared_node<Manager>, std::ref(manager), std::ref(shared_node), i);
+
     updater.join();
-    for (auto& t : readers) {
-        t.join();
-    }
+    for (auto& t : readers) t.join();
 
-    // Print statistics
-    SYNC_COUT("=== Final Statistics ===\n");
+    SYNC_COUT("=== [" << label << "] Final Statistics ===\n");
     SYNC_COUT("Active hazard pointers: " << manager.hazard_size() << "\n");
     SYNC_COUT("Retired nodes: " << manager.retire_size() << "\n");
 
-    // Final reclamation
     SYNC_COUT("Final reclamation of retired nodes.\n");
     manager.reclaim();
-    
-    // Clear all remaining nodes
     SYNC_COUT("Clearing all nodes.\n");
     manager.reclaim_all();
-    
-    // Reset the shared node
     shared_node.store(nullptr);
 
     SYNC_COUT("Hazard pointer test completed.\n");
-    
-    // Final statistics after cleanup
-    SYNC_COUT("=== After Cleanup Statistics ===\n");
+    SYNC_COUT("=== [" << label << "] After Cleanup Statistics ===\n");
     SYNC_COUT("Active hazard pointers: " << manager.hazard_size() << "\n");
     SYNC_COUT("Retired nodes: " << manager.retire_size() << "\n");
-    
+}
+
+// --- Baseline Overhead Test (NO hazard manager logic, just atomics/shared_ptr) ---
+void run_baseline_overhead_test(const std::string& label) {
+    SYNC_COUT("=== [" << label << "] Running baseline test (NO hazard pointer protection) ===\n");
+    std::atomic<std::shared_ptr<TestNode>> shared_node;
+    shared_node.store(std::make_shared<TestNode>(0));
+
+    // Updater (no protection)
+    auto updater = [&shared_node]() {
+        for (int i = 0; i < 10; ++i) {
+            auto new_node = std::make_shared<TestNode>(i);
+            auto old = shared_node.load();
+            shared_node.store(new_node);
+            (void)old; // mimic retire, but do nothing
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    };
+
+    // Reader (no protection)
+    auto reader = [&shared_node](int thread_id) {
+        for (int i = 0; i < 15; ++i) {
+            auto current = shared_node.load();
+            if (current) {
+                SYNC_COUT("Thread " << thread_id << ": (Baseline) Reading node with data "
+                         << current->data << "\n");
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+    };
+
+    const size_t threads_size = std::thread::hardware_concurrency() - 1;
+    std::vector<std::thread> readers;
+    readers.reserve(threads_size);
+
+    std::thread updater_thread(updater);
+    for (int i = 0; i < threads_size; ++i)
+        readers.emplace_back(reader, i);
+
+    updater_thread.join();
+    for (auto& t : readers) t.join();
+
+    shared_node.store(nullptr);
+    SYNC_COUT("=== [" << label << "] Baseline test completed ===\n");
+}
+
+// --- Timing Helper ---
+template<typename Func>
+double run_timed_test(const std::string& label, Func&& func) {
+    using namespace std::chrono;
+    SYNC_COUT("------ Timing [" << label << "] ------\n");
+    auto start = high_resolution_clock::now();
+    func();
+    auto end = high_resolution_clock::now();
+    double elapsed_ms = duration<double, std::milli>(end - start).count();
+    SYNC_COUT("------ [" << label << "] Elapsed: " << elapsed_ms << " ms ------\n\n");
+    return elapsed_ms;
+}
+
+int main() {
+    double fixed_time = 0, dynamic_time = 0, baseline_time = 0;
+
+    // Fixed-size mode
+    SYNC_COUT("==============[Fixed]==============\n\n");
+    auto& manager_fixed = HazardSystem::HazardPointerManager<TestNode, HAZARD_POINTERS>::instance(PER_THREAD);
+    fixed_time = run_timed_test("Fixed-Size", [&](){
+        run_hazard_pointer_test(manager_fixed, "Fixed-Size");
+    });
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    SYNC_COUT("\n\n");
+
+    // Dynamic-size mode (zero means "dynamic" in your code)
+    SYNC_COUT("==============[Dynamic]==============\n\n");
+    constexpr size_t DYNAMIC_HAZARD_POINTERS = 0UL;
+    constexpr size_t HAZARDS_SIZE = 5UL, RETIRED_SIZE = 4UL;
+    auto& manager_dynamic = HazardSystem::HazardPointerManager<TestNode, DYNAMIC_HAZARD_POINTERS>::instance(HAZARDS_SIZE, RETIRED_SIZE);
+    dynamic_time = run_timed_test("Dynamic-Size", [&](){
+        run_hazard_pointer_test(manager_dynamic, "Dynamic-Size");
+    });
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    SYNC_COUT("\n\n");
+
+    // Baseline (NO hazard pointer management)
+    SYNC_COUT("==============[Baseline/Overhead]==============\n\n");
+    baseline_time = run_timed_test("Baseline (no hazard management)", [&](){
+        run_baseline_overhead_test("Baseline");
+    });
+
+    // --- Comparison Output ---
+    SYNC_COUT("\n\n=====[ Summary ]=====\n");
+    SYNC_COUT("Fixed-Size HazardPointerManager:    " << fixed_time    << " ms\n");
+    SYNC_COUT("Dynamic-Size HazardPointerManager:  " << dynamic_time  << " ms\n");
+    SYNC_COUT("Baseline (NO hazard management):    " << baseline_time << " ms\n");
+
+    auto pct_fixed = ((fixed_time-baseline_time)/baseline_time) * 100.0;
+    auto pct_dynamic = ((dynamic_time-baseline_time)/baseline_time) * 100.0;
+    SYNC_COUT("\nOverhead vs Baseline:\n");
+    SYNC_COUT("  Fixed-Size:   " << pct_fixed << " %\n");
+    SYNC_COUT("  Dynamic-Size: " << pct_dynamic << " %\n");
+    SYNC_COUT("  (lower % = lower hazard pointer overhead)\n");
+
     return 0;
 }
