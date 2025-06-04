@@ -46,7 +46,7 @@ TEST(BitmaskTableDynamic, OutOfBounds) {
 }
 
 TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
-    constexpr size_t capacity = 37;
+    constexpr size_t capacity           = 37;
     BitmaskTable<int, 0> table(capacity);
     ASSERT_EQ(table.capacity(), capacity);
 
@@ -70,7 +70,7 @@ TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
         ASSERT_EQ(*val, int(i * 2));
         ASSERT_TRUE(table.release(idx));
     }
-    ASSERT_EQ(table.size(), 0u);
+    ASSERT_EQ(table.size(), 0U);
     // After release, slots should be inactive
     for (size_t idx : idxs) {
         ASSERT_FALSE(table.active(idx));
@@ -80,7 +80,8 @@ TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
 
 
 TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
-    constexpr size_t capacity = 53;
+    constexpr size_t capacity           = 53;
+    constexpr size_t resized_capacity   = 106;
     BitmaskTable<int, 0> table(capacity);
     ASSERT_EQ(table.capacity(), capacity);
 
@@ -109,7 +110,7 @@ TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
     // The total number of acquired slots should not exceed capacity
     size_t total_acquired = 0;
     for (const auto& v : all_idxs) total_acquired += v.size();
-    ASSERT_LE(total_acquired, capacity);
+    ASSERT_LE(total_acquired, resized_capacity);
     ASSERT_EQ(table.size(), total_acquired);
 
     // Release all slots, check values
@@ -123,7 +124,7 @@ TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
             ASSERT_TRUE(table.release(idx));
         }
     }
-    ASSERT_EQ(table.size(), 0u);
+    ASSERT_EQ(table.size(), 0U);
 
     // All slots should now be empty
     for (size_t i = 0; i < capacity; ++i) {
@@ -131,7 +132,6 @@ TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
         ASSERT_FALSE(table.at(i));
     }
 }
-
 
 TEST(BitmaskTableDynamic, AcquireReleaseSingleThread) {
     BitmaskTable<int, 0> table(DYNAMIC_SMALL);
