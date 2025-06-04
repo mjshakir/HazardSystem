@@ -190,7 +190,7 @@ TEST(BitmaskTableTest, MaxSlots) {
     ASSERT_EQ(table.capacity(), N);
 }
 
-TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
+TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
     constexpr size_t capacity = 37;
     BitmaskTable<int, capacity> table;
     ASSERT_EQ(table.capacity(), capacity);
@@ -224,7 +224,7 @@ TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
 }
 
 
-TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
+TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
     constexpr size_t capacity = 112;
     BitmaskTable<int, capacity> table;
     ASSERT_EQ(table.capacity(), capacity);
