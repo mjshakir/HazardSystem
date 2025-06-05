@@ -5,140 +5,19 @@
 #include <set>
 #include <random>
 #include <atomic>
+#include <limits>
 
 using namespace HazardSystem;
 
-TEST(BitmaskTableTest, AcquireReleaseSingleThread) {
-    constexpr size_t N = 64;
-    BitmaskTable<int, N> table;
-    std::set<uint8_t> acquired;
-
-    // Acquire all slots
-    for (size_t i = 0; i < N; ++i) {
-        auto idx = table.acquire();
-        ASSERT_TRUE(idx.has_value());
-        ASSERT_FALSE(acquired.count(*idx));
-        acquired.insert(*idx);
-
-        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42 + i)));
-        auto val = table.at(*idx);
-        ASSERT_TRUE(val);
-        ASSERT_EQ(*val, 42 + i);
-        ASSERT_TRUE(table.active(*idx));
-    }
-    // Now all slots should be full
-    ASSERT_FALSE(table.acquire().has_value());
-
-    // Release all slots
-    for (auto idx : acquired) {
-        ASSERT_TRUE(table.release(idx));
-        ASSERT_FALSE(table.active(idx));
-        ASSERT_FALSE(table.at(idx));
-    }
-    ASSERT_EQ(table.capacity(), N);
-}
-
-TEST(BitmaskTableTest, ReuseSlot) {
-    constexpr size_t N = 8;
-    BitmaskTable<int, N> table;
-
-    auto idx = table.acquire();
-    ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42)));
-    ASSERT_TRUE(table.release(*idx));
-    auto idx2 = table.acquire();
-    ASSERT_TRUE(idx2.has_value());
-    ASSERT_EQ(*idx, *idx2);
-}
+// Use a "small" dynamic size for quick tests, and a "large" one for concurrency
+constexpr size_t DYNAMIC_SMALL  = 16UL;
+constexpr size_t DYNAMIC_MEDIUM = 100UL;
+constexpr size_t DYNAMIC_LARGE  = 1000UL;
+constexpr size_t DYNAMIC_SIZE   = 1030UL;
 
 
-TEST(BitmaskTableTest, MultiThreadedAcquireRelease) {
-    constexpr size_t N = 128;
-    BitmaskTable<int, N> table;
-    constexpr int threads = 16;
-    constexpr int iters = 1000;
-    std::atomic<int> success_acquire{0}, success_release{0};
-
-    auto worker = [&](int id) {
-        for (int i = 0; i < iters; ++i) {
-            auto idx = table.acquire();
-            if (idx) {
-                table.set(*idx, std::make_shared<int>(id));
-                ++success_acquire;
-                // Don't assert value, as races are possible
-                std::this_thread::yield();
-                table.release(*idx);
-                ++success_release;
-            } else {
-                std::this_thread::yield();
-            }
-        }
-    };
-
-    std::vector<std::thread> pool;
-    pool.reserve(threads);
-    for (int i = 0; i < threads; ++i) {
-        pool.emplace_back(worker, i);
-    }
-    for (auto& t : pool) t.join();
-
-    ASSERT_EQ(success_acquire, success_release);
-
-    // Table should be empty (all slots released)
-    for (size_t i = 0; i < N; ++i) {
-        ASSERT_FALSE(table.active(i));
-        ASSERT_FALSE(table.at(i));
-    }
-}
-
-// #if defined(__GNUC__) || defined(__clang__)
-// #pragma GCC diagnostic push
-// #pragma GCC diagnostic ignored "-Wconversion"
-// #pragma GCC diagnostic ignored "-Woverflow"
-// #endif
-
-// // Test: Out-of-bounds release and set
-// TEST(BitmaskTableTest, OutOfBoundsReleaseSet) {
-//     constexpr size_t N = 16;
-//     BitmaskTable<int, N> table;
-
-//     // Out-of-bounds: index == N (just beyond last valid)
-//     ASSERT_FALSE(table.release(N));
-//     ASSERT_FALSE(table.set(N, std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(N));
-//     ASSERT_FALSE(table.at(N).has_value());
-
-//     // Out-of-bounds: index way beyond
-//     ASSERT_FALSE(table.release(1000));
-//     ASSERT_FALSE(table.set(1000, std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(1000));
-//     ASSERT_FALSE(table.at(1000).has_value());
-
-//     // Out-of-bounds: negative numbers (if public API is size_t, static_cast will make these large values)
-//     ASSERT_FALSE(table.release(static_cast<size_t>(-1)));
-//     ASSERT_FALSE(table.set(static_cast<size_t>(-1), std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(static_cast<size_t>(-1)));
-//     ASSERT_FALSE(table.at(static_cast<size_t>(-1)).has_value());
-// }
-
-
-// Test: Releasing already released slot
-TEST(BitmaskTableTest, DoubleRelease) {
-    constexpr size_t N = 8;
-    BitmaskTable<int, N> table;
-
-    auto idx = table.acquire();
-    ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(123)));
-    ASSERT_TRUE(table.release(*idx));
-    ASSERT_FALSE(table.release(*idx));
-}
-
-
-// Test: Setting nullptr should be fine, but slot is not "active"
-TEST(BitmaskTableTest, SetNullptr) {
-    constexpr size_t N = 4;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, SetNullptrIsInactive) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
     auto idx = table.acquire();
     ASSERT_TRUE(idx.has_value());
     ASSERT_TRUE(table.set(*idx, nullptr));
@@ -147,52 +26,28 @@ TEST(BitmaskTableTest, SetNullptr) {
     table.release(*idx);
 }
 
-// Test: Table with N = 1
-TEST(BitmaskTableTest, SingleSlot) {
-    constexpr size_t N = 1;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, OutOfBounds) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+    size_t n = DYNAMIC_SMALL;
+    ASSERT_FALSE(table.release(n));
+    ASSERT_FALSE(table.set(n, std::make_shared<int>(5)));
+    ASSERT_FALSE(table.active(n));
+    ASSERT_FALSE(table.at(n));
 
-    auto idx = table.acquire();
-    ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(99)));
-    ASSERT_TRUE(table.release(*idx));
-    ASSERT_FALSE(table.active(*idx));
-    ASSERT_FALSE(table.at(*idx));
-    // Should be able to reuse the slot
-    auto idx2 = table.acquire();
-    ASSERT_TRUE(idx2.has_value());
-    ASSERT_TRUE(table.set(*idx2, std::make_shared<int>(123)));
-    ASSERT_TRUE(table.release(*idx2));
+    ASSERT_FALSE(table.release(n + 100));
+    ASSERT_FALSE(table.set(n + 100, std::make_shared<int>(5)));
+    ASSERT_FALSE(table.active(n + 100));
+    ASSERT_FALSE(table.at(n + 100));
+
+    ASSERT_FALSE(table.release(static_cast<size_t>(-1)));
+    ASSERT_FALSE(table.set(static_cast<size_t>(-1), std::make_shared<int>(5)));
+    ASSERT_FALSE(table.active(static_cast<size_t>(-1)));
+    ASSERT_FALSE(table.at(static_cast<size_t>(-1)));
 }
 
-
-// Test: Table with N = 1024 (maximum allowed)
-TEST(BitmaskTableTest, MaxSlots) {
-    constexpr size_t N = 1024;
-    BitmaskTable<int, N> table;
-    std::vector<size_t> idxs;
-    idxs.reserve(N);
-    // Fill all slots
-    for (size_t i = 0; i < N; ++i) {
-        auto idx = table.acquire();
-        ASSERT_TRUE(idx.has_value());
-        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(int(i))));
-        idxs.push_back(*idx);
-    }
-    // No more slots should be available
-    ASSERT_FALSE(table.acquire().has_value());
-    // Release all slots
-    for (auto idx : idxs) {
-        ASSERT_TRUE(table.release(idx));
-        ASSERT_FALSE(table.active(idx));
-        ASSERT_FALSE(table.at(idx));
-    }
-    ASSERT_EQ(table.capacity(), N);
-}
-
-TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
-    constexpr size_t capacity = 37;
-    BitmaskTable<int, capacity> table;
+TEST(BitmaskTableDynamic, CapacityAndSizeSingleThreaded) {
+    constexpr size_t capacity           = 37;
+    BitmaskTable<int, 0> table(capacity);
     ASSERT_EQ(table.capacity(), capacity);
 
     std::vector<size_t> idxs;
@@ -215,7 +70,7 @@ TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
         ASSERT_EQ(*val, int(i * 2));
         ASSERT_TRUE(table.release(idx));
     }
-    ASSERT_EQ(table.size(), 0u);
+    ASSERT_EQ(table.size(), 0U);
     // After release, slots should be inactive
     for (size_t idx : idxs) {
         ASSERT_FALSE(table.active(idx));
@@ -224,9 +79,10 @@ TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
 }
 
 
-TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
-    constexpr size_t capacity = 112;
-    BitmaskTable<int, capacity> table;
+TEST(BitmaskTableDynamic, CapacityAndSizeMultiThreaded) {
+    constexpr size_t capacity           = 53;
+    constexpr size_t resized_capacity   = 106;
+    BitmaskTable<int, 0> table(capacity);
     ASSERT_EQ(table.capacity(), capacity);
 
     const size_t threads = std::thread::hardware_concurrency();
@@ -254,7 +110,7 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
     // The total number of acquired slots should not exceed capacity
     size_t total_acquired = 0;
     for (const auto& v : all_idxs) total_acquired += v.size();
-    ASSERT_LE(total_acquired, capacity);
+    ASSERT_LE(total_acquired, resized_capacity);
     ASSERT_EQ(table.size(), total_acquired);
 
     // Release all slots, check values
@@ -268,7 +124,7 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
             ASSERT_TRUE(table.release(idx));
         }
     }
-    ASSERT_EQ(table.size(), 0u);
+    ASSERT_EQ(table.size(), 0U);
 
     // All slots should now be empty
     for (size_t i = 0; i < capacity; ++i) {
@@ -277,13 +133,158 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
     }
 }
 
+TEST(BitmaskTableDynamic, AcquireReleaseSingleThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+    std::set<uint8_t> acquired;
+
+    // Acquire all slots
+    for (size_t i = 0; i < DYNAMIC_SMALL; ++i) {
+        auto idx = table.acquire();
+        ASSERT_TRUE(idx.has_value());
+        ASSERT_FALSE(acquired.count(*idx));
+        acquired.insert(*idx);
+
+        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42 + i)));
+        auto val = table.at(*idx);
+        ASSERT_TRUE(val);
+        ASSERT_EQ(*val, 42 + i);
+        ASSERT_TRUE(table.active(*idx));
+    }
+    // Now all slots should be full
+    ASSERT_FALSE(table.acquire().has_value());
+
+    // Release all slots
+    for (auto idx : acquired) {
+        ASSERT_TRUE(table.release(idx));
+        ASSERT_FALSE(table.active(idx));
+        ASSERT_FALSE(table.at(idx));
+    }
+    ASSERT_EQ(table.capacity(), DYNAMIC_SMALL);
+}
+
+TEST(BitmaskTableDynamic, ReuseSlot) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42)));
+    ASSERT_TRUE(table.release(*idx));
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_EQ(*idx, *idx2);
+}
+
+
+TEST(BitmaskTableDynamic, MultiThreadedAcquireRelease) {
+    BitmaskTable<int, 0> table(DYNAMIC_MEDIUM);
+    constexpr int iters = 1000;
+    std::atomic<int> success_acquire{0}, success_release{0};
+
+    auto worker = [&](int id) {
+        for (int i = 0; i < iters; ++i) {
+            auto idx = table.acquire();
+            if (idx) {
+                table.set(*idx, std::make_shared<int>(id));
+                ++success_acquire;
+                // Don't assert value, as races are possible
+                std::this_thread::yield();
+                table.release(*idx);
+                ++success_release;
+            } else {
+                std::this_thread::yield();
+            }
+        }
+    };
+
+    const size_t threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> pool;
+    pool.reserve(threads);
+    for (int i = 0; i < threads; ++i) {
+        pool.emplace_back(worker, i);
+    }
+    for (auto& t : pool) t.join();
+
+    ASSERT_EQ(success_acquire, success_release);
+
+    // Table should be empty (all slots released)
+    for (size_t i = 0; i < DYNAMIC_MEDIUM; ++i) {
+        ASSERT_FALSE(table.active(i));
+        ASSERT_FALSE(table.at(i));
+    }
+}
+
+// Test: Releasing already released slot
+TEST(BitmaskTableDynamic, DoubleRelease) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(123)));
+    ASSERT_TRUE(table.release(*idx));
+    ASSERT_FALSE(table.release(*idx));
+}
+
+
+// Test: Setting nullptr should be fine, but slot is not "active"
+TEST(BitmaskTableDynamic, SetNullptr) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.set(*idx, nullptr));
+    auto val = table.at(*idx);
+    ASSERT_FALSE(val);
+    table.release(*idx);
+}
+
+// Test: Table with N = 1
+TEST(BitmaskTableDynamic, SingleSlot) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(99)));
+    ASSERT_TRUE(table.release(*idx));
+    ASSERT_FALSE(table.active(*idx));
+    ASSERT_FALSE(table.at(*idx));
+    // Should be able to reuse the slot
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_TRUE(table.set(*idx2, std::make_shared<int>(123)));
+    ASSERT_TRUE(table.release(*idx2));
+}
+
+
+// Test: Table with N = 1024 (maximum allowed)
+TEST(BitmaskTableDynamic, MaxSlots) {
+    constexpr size_t _size = std::numeric_limits<uint16_t>::max();
+    BitmaskTable<int, _size> table;
+    std::vector<size_t> idxs;
+    idxs.reserve(_size);
+    // Fill all slots
+    for (size_t i = 0; i < _size; ++i) {
+        auto idx = table.acquire();
+        ASSERT_TRUE(idx.has_value());
+        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(int(i))));
+        idxs.push_back(*idx);
+    }
+    // No more slots should be available
+    ASSERT_FALSE(table.acquire().has_value());
+    // Release all slots
+    for (auto idx : idxs) {
+        ASSERT_TRUE(table.release(idx));
+        ASSERT_FALSE(table.active(idx));
+        ASSERT_FALSE(table.at(idx));
+    }
+    ASSERT_EQ(table.capacity(), _size);
+}
+
+
 // Test: for_each lambda is called only for active slots
-TEST(BitmaskTableTest, ForEachActive) {
-    constexpr size_t N = 10;
-    BitmaskTable<int, N> table;
-    std::vector<typename BitmaskTable<int, N>::IndexType> idxs;
-    idxs.reserve(N);
-    for (size_t i = 0; i < N; i += 2) {
+TEST(BitmaskTableDynamic, ForEachActive) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+    std::vector<typename BitmaskTable<int, 0>::IndexType> idxs;
+    idxs.reserve(DYNAMIC_SMALL);
+    for (size_t i = 0; i < DYNAMIC_SMALL; i += 2) {
         auto idx = table.acquire();
         ASSERT_TRUE(idx.has_value());
         idxs.push_back(*idx);
@@ -301,13 +302,12 @@ TEST(BitmaskTableTest, ForEachActive) {
 }
 
 
-TEST(BitmaskTableTest, ForEachActiveFastSingleThread) {
-    constexpr size_t N = 16;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, ForEachActiveFastSingleThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
     std::set<size_t> expected;
 
     // Set odd indices
-    for (size_t i = 1; i < N; i += 2) {
+    for (size_t i = 1; i < DYNAMIC_SMALL; i += 2) {
         table.set(i, std::make_shared<int>(i * 10));
         expected.insert(i);
     }
@@ -322,13 +322,11 @@ TEST(BitmaskTableTest, ForEachActiveFastSingleThread) {
 }
 
 
-TEST(BitmaskTableTest, ForEachActiveFastMultiThread) {
-    constexpr size_t N = 64;
-    BitmaskTable<int, N> table;
-    constexpr int threads = 8;
+TEST(BitmaskTableDynamic, ForEachActiveFastMultiThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_MEDIUM);
 
     // Randomly fill about half the slots
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_MEDIUM; ++i) {
         if (i % 3 == 0)
             table.set(i, std::make_shared<int>(i + 100));
     }
@@ -342,23 +340,25 @@ TEST(BitmaskTableTest, ForEachActiveFastMultiThread) {
         });
     };
 
+    const size_t threads = std::thread::hardware_concurrency();
     std::vector<std::thread> pool;
+    pool.reserve(threads);
+    
     for (int t = 0; t < threads; ++t)
         pool.emplace_back(worker);
     for (auto& t : pool) t.join();
 
     // Since each thread visits all, divide by thread count for per-table coverage
-    ASSERT_EQ(visited_count / threads, N / 3 + (N % 3 ? 1 : 0));
+    ASSERT_EQ(visited_count / threads, DYNAMIC_MEDIUM / 3 + (DYNAMIC_MEDIUM % 3 ? 1 : 0));
 }
 
 // Test 1: m_bitmask is not array, single-threaded (N=32)
-TEST(BitmaskTableTest, SetEmplaceNonArraySingleThread) {
-    constexpr size_t N = 32;
-    BitmaskTable<int, N> table;
-    std::vector<typename BitmaskTable<int, N>::IndexType> indices;
-    indices.reserve(N);
+TEST(BitmaskTableDynamic, SetEmplaceNonArraySingleThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+    std::vector<typename BitmaskTable<int, 0>::IndexType> indices;
+    indices.reserve(DYNAMIC_SMALL);
 
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_SMALL; ++i) {
         auto idx = table.set(std::make_shared<int>(int(i * 2)));
         ASSERT_TRUE(idx.has_value());
         indices.push_back(*idx);
@@ -375,13 +375,12 @@ TEST(BitmaskTableTest, SetEmplaceNonArraySingleThread) {
 }
 
 // Test 2: m_bitmask is array, single-threaded (N=256)
-TEST(BitmaskTableTest, SetEmplaceArraySingleThread) {
-    constexpr size_t N = 256;
-    BitmaskTable<int, N> table;
-    std::vector<typename BitmaskTable<int, N>::IndexType> indices;
-    indices.reserve(N);
+TEST(BitmaskTableDynamic, SetEmplaceArraySingleThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_LARGE);
+    std::vector<typename BitmaskTable<int, 0>::IndexType> indices;
+    indices.reserve(DYNAMIC_LARGE);
 
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_LARGE; ++i) {
         auto idx = table.set(std::make_shared<int>(1000 + int(i)));
         ASSERT_TRUE(idx.has_value());
         indices.push_back(*idx);
@@ -398,9 +397,8 @@ TEST(BitmaskTableTest, SetEmplaceArraySingleThread) {
 }
 
 // Test 3: m_bitmask is not array, multi-threaded (N=32)
-TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
-    constexpr size_t N = 32;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, SetEmplaceNonArrayMultiThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
     constexpr int ops_per_thread = 100;
     std::atomic<int> success{0};
 
@@ -430,7 +428,7 @@ TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
     for (auto& t : pool) t.join();
 
     // All slots should be released after threads finish
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_SMALL; ++i) {
         ASSERT_FALSE(table.active(i));
         ASSERT_FALSE(table.at(i));
     }
@@ -440,9 +438,8 @@ TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
 
 
 // Test 4: m_bitmask is array, multi-threaded (N=256)
-TEST(BitmaskTableTest, SetEmplaceArrayMultiThread) {
-    constexpr size_t N = 256;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, SetEmplaceArrayMultiThread) {
+    BitmaskTable<int, 0> table(DYNAMIC_LARGE);
     
     constexpr int ops_per_thread = 100;
     std::atomic<int> success{0};
@@ -469,80 +466,14 @@ TEST(BitmaskTableTest, SetEmplaceArrayMultiThread) {
     for (auto& t : pool) t.join();
 
     ASSERT_EQ(success, threads * ops_per_thread);
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_LARGE; ++i) {
         ASSERT_FALSE(table.active(i));
         ASSERT_FALSE(table.at(i));
     }
 }
 
-
-// TEST(BitmaskTableTest, RealWorldMixedOperations) {
-//     constexpr size_t N = 256;
-//     BitmaskTable<int, N> table;
-//     constexpr int threads = 32;
-//     constexpr int ops_per_thread = 500;
-//     std::vector<std::atomic<bool>> slot_in_use(N);
-
-//     // Make sure flags are initialized
-//     for (auto& flag : slot_in_use) flag = false;
-
-//     auto worker = [&](int tid) {
-//         thread_local std::mt19937 gen(std::random_device{}());
-//         std::uniform_int_distribution<int> op_dist(0, 2);
-//         std::vector<int> my_slots;
-
-//         for (int i = 0; i < ops_per_thread; ++i) {
-//             int op = op_dist(gen);
-
-//             if (op == 0 or my_slots.empty()) {
-//                 // Try to acquire
-//                 auto idx = table.acquire();
-//                 if (idx) {
-//                     if (slot_in_use[*idx].exchange(true)) {
-//                         ADD_FAILURE() << "Double allocation of slot " << *idx;
-//                     }
-//                     table.set(*idx, std::make_shared<int>(tid * 1000 + i));
-//                     my_slots.push_back(*idx);
-//                 }
-//             } else {
-//                 // Release random held slot
-//                 std::uniform_int_distribution<size_t> sdist(0, my_slots.size() - 1);
-//                 size_t idx_pos = sdist(gen);
-//                 int idx_val = my_slots[idx_pos];
-//                 ASSERT_TRUE(table.active(idx_val));
-//                 auto v = table.at(idx_val);
-//                 ASSERT_TRUE(v);
-//                 table.release(idx_val);
-//                 slot_in_use[idx_val].store(false);
-//                 std::swap(my_slots[idx_pos], my_slots.back());
-//                 my_slots.pop_back();
-//             }
-//         }
-//         // Clean up any leftovers
-//         for (int idx : my_slots) {
-//             table.release(idx);
-//             slot_in_use[idx].store(false);
-//         }
-//     };
-
-//     std::vector<std::thread> pool;
-//     pool.reserve(threads);
-//     for (int t = 0; t < threads; ++t)
-//         pool.emplace_back(worker, t);
-
-//     for (auto& t : pool) t.join();
-
-//     // After all threads complete, check for leaks/dangling
-//     for (size_t i = 0; i < N; ++i) {
-//         ASSERT_FALSE(table.active(i));
-//         ASSERT_FALSE(table.at(i));
-//         ASSERT_FALSE(slot_in_use[i]);
-//     }
-// }
-
-TEST(BitmaskTableTest, RealWorldMixedOperations) {
-    constexpr size_t N = 256;
-    BitmaskTable<int, N> table;
+TEST(BitmaskTableDynamic, RealWorldMixedOperations) {
+    BitmaskTable<int, 0> table(DYNAMIC_LARGE);
     constexpr int threads = 32;
     constexpr int ops_per_thread = 500;
 
@@ -590,7 +521,7 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
     for (auto& t : pool) t.join();
 
     // After all threads complete, check for leaks/dangling
-    for (size_t i = 0; i < N; ++i) {
+    for (size_t i = 0; i < DYNAMIC_LARGE; ++i) {
         ASSERT_FALSE(table.active(i));
         ASSERT_FALSE(table.at(i));
     }

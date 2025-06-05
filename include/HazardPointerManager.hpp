@@ -4,10 +4,13 @@
 //--------------------------------------------------------------
 #include <cstddef>
 #include <cstdbool>
-#include <array>
+#include <cassert>
+#include <vector>
 #include <functional>
 #include <atomic>
 #include <memory>
+#include <optional>
+#include <algorithm>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -22,35 +25,39 @@
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
-template<typename T, size_t HAZARD_POINTERS = 12UL, size_t PER_THREAD = 2UL>
+template<typename T, size_t HAZARD_POINTERS = 0UL>
 class HazardPointerManager {
-    //--------------------------------------------------------------
-    private:
-        //--------------------------------------------------------------
-        BitmaskTable<HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;
-        //--------------------------------------------------------------
+    //-------------------------------------------------------------
     public:
         //--------------------------------------------------------------
         using IndexType = typename BitmaskTable<HazardPointer<T>, HAZARD_POINTERS>::IndexType;
         //--------------------------------------------------------------
     public:
         //--------------------------------------------------------------
-        static HazardPointerManager& instance(void) {
-            static HazardPointerManager instance;
+        template<size_t N = HAZARD_POINTERS> 
+        static  std::enable_if_t<(N > 0), HazardPointerManager&> instance(const size_t& retired_size = 2UL) {
+            static HazardPointerManager instance(retired_size);
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
-        ProtectedPointer<T> protect(std::shared_ptr<T> data) {
-            return protect_data(std::move(data));
-        }// end ProtectedPointer<T> protect(std::shared_ptr<T> data)
+        template<size_t N = HAZARD_POINTERS> 
+        static  std::enable_if_t<(N == 0), HazardPointerManager&> instance( const size_t& hazards_size = std::thread::hardware_concurrency(),
+                                                                            const size_t& retired_size = 2UL) {
+            static HazardPointerManager instance(hazards_size, retired_size);
+            return instance;
+        } // end static HazardPointerManager& instance(void)
         //--------------------------
-        ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& asp_data) {
-            return protect_data(data);
-        }// end ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& data)
+        ProtectedPointer<T> protect(std::shared_ptr<T> sp_data) {
+            return protect_data(std::move(sp_data));
+        }// end ProtectedPointer<T> protect(std::shared_ptr<T> sp_data)
         //--------------------------
-        ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& data, const size_t& max_retries = 100UL) {
-            return protect_data(data, max_retries);
-        }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& data, const size_t& max_retries = 100UL)
+        ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& a_sp_data) {
+            return protect_data(a_sp_data);
+        }// end ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& a_sp_data)
+        //--------------------------
+        ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries = 100UL) {
+            return protect_data(a_sp_data, max_retries);
+        }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries = 100UL)
         //--------------------------
         // Acquire a hazard pointer slot
         HazardHandle<IndexType, HazardPointer<T>> acquire(void) {
@@ -88,7 +95,17 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
-        HazardPointerManager(void) {
+        template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
+        HazardPointerManager(const size_t& retired_size) :  m_retired_size(retired_limiter(retired_size)),
+                                                            m_retired_nodes(retired_size * 8UL) {
+            //--------------------------
+        } // end HazardPointerManager(void)
+        //--------------------------
+        template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N == 0), int> = 0>
+        HazardPointerManager(   const size_t& hazards_size,
+                                const size_t& retired_size) :   m_retired_size(retired_limiter(retired_size)),
+                                                                m_retired_nodes(retired_size * 8UL),
+                                                                m_hazard_pointers(hazard_limiter(hazards_size)){
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -99,53 +116,46 @@ class HazardPointerManager {
         //--------------------------
         ~HazardPointerManager(void) = default;
         //--------------------------------------------------------------
-        ProtectedPointer<T> protect_data(std::shared_ptr<T> data) {
+        ProtectedPointer<T> protect_data(std::shared_ptr<T> sp_data) {
             //--------------------------
-            if (!data) {
+            if (!sp_data) {
                 return ProtectedPointer<T>();
-            }// end if (!data)
+            }// end if (!sp_data)
             //--------------------------
             auto handle = acquire_data();
             if (!handle.valid()) {
                 return ProtectedPointer<T>();
             }// end if (!handle.valid())
             //--------------------------
-            handle.sp_data->pointer.store(data, std::memory_order_release);
-            return ProtectedPointer<T>( std::move(handle.sp_data),
-                                        std::move(data),
-                                        [this, index = handle.index](std::shared_ptr<HazardPointer<T>> hp) -> bool {
-                                            return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
+            handle.sp_data->pointer.store(sp_data, std::memory_order_release);
+            return create_protected_pointer(std::move(handle), std::move(sp_data));
             //--------------------------
-        }// end ProtectedPointer<T> protect(std::shared_ptr<T> data)
+        }// end ProtectedPointer<T> protect(std::shared_ptr<T> sp_data)
         //--------------------------
-        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& data) {
+        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data) {
             //--------------------------
             auto handle = acquire_data();
             if (!handle.valid()) {
                 return ProtectedPointer<T>();
             }// end if (!handle.valid())
             //--------------------------
-            auto protected_obj = data.load(std::memory_order_acquire);
+            auto protected_obj = a_sp_data.load(std::memory_order_acquire);
             if (!protected_obj) {
                 release_data(handle);
                 return ProtectedPointer<T>();
             }// end if (!protected_obj)
             //--------------------------
             handle.sp_data->pointer.store(protected_obj, std::memory_order_release);
-            if (data.load(std::memory_order_acquire) == protected_obj) {
-                return ProtectedPointer<T>(
-                    std::move(handle.sp_data),
-                    std::move(protected_obj),
-                    [this, index = handle.index](std::shared_ptr<HazardPointer<T>> hp) -> bool {
-                            return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
+            if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
+                return create_protected_pointer(std::move(handle), std::move(protected_obj));
             }// end if (atomic_ptr.load(std::memory_order_acquire) == protected_obj)
             //--------------------------
             release_data(handle);
             return ProtectedPointer<T>();
             //--------------------------
-        }// end  ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& data)
+        }// end  ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data)
         //--------------------------
-        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& data, const size_t& max_retries) {
+        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
             //--------------------------
             auto handle = acquire_data();
             if (!handle.valid()) {
@@ -156,19 +166,15 @@ class HazardPointerManager {
             //--------------------------
             for (size_t attempt = 0; attempt < max_retries; ++attempt) {
                 //--------------------------
-                protected_obj = data.load(std::memory_order_acquire);
+                protected_obj = a_sp_data.load(std::memory_order_acquire);
                 if (!protected_obj) {
                     release_data(handle);
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
                 handle.sp_data->pointer.store(protected_obj, std::memory_order_release);
-                if (data.load(std::memory_order_acquire) == protected_obj) {
-                    return ProtectedPointer<T>(
-                        std::move(handle.sp_data),
-                        std::move(protected_obj),
-                        [this, index = handle.index](std::shared_ptr<HazardPointer<T>> hp) -> bool {
-                            return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
+                if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
+                    return create_protected_pointer(std::move(handle), std::move(protected_obj));
                 }
                 //--------------------------
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
@@ -176,7 +182,16 @@ class HazardPointerManager {
             release_data(handle);
             return ProtectedPointer<T>();
             //--------------------------
-        }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& data, const size_t& max_retries)
+        }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries)
+        //--------------------------
+        ProtectedPointer<T> create_protected_pointer(HazardHandle<IndexType, HazardPointer<T>>&& handle, 
+                                                    std::shared_ptr<T>&& protected_obj) {
+            return ProtectedPointer<T>(
+                std::move(handle.sp_data),
+                std::move(protected_obj),
+                [this, index = handle.index](std::shared_ptr<HazardPointer<T>> hp) -> bool {
+                    return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
+        }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
         HazardHandle<IndexType, HazardPointer<T>> acquire_data(void) {
             //--------------------------
@@ -184,22 +199,15 @@ class HazardPointerManager {
             //--------------------------
             if (!ThreadRegistry::instance().registered()) {
                 return {std::nullopt, nullptr};
-            }
+            }// end if (!ThreadRegistry::instance().registered())
             //--------------------------
-            std::optional<IndexType> index = m_hazard_pointers.acquire();
+            std::optional<std::pair<IndexType, std::shared_ptr<HazardPointer<T>>>> _data = m_hazard_pointers.emplace_return();
             //--------------------------
-            if (!index.has_value()) {
+            if (!_data.has_value()) {
                 return {std::nullopt, nullptr};
             }// end if (!idx_opt.has_value())
             //--------------------------
-            auto hp_opt = m_hazard_pointers.at(index);
-            //--------------------------
-            if (!hp_opt) {
-                m_hazard_pointers.set(index, std::make_shared<HazardPointer<T>>());
-            } else {
-                hp_opt->pointer.store(nullptr, std::memory_order_relaxed);
-            }
-            return {index.value(), m_hazard_pointers.at(index)};
+            return {_data->first, _data->second};
             //--------------------------
         } // end std HazardHandle<IndexType, HazardPointer<T>> acquire_data(void)
         //--------------------------
@@ -207,7 +215,7 @@ class HazardPointerManager {
             //--------------------------        
             if (!handle.valid()) {
                 return false;
-            }// end if (!handle.valid() or handle.index.has_value() or handle.index.value() >= HAZARD_POINTERS)
+            }// end if (!handle.valid())
             //--------------------------
             return m_hazard_pointers.set(handle.index.value(), nullptr);
             //--------------------------
@@ -219,16 +227,16 @@ class HazardPointerManager {
                 return false;
             }// end if (!node)
             //--------------------------
-            T* raw_ptr = node.get();
-            m_retired_nodes.insert(raw_ptr, std::move(node));
+            // T* raw_ptr = node.get();
+            m_retired_nodes.insert(node);
             //--------------------------
-            if (m_retired_nodes.size() >= PER_THREAD) {
-                reclaim();
-            }// end if (m_retired_nodes.size() >= PER_THREAD)
+            if (m_retired_nodes.size() >= m_retired_size) {
+                scan_and_reclaim();
+            }// end if (m_retired_nodes.size() >= m_retired_size)
             //--------------------------
             return true;
             //--------------------------
-        } // end bool retire_node(std::shared_ptr<T> node)
+        }// end bool retire_node(std::shared_ptr<T> node)
         //--------------------------
         bool is_hazard(std::shared_ptr<T> node) const {
             //--------------------------
@@ -256,9 +264,7 @@ class HazardPointerManager {
         } // end bool is_hazard(std::shared_ptr<T> node)
         //--------------------------
         void scan_and_reclaim(void) {
-            //--------------------------
             m_retired_nodes.reclaim(std::bind(&HazardPointerManager::is_hazard, this, std::placeholders::_1));
-            //--------------------------
         } // end void scan_and_reclaim(void)
         //--------------------------
         void scan_and_reclaim_all(void) {
@@ -269,10 +275,22 @@ class HazardPointerManager {
             m_hazard_pointers.clear();
             m_retired_nodes.clear();
         } // end void clear_data(void)
+        //--------------------------
+        constexpr size_t hazard_limiter(size_t size) const {
+            constexpr size_t c_min_limit = 1UL;
+            return std::max(c_min_limit, size);
+        }// end constexpr size_t retired_limiter(size_t size) const
+        //--------------------------
+        constexpr size_t retired_limiter(size_t size) const {
+            constexpr size_t c_limiter = 2UL;
+            return std::max(c_limiter, size);
+        }// end constexpr size_t retired_limiter(size_t size) const
         //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
-        HashTable<T*, T, PER_THREAD> m_retired_nodes;  // Hash table for retired nodes
+        const size_t m_retired_size;
+        HashSet<std::shared_ptr<T>> m_retired_nodes;
+        BitmaskTable<HazardPointer<T>, HAZARD_POINTERS> m_hazard_pointers;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
