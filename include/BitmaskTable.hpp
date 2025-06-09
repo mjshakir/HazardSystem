@@ -162,6 +162,11 @@ namespace HazardSystem {
                 for_each_active_fast(std::move(fn));
             }// end void for_each_fast(Func&& fn) const
             //--------------------------
+            template<typename Func>
+            bool find(Func&& fn) const{
+                return find_data(std::move(fn));
+            }// end void for_each_fast(Func&& fn) const
+            //--------------------------
             void clear(void) {
                 clear_data();
             }// end void clear(void)
@@ -511,6 +516,62 @@ namespace HazardSystem {
                     }// end while (mask)
                 }// end for (uint16_t part = 0; part < C_MASK_COUNT; ++part)
             }// end void for_each_active_fast(Func&& fn) const
+            //--------------------------
+            template<typename Func, uint16_t M = N>
+            std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(Func&& fn) const {
+                //--------------------------
+                uint64_t mask = m_bitmask.load(std::memory_order_acquire);
+                //--------------------------
+                while (mask) {
+                    //--------------------------
+                    const uint8_t index = static_cast<uint8_t>(std::countr_zero(mask));
+                    //--------------------------
+                    if (index < get_capacity()) {
+                        //--------------------------
+                        auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                        if (sp_data and fn(index, sp_data)) {
+                            return true;
+                        }// end  if (sp_data and fn(index, sp_data))
+                        //--------------------------
+                    }// end  if (index < get_capacity())
+                    //--------------------------
+                    mask &= mask - 1;
+                    //--------------------------
+                }// end while (mask)
+                //--------------------------
+                return false;
+                //--------------------------
+            }// end std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(auto&& fn) const
+            //--------------------------
+            template<typename Func, uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), bool> find_data(Func&& fn) const {
+                //--------------------------
+                for (IndexType part = 0; part < get_mask_count(); ++part) {
+                    //--------------------------
+                    uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
+                    const IndexType base    = static_cast<IndexType>(part * C_BITS_PER_MASK);
+                    //--------------------------
+                    while (mask) {
+                        //--------------------------
+                        const IndexType index = base + static_cast<uint8_t>(std::countr_zero(mask));
+                        //--------------------------
+                        if (index < get_capacity()) {
+                            //--------------------------
+                            auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                            if (sp_data and fn(index, sp_data)) {
+                                return true;
+                            }//end if (sp_data and fn(index, sp_data)) 
+                            //--------------------------
+                        }// end if (index < get_capacity())
+                        //--------------------------
+                        mask &= mask - 1;
+                        //--------------------------
+                    }// en while (mask)
+                }// end for (IndexType part = 0; part < get_mask_count(); ++part)
+                //--------------------------
+                return false;
+                //--------------------------
+            }// end std::enable_if_t<(M == 0) or (M > 64), bool> find_data(Func&& fn) const
             //--------------------------
             void clear_data(void) {
                 for_each_active_fast([this](IndexType idx, std::shared_ptr<T>&) {
