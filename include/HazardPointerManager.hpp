@@ -56,7 +56,13 @@ class HazardPointerManager {
         }// end ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& a_sp_data)
         //--------------------------
         ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries = 100UL) {
+            //--------------------------
+            if(!max_retries) {
+                return protect_data(a_sp_data);
+            }// end if(!max_retries)
+            //--------------------------
             return protect_data(a_sp_data, max_retries);
+            //--------------------------
         }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries = 100UL)
         //--------------------------
         // Acquire a hazard pointer slot
@@ -189,7 +195,7 @@ class HazardPointerManager {
             return ProtectedPointer<T>(
                 std::move(handle.sp_data),
                 std::move(protected_obj),
-                [this, index = handle.index](std::shared_ptr<HazardPointer<T>> hp) -> bool {
+                [this, index = handle.index.value()](std::shared_ptr<HazardPointer<T>> hp) -> bool {
                     return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
         }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
@@ -228,9 +234,11 @@ class HazardPointerManager {
             }// end if (!node)
             //--------------------------
             // T* raw_ptr = node.get();
-            m_retired_nodes.insert(node);
+            if(!m_retired_nodes.insert(node)) {
+                return false;
+            }// end if(m_retired_nodes.insert(node))
             //--------------------------
-            if (m_retired_nodes.size() >= m_retired_size) {
+            if (m_retired_nodes.size() > m_retired_size) {
                 scan_and_reclaim();
             }// end if (m_retired_nodes.size() >= m_retired_size)
             //--------------------------
@@ -244,23 +252,16 @@ class HazardPointerManager {
                 return false;
             }// end if (!node)
             //--------------------------
-            bool found = false;
-            //--------------------------
-            m_hazard_pointers.for_each_fast([&found, &node](IndexType, const std::shared_ptr<HazardPointer<T>>& hp) {
-                //--------------------------
-                if (!hp) {
-                    found = false;
-                    return;
-                }// end if (!hp)
-                //--------------------------
-                auto hp_ptr = hp->pointer.load();
-                if (hp_ptr and hp_ptr.get() == node.get()){
-                    found = true;
-                }// end if (hp_ptr and hp_ptr.get() == node.get())
-                //--------------------------
-            });
-            //--------------------------
-            return found;
+            return m_hazard_pointers.find([&node](IndexType, const std::shared_ptr<HazardPointer<T>>& hp) {
+                        //--------------------------
+                        if (!hp) {
+                            return false;
+                        }// end if (!hp)
+                        //--------------------------
+                        auto hp_ptr = hp->pointer.load();
+                        return hp_ptr and hp_ptr.get() == node.get();
+                        //--------------------------
+                    });
         } // end bool is_hazard(std::shared_ptr<T> node)
         //--------------------------
         void scan_and_reclaim(void) {
