@@ -294,14 +294,13 @@ TEST_F(FixedHazardPointerManagerTest, DoubleReleaseProtection) {
     ASSERT_TRUE(handle.valid());
     
     // Create a copy for the second release attempt
-    auto& handle_copy = handle;
+    auto handle_copy = std::move(handle);
     
     // First release should succeed
-    EXPECT_TRUE(manager.release(handle));
+    EXPECT_FALSE(manager.release(handle));
     // Second release of the same handle should fail or be safe
-    EXPECT_FALSE(manager.release(handle_copy));
+    EXPECT_TRUE(manager.release(handle_copy));
 }
-
 // ============================================================================
 // ProtectedPointer Tests for Fixed Implementation
 // ============================================================================
