@@ -26,30 +26,12 @@ namespace HazardSystem {
                 //--------------------------
             }// end ProtectedPointer
             //--------------------------
-            ProtectedPointer(ProtectedPointer&& other) noexcept :   m_hazard_pointer(std::move(other.m_hazard_pointer)),
-                                                                    m_protected_pointer(std::move(other.m_protected_pointer)),
-                                                                    m_release(std::move(other.m_release)) {
-                //--------------------------
-            }// end ProtectedPointer(ProtectedPointer&& other) noexcep
+            ProtectedPointer(ProtectedPointer&& other) noexcept = default;
             //--------------------------
-            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept {
-                //--------------------------
-                if (this == &other) {
-                    return *this;
-                }// end if (this == &other)
-                //--------------------------
-                release_data();
-                //--------------------------
-                m_hazard_pointer    = std::move(other.m_hazard_pointer);
-                m_protected_pointer = std::move(other.m_protected_pointer);
-                m_release       = std::move(other.m_release);
-                //--------------------------
-                return *this;
-                //--------------------------
-            }// ProtectedPointer& operator=(ProtectedPointer&& other) noexcept
+            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept = default;
             //--------------------------
-            ProtectedPointer(const ProtectedPointer&)               = delete;
-            ProtectedPointer& operator=(const ProtectedPointer&)    = delete;
+            ProtectedPointer(const ProtectedPointer&)               = default;
+            ProtectedPointer& operator=(const ProtectedPointer&)    = default;
             //--------------------------
             ~ProtectedPointer(void) {
                 release_data();
