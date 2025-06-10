@@ -586,9 +586,9 @@ namespace HazardSystem {
             template<uint16_t M = N>
             std::enable_if_t<(M > 64) or (M == 0), bool> Initialization(uint64_t value) {
                 //--------------------------
-                for (auto& slot : m_bitmask) {
-                    slot.store(value, std::memory_order_relaxed);
-                }// end for (auto& slot : m_bitmask)
+                for (auto& mask : m_bitmask) {
+                    mask.store(value, std::memory_order_relaxed);
+                }// end for (auto& mask : m_bitmask)
                 //--------------------------
                 return true;
                 //--------------------------
