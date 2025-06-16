@@ -611,7 +611,7 @@ BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)
 
 // Utilization tests
 BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)
-    ->DenseRange(0, 90, 10)  // 0%, 10%, 20%, ..., 90% utilization
+    ->DenseRange(10, 90, 10)  // 0%, 10%, 20%, ..., 90% utilization
     ->Complexity(benchmark::oN);
 
 // ============================================================================
