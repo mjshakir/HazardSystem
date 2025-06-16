@@ -25,8 +25,8 @@ namespace HazardSystem {
                 //--------------------------
             }// end RetireSet(const size_t& thresholdxw)
             //--------------------------
-            RetireSet(void)                               = delete;
-            ~RetireSet(void)                              = default;
+            RetireSet(void)                         = delete;
+            ~RetireSet(void)                        = default;
             //--------------------------
             RetireSet(const RetireSet&)             = delete;
             RetireSet& operator=(const RetireSet&)  = delete;
