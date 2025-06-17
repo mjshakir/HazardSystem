@@ -219,7 +219,7 @@ namespace HazardSystem {
                 //--------------------------
                 if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
                     //--------------------------
-                    constexpr float c_increase_limit = 0.20f;
+                    constexpr float c_increase_limit = 1.2f;
                     //--------------------------
                     if(should_resize()) {
                         resize_data(static_cast<size_t>(_capacity * c_increase_limit));

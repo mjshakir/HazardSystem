@@ -66,7 +66,7 @@ namespace HazardSystem {
                 }// end if (m_retired.size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
-                    constexpr float C_INCREASE_SIZE = 0.2f;
+                    constexpr float C_INCREASE_SIZE = 1.2f;
                     static_cast<void>(resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE)));
                 }// end if (should_resize)
                 //--------------------------
