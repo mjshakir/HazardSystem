@@ -15,6 +15,14 @@
 #include <limits>
 #include <utility>
 #include <cmath>
+#include <cassert>
+#include <thread>
+#include <mutex>
+#include <string>
+#include <iostream>
+//--------------------------------------------------------------
+#define assertm(expr, msg) \
+    if (!(expr)) { std::cerr << "Assertion failed: " << msg << std::endl; assert(expr); }
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -23,11 +31,13 @@ namespace HazardSystem {
         //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            static constexpr uint16_t C_ARRAY_LIMIT = 1024U;
+            static constexpr uint16_t C_ARRAY_LIMIT     = 1024U;
+            static constexpr uint16_t C_BITS_PER_MASK   = std::numeric_limits<uint64_t>::digits;
+            static constexpr uint16_t C_MASK_COUNT      = (N == 0 ? 0 : static_cast<uint16_t>((N + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK));
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
-            using IndexType = std::conditional_t<(N == 0) or (N > std::numeric_limits<uint16_t>::max()), size_t, 
+            using IndexType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), size_t, 
                                                     std::conditional_t<(N <= std::numeric_limits<uint8_t>::max()), uint8_t, uint16_t>>;
             //--------------------------------------------------------------
         public:
@@ -53,9 +63,8 @@ namespace HazardSystem {
             BitmaskTable(const size_t& capacity) :  m_capacity(capacity),
                                                     m_mask_count(bitmask_table_calculator(capacity)),
                                                     m_size(0UL),
-                                                    m_slots(capacity),
-                                                    m_bitmask(m_mask_count.load(std::memory_order_relaxed)),
-                                                    m_initialized(Initialization(0ULL)) {
+                                                    m_resizing(false),
+                                                    m_initialized(Initialization(capacity, 0ULL)) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
             //--------------------------
@@ -63,9 +72,8 @@ namespace HazardSystem {
             BitmaskTable(void) :    m_capacity(N),
                                     m_mask_count(bitmask_table_calculator(N)),
                                     m_size(0UL),
-                                    m_slots(N),
-                                    m_bitmask(m_mask_count.load(std::memory_order_relaxed)),
-                                    m_initialized(Initialization(0ULL)) {
+                                    m_resizing(false),
+                                    m_initialized(Initialization(N, 0ULL)) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
             //--------------------------
@@ -219,10 +227,10 @@ namespace HazardSystem {
                 //--------------------------
                 if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
                     //--------------------------
-                    constexpr float c_increase_limit = 1.2f;
+                    constexpr float c_increase_limit = 1.3f;
                     //--------------------------
                     if(should_resize()) {
-                        resize_data(static_cast<size_t>(_capacity * c_increase_limit));
+                       static_cast<void>(resize_data(static_cast<size_t>(_capacity * c_increase_limit)));
                     }// end if(should_resize())
                     //--------------------------
                 }// end if constexpr ((N == 0) or (N > C_ARRAY_LIMIT))
@@ -230,22 +238,22 @@ namespace HazardSystem {
                 for (uint16_t part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
                     IndexType base  = static_cast<IndexType>(part * C_BITS_PER_MASK);
-                    uint64_t mask   = m_bitmask.at(part).load(std::memory_order_acquire);
+                    uint64_t mask   =  get_bitmask(part).load(std::memory_order_acquire);
                     //--------------------------
                     while (mask != ~0ULL) {
                         //--------------------------
                         IndexType index = static_cast<IndexType>(std::countr_zero(~mask));
                         if (base + index >= _capacity) {
-                            break;
+                            return std::nullopt;
                         }// end if (base + index >= _capacity)
                         //--------------------------
                         uint64_t flag       = 1ULL << index;
                         uint64_t desired    = mask | flag;
                         //--------------------------
-                        if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel)) {
+                        if (get_bitmask(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel)) {
                             // m_size.fetch_add(1, std::memory_order_relaxed);
                             return base + index;
-                        }// end if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
+                        }// end if (get_bitmask(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
                     }// end while (mask != ~0ULL)
                 }// end for (uint16_t part = 0; part < get_mask_count(); ++part) 
                 //--------------------------
@@ -259,7 +267,7 @@ namespace HazardSystem {
                     return false;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                auto prev = m_slots.at(index).exchange(nullptr, std::memory_order_acq_rel);
+                auto prev = get_slot(index).exchange(nullptr, std::memory_order_acq_rel);
                 if (!prev) {
                     return false;
                 }// end if (!prev)
@@ -273,7 +281,7 @@ namespace HazardSystem {
                     uint16_t part = part_index(index);
                     uint16_t bit  = bit_index(index);
                     //--------------------------
-                    m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                    get_bitmask(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
                     //--------------------------
                 }// end if constexpr (N <= 64)
                 //--------------------------
@@ -289,14 +297,18 @@ namespace HazardSystem {
                     return false;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                m_slots.at(index).store(sp_data, std::memory_order_release);
+                std::shared_ptr<T> previous_value = m_slots[index].exchange(sp_data, std::memory_order_acq_rel);
                 //--------------------------
                 if (sp_data) {
                     m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
-                    m_size.fetch_add(1, std::memory_order_relaxed);
+                    if (!previous_value) {
+                        m_size.fetch_add(1, std::memory_order_relaxed);
+                    }// end if (!previous_value)
                 } else {
                     m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
-                    m_size.fetch_sub(1, std::memory_order_relaxed);
+                    if (previous_value) {
+                        m_size.fetch_sub(1, std::memory_order_relaxed);
+                    }// end if (!previous_value)
                 }// end  if (sp_data)
                 //--------------------------
                 return true;
@@ -310,18 +322,25 @@ namespace HazardSystem {
                     return false;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                m_slots.at(index).store(sp_data, std::memory_order_release);
+                // get_slot(index).store(sp_data, std::memory_order_release);
+                std::shared_ptr<T> previous_value = get_slot(index).exchange(sp_data, std::memory_order_acq_rel);
                 //--------------------------
                 uint16_t part = part_index(index);
                 uint16_t bit  = bit_index(index);
                 //--------------------------
                 if (sp_data) {
-                    m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);         
+                    get_bitmask(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);   
+                    if (!previous_value) {
+                        m_size.fetch_add(1, std::memory_order_relaxed);
+                    }// end if (!previous_value)      
                 } else {
-                    m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                    get_bitmask(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                    if (previous_value) {
+                        m_size.fetch_sub(1, std::memory_order_relaxed);
+                    }// end if (!previous_value)
                 }// end if (sp_data)
                 //--------------------------
-                m_size.fetch_add(1, std::memory_order_relaxed);
+                // m_size.fetch_add(1, std::memory_order_relaxed);
                 return true;
                 //--------------------------
             }// end std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data)
@@ -381,7 +400,7 @@ namespace HazardSystem {
                     return nullptr;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                return m_slots.at(index).load(std::memory_order_acquire);
+                return get_slot(index).load(std::memory_order_acquire);
                 //--------------------------
             }// end std::optional<std::shared_ptr<T>> at_data(const IndexType& index) const
             //--------------------------
@@ -389,20 +408,16 @@ namespace HazardSystem {
                 //--------------------------
                 if (index >= get_capacity()) {
                     return false;
-                }// end if (index >= get_capacity())
-                //--------------------------
-                uint64_t mask = 0;
+                }
                 //--------------------------
                 if constexpr ((N > 0) and (N <= 64)) {
-                    mask = m_bitmask.load(std::memory_order_acquire);
-                } else {
-                    //--------------------------
-                    uint16_t part   = part_index(index);
-                    mask            = m_bitmask.at(part).load(std::memory_order_acquire);
-                    //--------------------------
-                }// end if constexpr (N <= 64)
-                //--------------------------
-                return (mask & (1ULL << index)) != 0;
+                    uint64_t mask = m_bitmask.load(std::memory_order_acquire);
+                    return (mask & (1ULL << index)) != 0;
+                }
+                uint16_t part = part_index(index);
+                uint16_t bit  = bit_index(index);
+                uint64_t mask = get_bitmask(part).load(std::memory_order_acquire);
+                return (mask & (1ULL << bit)) != 0;
                 //--------------------------
             }// end bool active_data(const IndexType& index) const
             //--------------------------
@@ -446,7 +461,7 @@ namespace HazardSystem {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
-                    const uint64_t mask   = m_bitmask[part].load(std::memory_order_acquire);
+                    const uint64_t mask   = get_bitmask(part).load(std::memory_order_acquire);
                     const IndexType base  = static_cast<IndexType>(part * C_BITS_PER_MASK);
                     //--------------------------
                     for (uint8_t bit = 0; bit < C_BITS_PER_MASK; ++bit) {
@@ -457,7 +472,7 @@ namespace HazardSystem {
                         }// end if (index >= get_capacity())
                         //--------------------------
                         if (mask & (1ULL << bit)) {
-                            auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                            auto sp_data = get_slot(index).load(std::memory_order_acquire);
                             if (sp_data) {
                                 fn(index, sp_data);
                             }// end if (sp_data)
@@ -494,7 +509,7 @@ namespace HazardSystem {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
-                    uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
+                    uint64_t mask           = get_bitmask(part).load(std::memory_order_acquire);
                     const IndexType _base    = static_cast<IndexType>(part * C_BITS_PER_MASK);
                     //--------------------------
                     while (mask) {
@@ -503,7 +518,7 @@ namespace HazardSystem {
                         //--------------------------
                         if (_index < get_capacity()) {
                             //--------------------------
-                            auto sp_data = m_slots[_index].load(std::memory_order_acquire);
+                            auto sp_data = get_slot(_index).load(std::memory_order_acquire);
                             //--------------------------
                             if (sp_data) {
                                 fn(_index, sp_data);
@@ -548,7 +563,7 @@ namespace HazardSystem {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
-                    uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
+                    uint64_t mask           = get_bitmask(part).load(std::memory_order_acquire);
                     const IndexType base    = static_cast<IndexType>(part * C_BITS_PER_MASK);
                     //--------------------------
                     while (mask) {
@@ -557,7 +572,7 @@ namespace HazardSystem {
                         //--------------------------
                         if (index < get_capacity()) {
                             //--------------------------
-                            auto sp_data = m_slots[index].load(std::memory_order_acquire);
+                            auto sp_data = get_slot(index).load(std::memory_order_acquire);
                             if (sp_data and fn(index, sp_data)) {
                                 return true;
                             }//end if (sp_data and fn(index, sp_data)) 
@@ -575,7 +590,7 @@ namespace HazardSystem {
             //--------------------------
             void clear_data(void) {
                 for_each_active_fast([this](IndexType idx, std::shared_ptr<T>&) {
-                    m_slots.at(idx).exchange(nullptr, std::memory_order_acq_rel);
+                    get_slot(idx).exchange(nullptr, std::memory_order_acq_rel);
                 });
             }// end void clear_data(void)
             //--------------------------
@@ -583,8 +598,18 @@ namespace HazardSystem {
                 return m_size.load(std::memory_order_acquire);
             }// end IndexType size_data(void) const
             //--------------------------
+             template<uint16_t M = N>
+            std::enable_if_t<((M > 64) and (M <= C_ARRAY_LIMIT)), bool> Initialization(const uint64_t& value) {
+                return Initialization_masks(value);
+            }
+            //--------------------------
             template<uint16_t M = N>
-            std::enable_if_t<(M > 64) or (M == 0), bool> Initialization(uint64_t value) {
+            std::enable_if_t<((M == 0) or (M > C_ARRAY_LIMIT)), bool> Initialization(const uint64_t& capacity, const uint64_t& value) {
+                return Initialization_slots(capacity) and Initialization_masks(value);
+            }
+            //--------------------------
+            template<uint16_t M = N>
+            std::enable_if_t<((M > 64) and (M <= C_ARRAY_LIMIT)), bool> Initialization_masks(const uint64_t& value) {
                 //--------------------------
                 for (auto& mask : m_bitmask) {
                     mask.store(value, std::memory_order_relaxed);
@@ -595,10 +620,67 @@ namespace HazardSystem {
             }// end std::enable_if_t<(M > 64), bool> Initialization(void)
             //--------------------------
             template<uint16_t M = N>
+            std::enable_if_t<((M == 0) or (M > C_ARRAY_LIMIT)), bool> Initialization_masks(const uint64_t& value) {
+                //--------------------------
+                const size_t _capacity = m_mask_count.load(std::memory_order_relaxed);
+                m_bitmask.reserve(_capacity);
+                for (size_t i = 0; i < _capacity; ++i) {
+                    m_bitmask.emplace_back(std::make_unique<std::atomic<size_t>>(value));
+                }// end for (auto& mask : m_bitmask)
+                //--------------------------
+                return true;
+                //--------------------------
+            }// end std::enable_if_t<(M > 64), bool> Initialization(void)
+            //--------------------------
+            template<uint16_t M = N>
+            std::enable_if_t<((M == 0) or (M > C_ARRAY_LIMIT)), bool> Initialization_slots(const uint64_t& capacity) {
+                //--------------------------
+                m_slots.reserve(capacity);
+                for (size_t i = 0; i < capacity; ++i) {
+                    m_slots.emplace_back(std::make_unique<std::atomic<std::shared_ptr<T>>>(nullptr));
+                }
+                //--------------------------
+                return true;
+                //--------------------------
+            }// end std::enable_if_t<(M > 64), bool> Initialization(void)
+            //--------------------------
+            template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> should_resize(void) const {
-                constexpr float c_resize_limiter = 0.85f;
-                return size_data() > static_cast<IndexType>(m_capacity.load(std::memory_order_acquire) * c_resize_limiter);
+                constexpr float c_resize_limiter = 0.75f;
+                return size_data() >= static_cast<IndexType>(m_capacity.load(std::memory_order_acquire) * c_resize_limiter);
             }// end  bool should_resize(void) const
+            //--------------------------
+            // template<uint16_t M = N>
+            // std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool>
+            // resize_data(const size_t& size) {
+            //     //--------------------------
+            //     while (m_resizing.load(std::memory_order_acquire));
+            //     //--------------------------
+            //     m_resizing.store(true, std::memory_order_release);
+            //     //--------------------------
+            //     const size_t requested_size = std::bit_ceil(size);
+            //     //--------------------------
+            //     if (!ensure_capacity(requested_size)) {
+            //         // Someone else already did it, or no resize needed
+            //         return false;
+            //     }
+            //     //--------------------------
+            //     // Only grow bitmask if we actually grew slots.
+            //     const size_t required_mask_count = bitmask_table_calculator(requested_size);
+            //     if(!ensure_mask_count(required_mask_count)) {
+            //         // Someone else already did it, or no resize needed
+            //         return false;
+            //     }
+            //     //--------------------------
+            //     m_mask_count.store(required_mask_count, std::memory_order_release);
+            //     m_capacity.store(requested_size, std::memory_order_release);
+            //     m_resizing.store(false, std::memory_order_release);
+            //     //--------------------------
+            //     // All invariants maintained!
+            //     return ((m_capacity.load(std::memory_order_relaxed) >= requested_size) and
+            //                 (m_mask_count.load(std::memory_order_release) >= required_mask_count));
+            //     //--------------------------
+            // }// bool resize_data(const size_t& size)
             //--------------------------
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> resize_data(const size_t& size) {
@@ -609,63 +691,81 @@ namespace HazardSystem {
                     return false;
                 }// end if (size <= current_capacity)
                 //--------------------------
-                static_cast<void>(resize_slots(current_capacity, requested_size));
+                std::lock_guard<std::mutex> lock(m_resize_mutex);
+                const size_t    _new_count      = bitmask_table_calculator(requested_size), 
+                                _current_count  = m_mask_count.load(std::memory_order_acquire);
+                //--------------------------
+                // m_slots.resize(requested_size);
+                m_slots.reserve(requested_size);
+                for (size_t i = current_capacity; i < requested_size; ++i) {
+                    m_slots.emplace_back(std::make_unique<std::atomic<std::shared_ptr<T>>>(nullptr));
+                }
+                //--------------------------
+                if(_current_count < _new_count) {
+                    m_bitmask.reserve(_new_count);
+                    for (size_t i = _current_count; i < _new_count; ++i) {
+                        m_bitmask.emplace_back(std::make_unique<std::atomic<uint64_t>>(0ULL));
+                    }
+                    m_mask_count.store(_new_count, std::memory_order_release);
+                }
+                //--------------------------
                 m_capacity.store(size, std::memory_order_release);
                 //--------------------------
-                const size_t    _new_count = bitmask_table_calculator(requested_size), 
-                                _current_count = m_mask_count.load(std::memory_order_acquire);
-                //--------------------------
-                if (!resize_bitmask(_current_count, _new_count, 0ULL)) {
-                    return false;
-                }// if (!resize_bitmask(_current_count, _new_count, 0ULL))
-                //--------------------------
-                m_mask_count.store(_new_count, std::memory_order_release);
-                //--------------------------
                 return true;
                 //--------------------------
-            }// end bool resize_data(const size_t& size)
+            }
             //--------------------------
-            template<uint16_t M = N>
-            std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> resize_slots(const size_t& current_size, const size_t& new_size) {
-                //--------------------------
-                if(new_size < current_size) {
-                    return false;
-                }// end if(new_size < current_size)
-                //--------------------------
-                if((new_size - current_size) == 1 ) {
-                    m_slots[new_size - 1].store(nullptr, std::memory_order_relaxed);
-                    return true;
-                }// end if((new_size - current_size) == 1 )
-                //--------------------------
-                for (size_t i = current_size; i < new_size; ++i) {
-                    m_slots.back().store(nullptr, std::memory_order_relaxed);
-                }// end for (size_t i = current_size; i < new_size; ++i)
-                //--------------------------
-                return true;
-                //--------------------------
-            }// end  std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> resize_slots(const size_t& current_size, const size_t& new_size)
-            //--------------------------
-             template<uint16_t M = N>
-            std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> resize_bitmask( const size_t& current_size,
-                                                                                    const size_t& new_size,
-                                                                                    const uint64_t& value = 0ULL) {
-                //--------------------------
-                if(new_size < current_size) {
-                    return false;
-                }// end if(new_size < current_size)
-                //--------------------------
-                if((new_size - current_size) == 1 ) {
-                    m_bitmask[new_size - 1].store(value, std::memory_order_relaxed);
-                    return true;
-                }// end if((new_size - current_size) == 1 )
-                //--------------------------
-                for (size_t i = current_size; i < new_size; ++i) {
-                    m_bitmask.back().store(value, std::memory_order_relaxed);
-                }// end for (size_t i = current_size; i < new_size; ++i)
-                //--------------------------
-                return true;
-                //--------------------------
-            }// end  std::enable_if_t<(M == 0) or (M > C_ARRAY_LIMIT), bool> resize_slots(const size_t& current_size, const size_t& new_size)
+            // bool ensure_capacity(size_t required) {
+            //     //--------------------------
+            //     if (m_capacity.load(std::memory_order_acquire) == RESIZE_IN_PROGRESS) {
+            //         return false;
+            //     }
+            //     //--------------------------
+            //     size_t cap = m_capacity.load(std::memory_order_acquire);
+            //     //--------------------------
+            //     while (cap < required) {
+            //         if (m_capacity.compare_exchange_weak(
+            //                 cap, RESIZE_IN_PROGRESS,
+            //                 std::memory_order_acq_rel, std::memory_order_acquire)) {
+
+            //             // This thread is responsible for growing the storage
+            //             m_slots.reserve(required);
+            //             for (size_t i = cap; i < required; ++i) {
+            //                 m_slots.emplace_back(std::make_unique<std::atomic<std::shared_ptr<T>>>(nullptr));
+            //             }
+                        
+            //             return true;
+            //         }
+            //         // cap is updated by CAS or after resize; loop to re-check
+            //         cap = m_capacity.load(std::memory_order_acquire);
+            //     }
+            //     return false;
+            // }
+            // //--------------------------
+            // bool ensure_mask_count(size_t required, uint64_t value = 0ULL) {
+            //     //--------------------------
+            //     if (m_mask_count.load(std::memory_order_acquire) == RESIZE_IN_PROGRESS) {
+            //         return false;
+            //     }
+            //     //--------------------------
+            //     size_t count = m_mask_count.load(std::memory_order_acquire);
+            //     //--------------------------
+            //     while (count < required) {
+            //         if (m_mask_count.compare_exchange_weak(
+            //                 count, RESIZE_IN_PROGRESS,
+            //                 std::memory_order_acq_rel, std::memory_order_acquire)) {
+
+            //             m_bitmask.reserve(required);
+            //             for (size_t i = count; i < required; ++i) {
+            //                 m_bitmask.emplace_back(std::make_unique<std::atomic<uint64_t>>(value));
+            //             }
+
+            //             return true;
+            //         }
+            //         count = m_mask_count.load(std::memory_order_acquire);
+            //     }
+            //     return false;
+            // }
             //--------------------------
             constexpr IndexType get_capacity(void) const {
                 //--------------------------
@@ -698,26 +798,77 @@ namespace HazardSystem {
             constexpr size_t bitmask_table_calculator(size_t capacity) {
                 return (capacity) ? static_cast<size_t>((capacity + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK) : 0UL;
             }// end constexpr size_t bitmask_table_calculator(size_t capacity)
+            //--------------------------         
+            std::atomic<std::shared_ptr<T>>& get_slot(const size_t& idx) {
+                if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
+                    // assert(idx < m_slots.size());
+                    // assertm(idx < m_slots.size(), std::string("m_slots idx:[") + std::to_string(idx) + "] and size:[ " + std::to_string(m_slots.size()) + "]");
+                    return *(m_slots.at(idx));
+                }
+                else {
+                    return m_slots.at(idx);
+                }
+            }
+
+            const std::atomic<std::shared_ptr<T>>& get_slot(const size_t& idx) const {
+                if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
+                    // assert(idx < m_slots.size());
+                    // assertm(idx < m_slots.size(), std::string("m_slots idx:[") + std::to_string(idx) + "] and size:[" + std::to_string(m_slots.size()) + "]");
+                    return *(m_slots.at(idx));
+                }
+                else {
+                    return m_slots.at(idx);
+                }
+            }
+
+
+            std::atomic<uint64_t>& get_bitmask(const size_t& idx) {
+                if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
+                    // assert(idx < m_bitmask.size());
+                    // assertm(idx < m_bitmask.size(), std::string("m_bitmask idx:[") + std::to_string(idx) + "] and size:[ " + std::to_string(m_bitmask.size()) + "]");
+                    return *(m_bitmask.at(idx));
+                }
+                if constexpr ((N > 64) and (N <= C_ARRAY_LIMIT)) {
+                    return m_bitmask.at(idx);
+                }
+                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
+                    return m_bitmask;
+                }
+            }
+
+            const std::atomic<uint64_t>& get_bitmask(const size_t& idx) const {
+                if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
+                    // assert(idx < m_bitmask.size());
+                    // assertm(idx < m_bitmask.size(), std::string("m_bitmask idx:[") + std::to_string(idx) + "] and size:[ " + std::to_string(m_bitmask.size()) + "]");
+                    return *(m_bitmask.at(idx));
+                }
+                if constexpr ((N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT)) {
+                    return m_bitmask.at(idx);
+                } 
+                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
+                    return m_bitmask;
+                }
+            }
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            static constexpr uint16_t C_BITS_PER_MASK   = std::numeric_limits<uint64_t>::digits;
-            static constexpr uint16_t C_MASK_COUNT      = (N == 0 ? 0 : static_cast<uint16_t>((N + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK));
-            //--------------------------
             std::atomic<size_t> m_capacity, m_mask_count, m_size;
+            std::atomic<bool> m_resizing;
             //--------------------------
-            using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,
+            using SlotType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::unique_ptr<std::atomic<std::shared_ptr<T>>>>,
+                                                                std::array<std::atomic<std::shared_ptr<T>>, N>>;
+            //--------------------------
+            using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::unique_ptr<std::atomic<uint64_t>>>,
                                     std::conditional_t<(N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT ), std::array<std::atomic<uint64_t>, C_MASK_COUNT>,
                                     std::atomic<uint64_t>>>;
-            //--------------------------
-            using SlotType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<std::shared_ptr<T>>>,
-                                                                std::array<std::atomic<std::shared_ptr<T>>, N>>;
-
+            
             //--------------------------
             SlotType m_slots;
             BitmaskType m_bitmask;
             //--------------------------      
             std::optional<bool> m_initialized;
+            //--------------------------
+            std::mutex m_resize_mutex;
         //--------------------------------------------------------------
     };// end class BitmaskTable
     //--------------------------------------------------------------
