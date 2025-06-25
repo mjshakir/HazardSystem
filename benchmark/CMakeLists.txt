@@ -55,4 +55,7 @@ endfunction()
 #------------------------------------------------------------------------------------------
 # Add the benchmarks without the 'benchmark/' prefix since we are already in the benchmark directory
 create_benchmark_target(${PROJECT_NAME}_HashTable_Benchmark HashTableBenchmark.cpp)
+# create_benchmark_target(${PROJECT_NAME}_Benchmark HazardPointerManagerBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_Fixed_Benchmark     HazardPointerManagerFixedBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_Dynamic_Benchmark     HazardPointerManagerDynamicBenchmark.cpp)
 #------------------------------------------------------------------------------------------

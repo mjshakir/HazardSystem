@@ -84,6 +84,9 @@
         "cstdbool": "cpp",
         "shared_mutex": "cpp",
         "chrono": "cpp",
-        "future": "cpp"
+        "future": "cpp",
+        "print": "cpp",
+        "queue": "cpp",
+        "stack": "cpp"
     }
 }
