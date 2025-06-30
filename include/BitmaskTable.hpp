@@ -51,20 +51,20 @@ namespace HazardSystem {
             //--------------------------
             template <uint16_t M = N, std::enable_if_t< (M == 0), int> = 0>
             BitmaskTable(const size_t& capacity) :  m_capacity(bitmask_capacity_calculator(capacity)),
-                                                    m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_release))),
+                                                    m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_acquire))),
                                                     m_size(0UL),
-                                                    m_slots(m_capacity.load(std::memory_order_release)),
-                                                    m_bitmask(m_mask_count.load(std::memory_order_relaxed)),
+                                                    m_slots(m_capacity.load(std::memory_order_acquire)),
+                                                    m_bitmask(m_mask_count.load(std::memory_order_acquire)),
                                                     m_initialized(Initialization(0ULL)) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
             //--------------------------
             template <uint16_t M = N, std::enable_if_t< (M > C_ARRAY_LIMIT), int> = 0>
             BitmaskTable(void) :    m_capacity(bitmask_capacity_calculator(N)),
-                                    m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_release))),
+                                    m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_acquire))),
                                     m_size(0UL),
-                                    m_slots(m_capacity.load(std::memory_order_release)),
-                                    m_bitmask(m_mask_count.load(std::memory_order_relaxed)),
+                                    m_slots(m_capacity.load(std::memory_order_acquire)),
+                                    m_bitmask(m_mask_count.load(std::memory_order_acquire)),
                                     m_initialized(Initialization(0ULL)) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
