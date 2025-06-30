@@ -32,8 +32,9 @@ public:
         // Simulate some work
         volatile int sum = 0;
         for (const auto& val : data) {
-            sum += val;
+            sum = sum + val;
         }
+        static_cast<void>(sum);
     }
 };
 
