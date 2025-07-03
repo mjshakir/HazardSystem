@@ -248,7 +248,7 @@ class HazardPointerManager {
                 return false;
             }// end if (!node)
             //--------------------------
-            return m_hazard_pointers.find([&node](IndexType, const std::shared_ptr<HazardPointer<T>>& hp) {
+            return m_hazard_pointers.find([&node](const std::shared_ptr<HazardPointer<T>>& hp) {
                         //--------------------------
                         if (!hp) {
                             return false;
