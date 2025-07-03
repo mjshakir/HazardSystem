@@ -184,7 +184,7 @@ namespace HazardSystem {
             template<uint16_t M = N>
             std::enable_if_t<(M > 0) and (M <= 64), std::optional<IndexType>> acquire_data(void) {
                 //--------------------------
-                uint64_t mask = m_bitmask.load(std::memory_order_acquire);
+                uint64_t mask = m_bitmask.load(std::memory_order_relaxed);
                 //--------------------------
                 while (mask != ~0ULL) {
                     //--------------------------
@@ -197,10 +197,10 @@ namespace HazardSystem {
                     uint64_t flag = 1ULL << index;
                     uint64_t desired = mask | flag;
                     //--------------------------
-                    if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel)) {
+                    if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                         // m_size.fetch_add(1, std::memory_order_relaxed);
                         return index;
-                    }// end if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
+                    }// end if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)))
                 }// end while (mask != ~0ULL)
                 //--------------------------
                 return std::nullopt;
@@ -215,7 +215,7 @@ namespace HazardSystem {
                 for (uint16_t part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
                     IndexType base  = static_cast<IndexType>(part * C_BITS_PER_MASK);
-                    uint64_t mask   = m_bitmask.at(part).load(std::memory_order_acquire);
+                    uint64_t mask   = m_bitmask.at(part).load(std::memory_order_relaxed);
                     //--------------------------
                     while (mask != ~0ULL) {
                         //--------------------------
@@ -227,7 +227,7 @@ namespace HazardSystem {
                         uint64_t flag       = 1ULL << index;
                         uint64_t desired    = mask | flag;
                         //--------------------------
-                        if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel)) {
+                        if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                             // m_size.fetch_add(1, std::memory_order_relaxed);
                             return base + index;
                         }// end if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
@@ -274,14 +274,18 @@ namespace HazardSystem {
                     return false;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                m_slots.at(index).store(sp_data, std::memory_order_release);
+                auto prev = m_slots.at(index).exchange(sp_data, std::memory_order_acq_rel);
                 //--------------------------
                 if (sp_data) {
                     m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
-                    m_size.fetch_add(1, std::memory_order_relaxed);
+                    if (!prev) {
+                        m_size.fetch_add(1, std::memory_order_acq_rel);
+                    }// end if (!prev)
                 } else {
                     m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
-                    m_size.fetch_sub(1, std::memory_order_relaxed);
+                    if (prev) {
+                        m_size.fetch_sub(1, std::memory_order_acq_rel);
+                    }// end if (prev) 
                 }// end  if (sp_data)
                 //--------------------------
                 return true;
@@ -295,18 +299,23 @@ namespace HazardSystem {
                     return false;
                 }// end if (index >= get_capacity())
                 //--------------------------
-                m_slots.at(index).store(sp_data, std::memory_order_release);
+                auto prev = m_slots.at(index).exchange(sp_data, std::memory_order_acq_rel);
                 //--------------------------
                 uint16_t part = part_index(index);
                 uint16_t bit  = bit_index(index);
                 //--------------------------
                 if (sp_data) {
-                    m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);         
+                    m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);
+                    if (!prev) {
+                        m_size.fetch_add(1, std::memory_order_acq_rel);
+                    }// end if (!prev)
                 } else {
                     m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                    if (prev) {
+                        m_size.fetch_sub(1, std::memory_order_acq_rel);
+                    }// end if (prev) 
                 }// end if (sp_data)
                 //--------------------------
-                m_size.fetch_add(1, std::memory_order_relaxed);
                 return true;
                 //--------------------------
             }// end std::enable_if_t<(M > 64), bool> set_data(const IndexType& index, std::shared_ptr<T> sp_data)
@@ -514,7 +523,7 @@ namespace HazardSystem {
                     if (index < get_capacity()) {
                         //--------------------------
                         auto sp_data = m_slots[index].load(std::memory_order_acquire);
-                        if (sp_data and fn(index, sp_data)) {
+                        if (sp_data and fn(sp_data)) {
                             return true;
                         }// end  if (sp_data and fn(index, sp_data))
                         //--------------------------
@@ -543,7 +552,7 @@ namespace HazardSystem {
                         if (index < get_capacity()) {
                             //--------------------------
                             auto sp_data = m_slots[index].load(std::memory_order_acquire);
-                            if (sp_data and fn(index, sp_data)) {
+                            if (sp_data and fn(sp_data)) {
                                 return true;
                             }//end if (sp_data and fn(index, sp_data)) 
                             //--------------------------
