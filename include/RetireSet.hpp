@@ -62,12 +62,16 @@ namespace HazardSystem {
                 }// end if (!ptr)
                 //--------------------------
                 if (m_retired.size() >= m_threshold) {
-                    static_cast<void>(scan_and_reclaim());
+                    if (!scan_and_reclaim()) {
+                        return false;
+                    }
                 }// end if (m_retired.size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
                     constexpr float C_INCREASE_SIZE = 1.2f;
-                    static_cast<void>(resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE)));
+                    if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) {
+                        return false;
+                    }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
                 //--------------------------
                 return m_retired.insert(std::move(ptr)).second;
