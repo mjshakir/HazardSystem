@@ -134,9 +134,9 @@ class HazardPointerManager {
             }// end if (!sp_data)
             //--------------------------
             auto handle = acquire_data();
-            if (!handle.valid()) {
+            if (!handle) {
                 return ProtectedPointer<T>();
-            }// end if (!handle.valid())
+            }// end if (!handle)
             //--------------------------
             handle.sp_data->pointer.store(sp_data, std::memory_order_release);
             return create_protected_pointer(std::move(handle), std::move(sp_data));
@@ -146,9 +146,9 @@ class HazardPointerManager {
         ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data) {
             //--------------------------
             auto handle = acquire_data();
-            if (!handle.valid()) {
+            if (!handle) {
                 return ProtectedPointer<T>();
-            }// end if (!handle.valid())
+            }// end if (!handle)
             //--------------------------
             auto protected_obj = a_sp_data.load(std::memory_order_acquire);
             if (!protected_obj) {
@@ -169,9 +169,9 @@ class HazardPointerManager {
         ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
             //--------------------------
             auto handle = acquire_data();
-            if (!handle.valid()) {
+            if (!handle) {
                 return ProtectedPointer<T>();
-            }// end if (!handle.valid())
+            }// end if (!handle)
             //--------------------------
             std::shared_ptr<T> protected_obj;
             //--------------------------
@@ -200,8 +200,8 @@ class HazardPointerManager {
             return ProtectedPointer<T>(
                 std::move(handle.sp_data),
                 std::move(protected_obj),
-                [this, index = handle.index.value()](std::shared_ptr<HazardPointer<T>> hp) -> bool {
-                    return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(index, std::move(hp)));});
+                [this, index = std::move(handle.index.value())](std::shared_ptr<HazardPointer<T>> hp) -> bool {
+                    return this->release_data(HazardHandle<IndexType, HazardPointer<T>>(std::move(index), std::move(hp)));});
         }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
         HazardHandle<IndexType, HazardPointer<T>> acquire_data(void) {
@@ -224,9 +224,9 @@ class HazardPointerManager {
         //--------------------------
         bool release_data(const HazardHandle<IndexType, HazardPointer<T>>& handle) {
             //--------------------------        
-            if (!handle.valid()) {
+            if (!handle) {
                 return false;
-            }// end if (!handle.valid())
+            }// end if (!handle)
             //--------------------------
             return m_hazard_pointers.set(handle.index.value(), nullptr);
             //--------------------------
