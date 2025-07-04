@@ -15,6 +15,7 @@
 #include <limits>
 #include <utility>
 #include <cmath>
+#include <functional>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -152,18 +153,15 @@ namespace HazardSystem {
                 //--------------------------
             }// end bool active(const std::optional<IndexType>& index) const
             //--------------------------
-            template<typename Func>
-            void for_each(Func&& fn) const {
+            void for_each(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 for_each_active(std::move(fn));
             }// end void for_each(Func&& fn) const
             //--------------------------
-            template<typename Func>
-            void for_each_fast(Func&& fn) const{
+            void for_each_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const{
                 for_each_active_fast(std::move(fn));
-            }// end void for_each_fast(Func&& fn) const
+            }// end void for_each_fast(std::function<void(IndexType index, const std::shared_ptr<T>&)>&& fn) const
             //--------------------------
-            template<typename Func>
-            bool find(Func&& fn) const{
+            bool find(std::function<bool(const std::shared_ptr<T>&)>&& fn) const{
                 return find_data(std::move(fn));
             }// end void for_each_fast(Func&& fn) const
             //--------------------------
@@ -417,8 +415,8 @@ namespace HazardSystem {
                 //--------------------------
             }// end uint16_t active_count_data(void) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M > 0) and (M <= 64) , void> for_each_active(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M > 0) and (M <= 64) , void> for_each_active(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 const uint64_t mask = m_bitmask.load(std::memory_order_acquire);
                 //--------------------------
@@ -433,10 +431,10 @@ namespace HazardSystem {
                     //--------------------------
                 }// end for (IndexType index = 0; index < N; ++index)
                 //--------------------------
-            }// end void for_each_active(Func&& fn) const
+            }// end void for_each_active(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M == 0) or (M > 64), void> for_each_active(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), void> for_each_active(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
@@ -459,10 +457,10 @@ namespace HazardSystem {
                         //--------------------------
                     }// end for (uint8_t bit = 0; bit < C_BITS_PER_MASK; ++bit)
                 }// end for (uint16_t part = 0; part < C_MASK_COUNT; ++part)
-            }// end void for_each_active(Func&& fn) const
+            }// end void for_each_active(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M > 0) and (M <= 64) , void> for_each_active_fast(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M > 0) and (M <= 64) , void> for_each_active_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 uint64_t mask = m_bitmask.load(std::memory_order_acquire);
                 //--------------------------
@@ -481,10 +479,10 @@ namespace HazardSystem {
                     //--------------------------
                 }// end while (mask)
                 //--------------------------
-            }// end void for_each_active_fast(Func&& fn) const
+            }// end void for_each_active_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M == 0) or (M > 64), void> for_each_active_fast(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), void> for_each_active_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
@@ -509,10 +507,10 @@ namespace HazardSystem {
                         //--------------------------
                     }// end while (mask)
                 }// end for (uint16_t part = 0; part < C_MASK_COUNT; ++part)
-            }// end void for_each_active_fast(Func&& fn) const
+            }// end void for_each_active_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(std::function<bool(const std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 uint64_t mask = m_bitmask.load(std::memory_order_acquire);
                 //--------------------------
@@ -537,8 +535,8 @@ namespace HazardSystem {
                 //--------------------------
             }// end std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(auto&& fn) const
             //--------------------------
-            template<typename Func, uint16_t M = N>
-            std::enable_if_t<(M == 0) or (M > 64), bool> find_data(Func&& fn) const {
+            template<uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), bool> find_data(std::function<bool(const std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
                 for (IndexType part = 0; part < get_mask_count(); ++part) {
                     //--------------------------
