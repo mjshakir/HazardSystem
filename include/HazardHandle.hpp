@@ -23,6 +23,14 @@ namespace HazardSystem {
             //--------------------------
         }// end HazardHandle(const std::optional<Index>& index_, std::shared_ptr<T> p_data_)
         //--------------------------
+        HazardHandle(Index&& index_, std::shared_ptr<T>&& p_data_) : index(std::move(index_)), sp_data(std::move(p_data_)) {
+            //--------------------------
+        }// end HazardHandle(const Index& index_, std::shared_ptr<T> p_data_)
+        //--------------------------
+        HazardHandle(std::optional<Index>&& index_, std::shared_ptr<T>&& p_data_) : index(std::move(index_)), sp_data(std::move(p_data_)) {
+            //--------------------------
+        }// end HazardHandle(const std::optional<Index>& index_, std::shared_ptr<T> p_data_)
+        //--------------------------
         HazardHandle(void)                              = default;
         ~HazardHandle(void)                             = default;
         //--------------------------
@@ -31,14 +39,13 @@ namespace HazardSystem {
         HazardHandle(HazardHandle&&)                    = default;
         HazardHandle& operator=(HazardHandle&&)         = default;
         //--------------------------
-        bool valid(void) const {
+        explicit operator bool(void) const noexcept {
+            return sp_data and index.has_value();
+        }// en d operator bool(void) const
+        //--------------------------
+        bool valid(void) const noexcept {
             return sp_data and index.has_value();
         }// end bool valid(void) cons
-        //--------------------------
-        // void reset(void) {
-        //     index   = std::nullopt;
-        //     sp_data = nullptr;
-        // }// end void reset(void)
         //--------------------------
         std::optional<Index> index;
         std::shared_ptr<T> sp_data;
