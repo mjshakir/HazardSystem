@@ -120,10 +120,10 @@ class HazardPointerManager {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
-        HazardPointerManager(const HazardPointerManager&) = delete;
-        HazardPointerManager& operator=(const HazardPointerManager&) = delete;
-        HazardPointerManager(HazardPointerManager&&) = delete;
-        HazardPointerManager& operator=(HazardPointerManager&&) = delete;
+        HazardPointerManager(const HazardPointerManager&)               = delete;
+        HazardPointerManager& operator=(const HazardPointerManager&)    = delete;
+        HazardPointerManager(HazardPointerManager&&)                    = delete;
+        HazardPointerManager& operator=(HazardPointerManager&&)         = delete;
         //--------------------------
         ~HazardPointerManager(void) = default;
         //--------------------------------------------------------------
@@ -242,7 +242,7 @@ class HazardPointerManager {
             //--------------------------
         }// end bool retire_node(std::shared_ptr<T> node)
         //--------------------------
-        bool is_hazard(std::shared_ptr<T> node) const {
+        bool is_hazard(const std::shared_ptr<T>& node) const {
             //--------------------------
             if (!node) {
                 return false;
