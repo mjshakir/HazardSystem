@@ -18,23 +18,21 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             ProtectedPointer(void) = default;
             //--------------------------
-            ProtectedPointer(   std::shared_ptr<HazardPointer<T>> hazard_pointer,
-                                std::shared_ptr<T> protected_pointer,
-                                std::function<bool(std::shared_ptr<HazardPointer<T>>)> release) :  m_hazard_pointer(std::move(hazard_pointer)),
+            ProtectedPointer(   std::shared_ptr<HazardPointer<T>>&& hazard_pointer,
+                                std::shared_ptr<T>&& protected_pointer,
+                                std::function<bool(std::shared_ptr<HazardPointer<T>>)>&& release) : m_hazard_pointer(std::move(hazard_pointer)),
                                                                                                     m_protected_pointer(std::move(protected_pointer)),
                                                                                                     m_release(std::move(release)) {
                 //--------------------------
             }// end ProtectedPointer
             //--------------------------
-            ProtectedPointer(ProtectedPointer&& other) noexcept = default;
+            ProtectedPointer(ProtectedPointer&& other) noexcept             = default;
+            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept  = default;
+            ProtectedPointer(const ProtectedPointer&)                       = delete;
+            ProtectedPointer& operator=(const ProtectedPointer&)            = delete;
             //--------------------------
-            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept = default;
-            //--------------------------
-            ProtectedPointer(const ProtectedPointer&)               = default;
-            ProtectedPointer& operator=(const ProtectedPointer&)    = default;
-            //--------------------------
-            ~ProtectedPointer(void) {
-                release_data();
+            ~ProtectedPointer(void) noexcept {
+                static_cast<void>(release_data());
             }// end ~ProtectedPointer(void)
             //--------------------------
             T* operator->(void) const noexcept {
@@ -50,20 +48,24 @@ namespace HazardSystem {
             }// end T* get(void) const noexcept
             //--------------------------
             explicit operator bool(void) const noexcept {
-                return m_protected_pointer != nullptr;
+                return !!m_protected_pointer;
             }// end explicit operator bool(void) const noexcept
             //--------------------------
             std::shared_ptr<T> shared_ptr(void) const {
                 return m_protected_pointer;
             }// end std::shared_ptr<T> shared_ptr(void) const
             //--------------------------
-            void reset(void) {
-                release_data();
+            bool reset(void) noexcept {
+                return release_data();
             }// end void reset(void)
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            void release_data(void) {
+            bool release_data(void) noexcept {
+                //--------------------------
+                if (!m_hazard_pointer) {
+                    return false;
+                }// end if (!m_hazard_pointer and !m_protected_pointer)
                 //--------------------------
                 if (m_hazard_pointer and m_release) {
                     m_release(m_hazard_pointer);
@@ -71,6 +73,8 @@ namespace HazardSystem {
                 //--------------------------
                 m_hazard_pointer.reset();
                 m_protected_pointer.reset();
+                //--------------------------
+                return true;
                 //--------------------------
             }// end void release_data(void)
             //--------------------------------------------------------------

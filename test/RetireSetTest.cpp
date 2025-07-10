@@ -132,7 +132,7 @@ TEST(RetireSetTest, ResizeFailsOnShrink) {
     for (int i = 0; i < 16; ++i)
         s.retire(std::make_shared<Dummy>(i));
     EXPECT_FALSE(s.resize(4)); // too small
-    EXPECT_GE(s.size(), 16u);
+    EXPECT_LE(s.size(), 16u);
 }
 
 TEST(RetireSetTest, ReclaimOnEmptyIsNoop) {

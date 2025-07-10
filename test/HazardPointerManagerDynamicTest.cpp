@@ -1,3 +1,5 @@
+// HazardPointerManagerDynamicTest.cpp
+
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <thread>
@@ -7,9 +9,6 @@
 #include <memory>
 #include <random>
 #include <algorithm>
-#include <future>
-#include <array>
-#include <numeric>
 #include <iostream>
 
 #include "HazardPointerManager.hpp"
@@ -17,335 +16,668 @@
 
 using namespace HazardSystem;
 
-// Macro to define unique TestData type per test
-#define DEFINE_TESTDATA_TYPE(TESTNAME) \
-    struct TESTNAME##_TestData { \
-        int value; \
-        std::atomic<bool> destroyed{false}; \
-        std::atomic<int> access_count{0}; \
-        TESTNAME##_TestData(int v = 0) : value(v) {} \
-        ~TESTNAME##_TestData() { destroyed.store(true, std::memory_order_release); } \
-        void access() { access_count.fetch_add(1, std::memory_order_relaxed); } \
-        void increment() { access_count.fetch_add(1, std::memory_order_relaxed); } \
-    }
+// Macro to define a unique TestData type per test
+#define DEFINE_TESTDATA_TYPE(TESTNAME)                   \
+  struct TESTNAME##_TestData {                           \
+    int value;                                           \
+    std::atomic<bool> destroyed{false};                  \
+    std::atomic<int> access_count{0};                    \
+    TESTNAME##_TestData(int v = 0) : value(v) {}         \
+    ~TESTNAME##_TestData() { destroyed.store(true); }    \
+    void access()    { access_count.fetch_add(1); }      \
+    void increment() { access_count.fetch_add(1); }      \
+  }
 
-// ========== Core Functionality ==========
-
+// -----------------------------------------------------------------------------
+// 1) Singleton
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(SingletonInstance);
 TEST(DynamicHazardPointerManager, SingletonInstance) {
-    using TestData = SingletonInstance_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager1 = Manager::instance();
-    auto& manager2 = Manager::instance();
-    EXPECT_EQ(&manager1, &manager2);
-    manager1.clear();
+  using TestData = SingletonInstance_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& m1 = Manager::instance(4, 4);
+  auto& m2 = Manager::instance(4, 4);
+  EXPECT_EQ(&m1, &m2);
+  m1.clear();
 }
 
+// -----------------------------------------------------------------------------
+// 2) Dynamic sizing via protect()
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(DynamicSizing);
-TEST(DynamicHazardPointerManager, DynamicSizing) {
-    using TestData = DynamicSizing_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>;
-    constexpr size_t hazards = 20, retire = 5;
-    auto& manager = Manager::instance(hazards, retire);
-    EXPECT_GE(manager.hazard_capacity(), hazards);
-    size_t cap = manager.hazard_capacity();
-    std::vector<Handle> handles; handles.reserve(cap);
-    for (size_t i = 0; i < cap; ++i) {
-        auto h = manager.acquire();
-        EXPECT_TRUE(h.valid()) << "Failed at " << i;
-        handles.push_back(std::move(h));
-    }
-    auto extra = manager.acquire();
-    EXPECT_FALSE(extra.valid());
-    for (auto& h : handles) manager.release(h);
-    manager.clear();
+TEST(DynamicHazardPointerManager, DynamicSizingViaProtect) {
+  using TestData = DynamicSizing_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  constexpr size_t HAZ  = 20, RET = 5;
+  auto& mgr = Manager::instance(HAZ, RET);
+  EXPECT_GE(mgr.hazard_capacity(), HAZ);
+
+  size_t cap = mgr.hazard_capacity();
+  std::vector<ProtectedPointer<TestData>> guards;
+  guards.reserve(cap);
+  for (size_t i = 0; i < cap; ++i) {
+    auto p = mgr.protect(std::make_shared<TestData>(int(i)));
+    EXPECT_TRUE(static_cast<bool>(p)) << "protect #" << i << " failed";
+    guards.push_back(std::move(p));
+  }
+  // pool exhausted
+  auto extra = mgr.protect(std::make_shared<TestData>(999));
+  EXPECT_FALSE(static_cast<bool>(extra));
+
+  guards.clear();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+  mgr.clear();
 }
 
-DEFINE_TESTDATA_TYPE(AcquireAndRelease);
-TEST(DynamicHazardPointerManager, AcquireAndRelease) {
-    using TestData = AcquireAndRelease_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>;
-    auto& manager = Manager::instance(10);
-    auto handle = manager.acquire();
-    EXPECT_TRUE(handle.valid());
-    EXPECT_TRUE(handle.index.has_value());
-    EXPECT_NE(handle.sp_data, nullptr);
-    bool released = manager.release(handle);
-    EXPECT_TRUE(released);
-    manager.clear();
+// -----------------------------------------------------------------------------
+// 3) Acquire & Release → protect & reset
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(AcquireAndReleaseViaProtect);
+TEST(DynamicHazardPointerManager, AcquireAndReleaseViaProtect) {
+  using TestData = AcquireAndReleaseViaProtect_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  auto p = mgr.protect(std::make_shared<TestData>(7));
+  EXPECT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(mgr.hazard_size(), 1u);
+
+  p.reset();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  mgr.clear();
 }
 
+// -----------------------------------------------------------------------------
+// 4) Protect shared_ptr
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(ProtectSharedPtr);
 TEST(DynamicHazardPointerManager, ProtectSharedPtr) {
-    using TestData = ProtectSharedPtr_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    auto data = std::make_shared<TestData>(42);
-    auto protected_ptr = manager.protect(data);
-    EXPECT_TRUE(static_cast<bool>(protected_ptr));
-    EXPECT_EQ(protected_ptr->value, 42);
-    EXPECT_EQ(protected_ptr.get()->value, 42);
-    EXPECT_EQ((*protected_ptr).value, 42);
-    manager.clear();
+  using TestData = ProtectSharedPtr_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  auto data = std::make_shared<TestData>(42);
+  auto p = mgr.protect(data);
+  EXPECT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(p->value, 42);
+  EXPECT_EQ((*p).value, 42);
+
+  mgr.clear();
 }
 
+// -----------------------------------------------------------------------------
+// 5) Protect atomic shared_ptr
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(ProtectAtomicSharedPtr);
 TEST(DynamicHazardPointerManager, ProtectAtomicSharedPtr) {
-    using TestData = ProtectAtomicSharedPtr_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    std::atomic<std::shared_ptr<TestData>> atomic_data;
-    atomic_data.store(std::make_shared<TestData>(100));
-    auto protected_ptr = manager.protect(atomic_data);
-    EXPECT_TRUE(static_cast<bool>(protected_ptr));
-    EXPECT_EQ(protected_ptr->value, 100);
-    manager.clear();
+  using TestData = ProtectAtomicSharedPtr_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  std::atomic<std::shared_ptr<TestData>> atom;
+  atom.store(std::make_shared<TestData>(100));
+  auto p = mgr.protect(atom);
+  EXPECT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(p->value, 100);
+
+  mgr.clear();
 }
 
+// -----------------------------------------------------------------------------
+// 6) try_protect with retries
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(TryProtectWithRetries);
 TEST(DynamicHazardPointerManager, TryProtectWithRetries) {
-    using TestData = TryProtectWithRetries_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    std::atomic<std::shared_ptr<TestData>> atomic_data;
-    atomic_data.store(std::make_shared<TestData>(200));
-    auto protected_ptr = manager.try_protect(atomic_data, 10);
-    EXPECT_TRUE(static_cast<bool>(protected_ptr));
-    EXPECT_EQ(protected_ptr->value, 200);
-    manager.clear();
+  using TestData = TryProtectWithRetries_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  std::atomic<std::shared_ptr<TestData>> atom;
+  atom.store(std::make_shared<TestData>(200));
+  auto p = mgr.try_protect(atom, 5);
+  EXPECT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(p->value, 200);
+
+  mgr.clear();
 }
 
+// -----------------------------------------------------------------------------
+// 7) try_protect with zero retries
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(TryProtectWithZeroRetries);
+TEST(DynamicHazardPointerManager, TryProtectWithZeroRetries) {
+  using TestData = TryProtectWithZeroRetries_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  std::atomic<std::shared_ptr<TestData>> atom;
+  atom.store(std::make_shared<TestData>(300));
+  auto p = mgr.try_protect(atom, 0);
+  EXPECT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(p->value, 300);
+
+  mgr.clear();
+}
+
+// -----------------------------------------------------------------------------
+// 8) Retire and reclaim
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(RetireAndReclaim);
 TEST(DynamicHazardPointerManager, RetireAndReclaim) {
-    using TestData = RetireAndReclaim_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10, 2);
-    auto data1 = std::make_shared<TestData>(1);
-    auto data2 = std::make_shared<TestData>(2);
-    auto data3 = std::make_shared<TestData>(3);
-    EXPECT_TRUE(manager.retire(data1));
-    EXPECT_TRUE(manager.retire(data2));
-    EXPECT_EQ(manager.retire_size(), 2);
-    EXPECT_TRUE(manager.retire(data3)); // should trigger reclamation
-    manager.clear();
+  using TestData = RetireAndReclaim_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 3);
+
+  auto d1 = std::make_shared<TestData>(1);
+  auto d2 = std::make_shared<TestData>(2);
+  auto d3 = std::make_shared<TestData>(3);
+
+  EXPECT_TRUE(mgr.retire(d1));
+  EXPECT_TRUE(mgr.retire(d2));
+  EXPECT_EQ(mgr.retire_size(), 2u);
+
+  // third retire should trigger a reclaim run
+  EXPECT_TRUE(mgr.retire(d3));
+  mgr.reclaim();
+  EXPECT_LE(mgr.retire_size(), 2u);
+
+  mgr.clear();
 }
 
-// ========== Edge Cases ==========
-
+// -----------------------------------------------------------------------------
+// 9) Protect null pointers
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(ProtectNullptr);
 TEST(DynamicHazardPointerManager, ProtectNullptr) {
-    using TestData = ProtectNullptr_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    std::shared_ptr<TestData> null_ptr;
-    auto protected_ptr = manager.protect(null_ptr);
-    EXPECT_FALSE(static_cast<bool>(protected_ptr));
-    manager.clear();
+  using TestData = ProtectNullptr_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  std::shared_ptr<TestData> np;
+  auto p = mgr.protect(np);
+  EXPECT_FALSE(static_cast<bool>(p));
+
+  std::atomic<std::shared_ptr<TestData>> anp;
+  anp.store(nullptr);
+  auto q = mgr.protect(anp);
+  EXPECT_FALSE(static_cast<bool>(q));
+
+  mgr.clear();
 }
 
-DEFINE_TESTDATA_TYPE(ProtectAtomicNullptr);
-TEST(DynamicHazardPointerManager, ProtectAtomicNullptr) {
-    using TestData = ProtectAtomicNullptr_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    std::atomic<std::shared_ptr<TestData>> atomic_null;
-    atomic_null.store(nullptr);
-    auto protected_ptr = manager.protect(atomic_null);
-    EXPECT_FALSE(static_cast<bool>(protected_ptr));
-    manager.clear();
+// -----------------------------------------------------------------------------
+// 10) Default ProtectedPointer reset is safe
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(DefaultProtectReset);
+TEST(DynamicHazardPointerManager, DefaultProtectedPointerReset) {
+  using TestData = DefaultProtectReset_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(10, 10);
+
+  ProtectedPointer<TestData> p;  // default
+  p.reset();                    // no crash
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  mgr.clear();
 }
 
-DEFINE_TESTDATA_TYPE(ReleaseInvalidHandle);
-TEST(DynamicHazardPointerManager, ReleaseInvalidHandle) {
-    using TestData = ReleaseInvalidHandle_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>;
-    auto& manager = Manager::instance(10);
-    Handle invalid_handle;
-    EXPECT_FALSE(manager.release(invalid_handle));
-    manager.clear();
+// -----------------------------------------------------------------------------
+// 11) Acquire-from-empty-pool via protect
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(AcquireFromEmptyPoolViaProtect);
+TEST(DynamicHazardPointerManager, AcquireFromEmptyPoolViaProtect) {
+  using TestData = AcquireFromEmptyPoolViaProtect_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(0, 1);  // bit_ceil(0)==1 slot
+
+  auto p1 = mgr.protect(std::make_shared<TestData>(1));
+  EXPECT_TRUE(static_cast<bool>(p1));
+  EXPECT_EQ(mgr.hazard_size(), 1u);
+
+  auto p2 = mgr.protect(std::make_shared<TestData>(2));
+  EXPECT_FALSE(static_cast<bool>(p2));
+  EXPECT_EQ(mgr.hazard_size(), 1u);
+
+  p1.reset();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  auto p3 = mgr.protect(std::make_shared<TestData>(3));
+  EXPECT_TRUE(static_cast<bool>(p3));
+
+  mgr.clear();
 }
 
-DEFINE_TESTDATA_TYPE(RetireNullptr);
-TEST(DynamicHazardPointerManager, RetireNullptr) {
-    using TestData = RetireNullptr_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    std::shared_ptr<TestData> null_ptr;
-    EXPECT_FALSE(manager.retire(null_ptr));
-    manager.clear();
+// -----------------------------------------------------------------------------
+// 12) Acquire-from-single-slot-pool via protect
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(AcquireFromSingleSlotPoolViaProtect);
+TEST(DynamicHazardPointerManager, AcquireFromSingleSlotPoolViaProtect) {
+  using TestData = AcquireFromSingleSlotPoolViaProtect_TestData;
+  using Manager  = HazardPointerManager<TestData, 0>;
+  auto& mgr = Manager::instance(1, 1);
+
+  auto p1 = mgr.protect(std::make_shared<TestData>(10));
+  EXPECT_TRUE(static_cast<bool>(p1));
+  EXPECT_EQ(mgr.hazard_size(), 1u);
+
+  auto p2 = mgr.protect(std::make_shared<TestData>(20));
+  EXPECT_FALSE(static_cast<bool>(p2));
+  EXPECT_EQ(mgr.hazard_size(), 1u);
+
+  p1.reset();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  mgr.clear();
 }
 
-DEFINE_TESTDATA_TYPE(AcquireFromEmptyPool);
-TEST(DynamicHazardPointerManager, AcquireFromEmptyPool) {
-    using TestData = AcquireFromEmptyPool_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>;
-    auto& manager = Manager::instance(0); // Request 0, but actually get 1
-    auto handle1 = manager.acquire();
-    EXPECT_TRUE(handle1.valid()) << "One slot should be available due to bit_ceil(0)==1";
-    auto handle2 = manager.acquire();
-    EXPECT_FALSE(handle2.valid()) << "No more handles should be available after the first";
-    manager.clear();
-}
+// -----------------------------------------------------------------------------
+// 13) Pool-size macro via protect
+// -----------------------------------------------------------------------------
+#define TEST_POOL_SIZE_VIA_PROTECT(PREFIX, SIZE)                           \
+  DEFINE_TESTDATA_TYPE(PREFIX##_##SIZE##ViaProtect);                       \
+  TEST(DynamicHazardPointerManager, PREFIX##_##SIZE##ViaProtect) {         \
+    using TestData = PREFIX##_##SIZE##ViaProtect_TestData;                 \
+    using Manager = HazardPointerManager<TestData,0>;                      \
+    auto& mgr = Manager::instance(SIZE, SIZE);                             \
+    mgr.clear();                                                           \
+                                                                           \
+    std::vector<ProtectedPointer<TestData>> gs;                            \
+    for(size_t i=0;i<SIZE;++i){                                            \
+      auto p = mgr.protect(std::make_shared<TestData>(int(i)));            \
+      EXPECT_TRUE(static_cast<bool>(p));                                   \
+      gs.push_back(std::move(p));                                          \
+    }                                                                      \
+    auto extra = mgr.protect(std::make_shared<TestData>(-1));              \
+    EXPECT_FALSE(static_cast<bool>(extra));                                \
+                                                                           \
+    gs.clear();                                                            \
+    EXPECT_EQ(mgr.hazard_size(),0u);                                       \
+    mgr.clear();                                                           \
+  }
 
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,1)
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,4)
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,16)
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,64)
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,128)
+TEST_POOL_SIZE_VIA_PROTECT(VariablePoolSizes,256)
 
-DEFINE_TESTDATA_TYPE(AcquireFromSingleSlotPool);
-TEST(DynamicHazardPointerManager, AcquireFromSingleSlotPool) {
-    using TestData = AcquireFromSingleSlotPool_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>;
-    auto& manager = Manager::instance(1);
-    auto handle1 = manager.acquire();
-    EXPECT_TRUE(handle1.valid());
-    auto handle2 = manager.acquire();
-    EXPECT_FALSE(handle2.valid());
-    EXPECT_TRUE(manager.release(handle1));
-    auto handle3 = manager.acquire();
-    EXPECT_TRUE(handle3.valid());
-    EXPECT_TRUE(manager.release(handle3));
-    manager.clear();
-}
+// -----------------------------------------------------------------------------
+// 14) ProtectedPointer move/reset/access/self-assign/double-reset
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(ProtectedPointerMove);
+TEST(DynamicHazardPointerManager, ProtectedPointerMove) {
+  using TestData = ProtectedPointerMove_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(4,4);
 
-// ========== Pool Size & Performance (repeat for various pool sizes) ==========
+  auto sp = std::make_shared<TestData>(42);
+  auto p1 = mgr.protect(sp);
+  EXPECT_TRUE(static_cast<bool>(p1));
 
-#define TEST_POOL_SIZE(PREFIX, POOL_SIZE) \
-    DEFINE_TESTDATA_TYPE(PREFIX##_##POOL_SIZE); \
-    TEST(DynamicHazardPointerManager, PREFIX##_##POOL_SIZE) { \
-        using TestData = PREFIX##_##POOL_SIZE##_TestData; \
-        using Manager = HazardPointerManager<TestData, 0>; \
-        using Handle = HazardHandle<typename Manager::IndexType, HazardPointer<TestData>>; \
-        auto& manager = Manager::instance(POOL_SIZE); \
-        manager.clear(); \
-        std::vector<Handle> handles; \
-        for (size_t i = 0; i < POOL_SIZE; ++i) { \
-            auto handle = manager.acquire(); \
-            EXPECT_TRUE(handle.valid()) << "Failed at pool_size=" << POOL_SIZE << ", index=" << i; \
-            handles.push_back(std::move(handle)); \
-        } \
-        auto extra = manager.acquire(); \
-        EXPECT_FALSE(extra.valid()); \
-        for (auto& handle : handles) manager.release(handle); \
-        manager.clear(); \
-    }
+  auto p2 = std::move(p1);
+  EXPECT_FALSE(static_cast<bool>(p1));
+  EXPECT_TRUE(static_cast<bool>(p2));
+  EXPECT_EQ(p2->value,42);
 
-TEST_POOL_SIZE(VariablePoolSizes, 1)
-TEST_POOL_SIZE(VariablePoolSizes, 4)
-TEST_POOL_SIZE(VariablePoolSizes, 16)
-TEST_POOL_SIZE(VariablePoolSizes, 64)
-TEST_POOL_SIZE(VariablePoolSizes, 128)
-TEST_POOL_SIZE(VariablePoolSizes, 256)
+  auto p3 = mgr.protect(std::make_shared<TestData>(100));
+  p3 = std::move(p2);
+  EXPECT_FALSE(static_cast<bool>(p2));
+  EXPECT_TRUE(static_cast<bool>(p3));
+  EXPECT_EQ(p3->value,42);
 
-// (Continue using this macro for other pool size or scaling tests as desired)
-
-// ========== ProtectedPointer Move/Reset/Access ==========
-
-DEFINE_TESTDATA_TYPE(ProtectedPointerMoveSemantic);
-TEST(DynamicHazardPointerManager, ProtectedPointerMoveSemantic) {
-    using TestData = ProtectedPointerMoveSemantic_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    auto data = std::make_shared<TestData>(42);
-    auto protected_ptr1 = manager.protect(data);
-    EXPECT_TRUE(static_cast<bool>(protected_ptr1));
-    auto protected_ptr2 = std::move(protected_ptr1);
-    EXPECT_FALSE(static_cast<bool>(protected_ptr1));
-    EXPECT_TRUE(static_cast<bool>(protected_ptr2));
-    EXPECT_EQ(protected_ptr2->value, 42);
-    auto protected_ptr3 = manager.protect(std::make_shared<TestData>(100));
-    protected_ptr3 = std::move(protected_ptr2);
-    EXPECT_FALSE(static_cast<bool>(protected_ptr2));
-    EXPECT_TRUE(static_cast<bool>(protected_ptr3));
-    EXPECT_EQ(protected_ptr3->value, 42);
-    manager.clear();
+  mgr.clear();
 }
 
 DEFINE_TESTDATA_TYPE(ProtectedPointerReset);
 TEST(DynamicHazardPointerManager, ProtectedPointerReset) {
-    using TestData = ProtectedPointerReset_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    auto data = std::make_shared<TestData>(42);
-    auto protected_ptr = manager.protect(data);
-    EXPECT_TRUE(static_cast<bool>(protected_ptr));
-    protected_ptr.reset();
-    EXPECT_FALSE(static_cast<bool>(protected_ptr));
-    manager.clear();
+  using TestData = ProtectedPointerReset_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(4,4);
+
+  auto p = mgr.protect(std::make_shared<TestData>(7));
+  EXPECT_TRUE(static_cast<bool>(p));
+  p.reset();
+  EXPECT_FALSE(static_cast<bool>(p));
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  mgr.clear();
 }
 
 DEFINE_TESTDATA_TYPE(ProtectedPointerAccessors);
 TEST(DynamicHazardPointerManager, ProtectedPointerAccessors) {
-    using TestData = ProtectedPointerAccessors_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    auto& manager = Manager::instance(10);
-    auto data = std::make_shared<TestData>(42);
-    auto protected_ptr = manager.protect(data);
-    ASSERT_TRUE(static_cast<bool>(protected_ptr));
-    EXPECT_EQ(protected_ptr->value, 42);
-    EXPECT_EQ((*protected_ptr).value, 42);
-    EXPECT_EQ(protected_ptr.get()->value, 42);
-    EXPECT_EQ(protected_ptr.shared_ptr()->value, 42);
-    manager.clear();
+  using TestData = ProtectedPointerAccessors_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(4,4);
+
+  auto p = mgr.protect(std::make_shared<TestData>(5));
+  ASSERT_TRUE(static_cast<bool>(p));
+  EXPECT_EQ(p->value,5);
+  EXPECT_EQ((*p).value,5);
+  EXPECT_EQ(p.get()->value,5);
+  EXPECT_EQ(p.shared_ptr()->value,5);
+
+  mgr.clear();
 }
 
-// ========== Memory Management/Leak Tests ==========
+DEFINE_TESTDATA_TYPE(ProtectedPointerSelfAssign);
+TEST(DynamicHazardPointerManager, ProtectedPointerSelfAssign) {
+  using TestData = ProtectedPointerSelfAssign_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(4,4);
 
+  auto p = mgr.protect(std::make_shared<TestData>(9));
+  EXPECT_TRUE(static_cast<bool>(p));
+  p = std::move(p);
+  EXPECT_TRUE(static_cast<bool>(p));
+
+  mgr.clear();
+}
+
+DEFINE_TESTDATA_TYPE(ProtectedPointerDoubleReset);
+TEST(DynamicHazardPointerManager, ProtectedPointerDoubleReset) {
+  using TestData = ProtectedPointerDoubleReset_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(4,4);
+
+  auto p = mgr.protect(std::make_shared<TestData>(11));
+  EXPECT_TRUE(static_cast<bool>(p));
+  p.reset();
+  p.reset();
+  EXPECT_FALSE(static_cast<bool>(p));
+  EXPECT_EQ(mgr.hazard_size(),0u);
+
+  mgr.clear();
+}
+
+// -----------------------------------------------------------------------------
+// 15) Clear operation via protect
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(ClearOperationViaProtect);
+TEST(DynamicHazardPointerManager, ClearOperationViaProtect) {
+  using TestData = ClearOperationViaProtect_TestData;
+  using Manager  = HazardPointerManager<TestData,0>;
+  auto& mgr = Manager::instance(8,8);
+
+  std::vector<ProtectedPointer<TestData>> guards;
+  for (int i = 0; i < 8; ++i) {
+    guards.push_back(mgr.protect(std::make_shared<TestData>(i)));
+  }
+  EXPECT_EQ(mgr.hazard_size(), 8u);
+
+  guards.clear();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+
+  mgr.clear();
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+}
+
+// -----------------------------------------------------------------------------
+// 16) Real-world mixed stress via protect
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(RealWorldDynamicProtect);
+TEST(DynamicHazardPointerManager, RealWorldDynamicProtectStressTest) {
+  struct Tracked {
+    int                  v;
+    std::atomic<int>*    c;
+    std::atomic<int>*    d;
+    Tracked(int vv, std::atomic<int>* cc, std::atomic<int>* dd)
+      : v(vv), c(cc), d(dd) { c->fetch_add(1); }
+    ~Tracked() { d->fetch_add(1); }
+    void access() {}
+  };
+
+  std::atomic<int> created{0}, destroyed{0};
+  using Mgr = HazardPointerManager<Tracked, 0>;
+  auto& mgr = Mgr::instance(64,16);
+
+  std::atomic<std::shared_ptr<Tracked>> shared;
+  shared.store(std::make_shared<Tracked>(0,&created,&destroyed),
+               std::memory_order_relaxed);
+
+  const int THREADS = std::thread::hardware_concurrency();
+  constexpr int OPS = 5000;
+  std::mt19937_64 rnd{12345};
+  std::vector<std::thread> ths;
+  ths.reserve(THREADS);
+
+  for(int t=0;t<THREADS;++t){
+    ths.emplace_back([&](){
+      ThreadRegistry::instance().register_id();
+      std::uniform_int_distribution<int> act(0,4);
+      for(int i=0;i<OPS;++i){
+        switch(act(rnd)){
+          case 0: { // writer
+            auto n = std::make_shared<Tracked>(i,&created,&destroyed);
+            auto o = shared.exchange(n,std::memory_order_acq_rel);
+            if(o) mgr.retire(o);
+            break;
+          }
+          case 1: { // reader
+            auto p = mgr.protect(shared);
+            if(p) { p->access(); if((i&0x3FF)==0) p.reset(); }
+            break;
+          }
+          case 2: { // bulk retire
+            for(int k=0;k<2;++k)
+              mgr.retire(std::make_shared<Tracked>(i+k,&created,&destroyed));
+            break;
+          }
+          case 3: mgr.reclaim(); break;
+          case 4: { auto p = mgr.protect(
+                      std::make_shared<Tracked>(i,&created,&destroyed));
+                     if(p) p->access();
+                   }
+        }
+      }
+    });
+  }
+  for(auto &th:ths) th.join();
+
+  // final cleanup
+  mgr.clear();
+  mgr.reclaim_all();
+
+  EXPECT_EQ(mgr.hazard_size(), 0u);
+  EXPECT_EQ(created.load(), destroyed.load()+1);
+  EXPECT_EQ(mgr.retire_size(), 0u);
+}
+
+// -----------------------------------------------------------------------------
+// 17) Memory leak prevention
+// -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(MemoryLeakPrevention);
 TEST(DynamicHazardPointerManager, MemoryLeakPrevention) {
-    using TestData = MemoryLeakPrevention_TestData;
-    using Manager = HazardPointerManager<TestData, 0>;
-    std::atomic<int> created{0}, destroyed{0};
-    struct TrackedTestData {
-        int value;
-        std::atomic<int>* c;
-        std::atomic<int>* d;
-        TrackedTestData(int v, std::atomic<int>* cr, std::atomic<int>* de) : value(v), c(cr), d(de) { c->fetch_add(1); }
-        ~TrackedTestData() { d->fetch_add(1); }
-    };
-    auto& tracked_manager = HazardPointerManager<TrackedTestData, 0>::instance(16, 10);
-    const int N = 100;
-    for (int i = 0; i < N; ++i) {
-        auto data = std::make_shared<TrackedTestData>(i, &created, &destroyed);
-        tracked_manager.retire(data);
-    }
-    tracked_manager.reclaim_all();
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    EXPECT_EQ(created.load(), N);
-    EXPECT_EQ(destroyed.load(), N);
-    tracked_manager.clear();
+  using TestData = MemoryLeakPrevention_TestData;
+  struct Tracked2 {
+    std::atomic<int>* c; std::atomic<int>* d;
+    Tracked2(std::atomic<int>* cc,std::atomic<int>* dd): c(cc),d(dd){c->fetch_add(1);}
+    ~Tracked2(){d->fetch_add(1);}
+  };
+
+  std::atomic<int> created{0}, destroyed{0};
+  auto& mgr = HazardPointerManager<Tracked2,0>::instance(32,8);
+
+  for(int i=0;i<50;i++){
+    mgr.retire(std::make_shared<Tracked2>(&created,&destroyed));
+  }
+  mgr.reclaim_all();
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  EXPECT_EQ(created, destroyed);
+  mgr.clear();
 }
 
-// ========== Retire Threshold Configuration ==========
-
-DEFINE_TESTDATA_TYPE(RetireThresholdConfiguration);
+// -----------------------------------------------------------------------------
+// 18) Retire threshold configuration
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(RetireThresholdConfig);
 TEST(DynamicHazardPointerManager, RetireThresholdConfiguration) {
-    using TestData = RetireThresholdConfiguration_TestData;
-    constexpr std::array<size_t, 5> thresholds = {1, 5, 10, 20, 50};
-    for (size_t t : thresholds) {
-        auto& manager = HazardPointerManager<TestData, 0>::instance(16, t);
-        manager.clear();
-        for (size_t i = 0; i < t; ++i) {
-            auto data = std::make_shared<TestData>(static_cast<int>(i));
-            manager.retire(data);
-        }
-        // Allow up to t here, may be less if scan_and_reclaim reclaims eagerly
-        EXPECT_LE(manager.retire_size(), t);
-
-        auto trigger_data = std::make_shared<TestData>(999);
-        manager.retire(trigger_data);
-        // After possible scan-and-reclaim, we can have up to t+1
-        EXPECT_LE(manager.retire_size(), t + 1);
-
-        manager.clear();
+  using TestData = RetireThresholdConfig_TestData;
+  constexpr std::array<size_t,3> THR = {1,5,10};
+  for(auto t:THR){
+    auto& mgr = HazardPointerManager<TestData,0>::instance(16, t);
+    mgr.clear();
+    for(size_t i=0;i<t;i++){
+      mgr.retire(std::make_shared<TestData>(int(i)));
     }
+    EXPECT_LE(mgr.retire_size(), t);
+    mgr.retire(std::make_shared<TestData>(999));
+    EXPECT_LE(mgr.retire_size(), t+1);
+    mgr.clear();
+  }
 }
 
-// (Repeat above pattern for more concurrency, scalability, and integration tests as needed)
+// -----------------------------------------------------------------------------
+// 19) Real World Mixed Stress Concurrency Test
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(RealWorldMixedConcurrency);
+TEST(DynamicHazardPointerManager, RealWorldMixedConcurrency) {
+    struct Tracked {
+        int                v;
+        std::atomic<int>*  created;
+        std::atomic<int>*  destroyed;
+        Tracked(int vv, std::atomic<int>* c, std::atomic<int>* d)
+          : v(vv), created(c), destroyed(d) { created->fetch_add(1); }
+        ~Tracked() { destroyed->fetch_add(1); }
+        void access() {}
+    };
 
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    std::cout << "Running Dynamic HazardPointerManager (HAZARD_POINTERS=0) tests..." << std::endl;
-    return RUN_ALL_TESTS();
+    std::atomic<int> created{0}, destroyed{0};
+    using Mgr = HazardPointerManager<Tracked, 0>;
+    auto& mgr = Mgr::instance(64, 16);
+
+    // shared pointer for readers/writers
+    std::atomic<std::shared_ptr<Tracked>> shared;
+    shared.store(std::make_shared<Tracked>(0, &created, &destroyed),
+                 std::memory_order_relaxed);
+
+    const int THREADS = std::thread::hardware_concurrency();
+    constexpr int OPS = 25000;
+    std::mt19937_64 rnd{123456};
+
+    std::vector<std::thread> ths;
+    ths.reserve(THREADS);
+    for (int t = 0; t < THREADS; ++t) {
+        ths.emplace_back([&, t]() {
+            ThreadRegistry::instance().register_id();
+            std::uniform_int_distribution<int> action(0,5);
+            for (int i = 0; i < OPS; ++i) {
+                switch (action(rnd)) {
+                  case 0: { // swap writer + retire
+                    auto node = std::make_shared<Tracked>(i, &created, &destroyed);
+                    auto old  = shared.exchange(node, std::memory_order_acq_rel);
+                    if (old) mgr.retire(old);
+                    break;
+                  }
+                  case 1: { // protect + access + occasional reset
+                    auto p = mgr.protect(shared);
+                    if (p) {
+                        p->access();
+                        if ((i & 0x7FF)==0) p.reset();
+                    }
+                    break;
+                  }
+                  case 2: { // bulk retire
+                    for (int k = 0; k < 3; ++k) {
+                      mgr.retire(std::make_shared<Tracked>(i+k, &created, &destroyed));
+                    }
+                    break;
+                  }
+                  case 3:  // manual reclaim
+                    mgr.reclaim();
+                    break;
+                  case 4: { // fresh protect on new
+                    auto p = mgr.protect(std::make_shared<Tracked>(i, &created, &destroyed));
+                    if (p) p->access();
+                    break;
+                  }
+                  case 5:  // clear (only when no live ProtectedPointer in this iteration)
+                    if ((i % 5000)==0) mgr.clear();
+                    break;
+                }
+            }
+        });
+    }
+    for (auto &th : ths) th.join();
+
+    // final cleanup
+    mgr.clear();
+    mgr.reclaim_all();
+
+    EXPECT_EQ(mgr.hazard_size(), 0u);
+    // there is exactly one node still in 'shared'
+    EXPECT_EQ(created.load(), destroyed.load() + 1);
+    EXPECT_EQ(mgr.retire_size(), 0u);
+}
+
+// -----------------------------------------------------------------------------
+// 20) ABA Simulation under try_protect
+// -----------------------------------------------------------------------------
+DEFINE_TESTDATA_TYPE(ABASimulation);
+TEST(DynamicHazardPointerManager, ABASimulation) {
+    struct Node {
+        int                val;
+        std::atomic<int>*  created;
+        std::atomic<int>*  destroyed;
+        Node(int v, std::atomic<int>* c, std::atomic<int>* d)
+          : val(v), created(c), destroyed(d) { created->fetch_add(1); }
+        ~Node() { destroyed->fetch_add(1); }
+    };
+
+    std::atomic<int> created{0}, destroyed{0};
+    using Mgr = HazardPointerManager<Node, 0>;
+    auto& mgr = Mgr::instance(32, 8);
+
+    std::atomic<std::shared_ptr<Node>> atom;
+    atom.store(std::make_shared<Node>(1, &created, &destroyed),
+               std::memory_order_relaxed);
+
+    const int THREADS = std::thread::hardware_concurrency();
+    constexpr int OPS = 30000;
+    std::mt19937_64 rnd{98765};
+
+    std::vector<std::thread> ths;
+    ths.reserve(THREADS);
+    for (int t = 0; t < THREADS; ++t) {
+        ths.emplace_back([&](){
+            ThreadRegistry::instance().register_id();
+            std::uniform_int_distribution<int> op(0,9);
+            for (int i = 0; i < OPS; ++i) {
+                if (i % 25 == 0) {
+                    // do an ABA: replace A->B->A
+                    auto orig = atom.load();
+                    auto tmp  = std::make_shared<Node>(999, &created, &destroyed);
+                    atom.store(tmp);
+                    atom.store(orig);
+                    if (orig) mgr.retire(orig);
+                    mgr.retire(tmp);
+                } else {
+                    // try_protect pattern
+                    auto p = mgr.try_protect(atom, 5);
+                    if (p) { /* read safely */ }
+                }
+                if (i % 1000 == 0) mgr.reclaim();
+            }
+        });
+    }
+    for (auto &th : ths) th.join();
+
+    // final cleanup
+    mgr.clear();
+    mgr.reclaim_all();
+
+    EXPECT_EQ(mgr.hazard_size(),   0u);
+    EXPECT_EQ(mgr.retire_size(),   0u);
+    // One left in `atom`
+    EXPECT_EQ(created.load(), destroyed.load() + 1);
+}
+
+// -----------------------------------------------------------------------------
+// main
+// -----------------------------------------------------------------------------
+int main(int argc,char**argv){
+  ::testing::InitGoogleTest(&argc,argv);
+  std::cout<<"Running Dynamic HazardPointerManager tests...\n";
+  return RUN_ALL_TESTS();
 }
