@@ -21,7 +21,6 @@
 #include "ThreadRegistry.hpp"
 #include "HazardThreadManager.hpp"
 #include "ProtectedPointer.hpp"
-#include "HazardHandle.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireSet.hpp"
 //--------------------------------------------------------------
