@@ -59,7 +59,7 @@ public:
 
 // Type aliases for cleaner code
 using DynamicManagerType = HazardPointerManager<BenchmarkTestData, 0>;
-using DynamicHandleType = HazardHandle<typename DynamicManagerType::IndexType, HazardPointer<BenchmarkTestData>>;
+using DynamicHandleType = std::pair<std::optional<typename DynamicManagerType::IndexType>, std::shared_ptr<HazardPointer<BenchmarkTestData>>>;
 
 // ============================================================================
 // Dynamic Size Hazard Pointer Manager Benchmarks (HAZARD_POINTERS = 0)
@@ -67,73 +67,118 @@ using DynamicHandleType = HazardHandle<typename DynamicManagerType::IndexType, H
 
 // Time Complexity: O(n) where n = number of hazard pointer slots
 // Uses BitmaskTable with linear search for first available slot
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Acquire)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+//     std::vector<DynamicHandleType> handles;
+    
+//     for (auto _ : state) {
+//         auto handle = manager.acquire();
+//         if (handle.first and handle.second) {
+//             handles.push_back(std::move(handle));
+//         }
+        
+//         // Clean up periodically to avoid exhaustion (keep some slots free)
+//         if (handles.size() >= hazard_size - 10) {
+//             for (auto& h : handles) {
+//                 manager.release(h);
+//             }
+//             handles.clear();
+//         }
+//     }
+    
+//     // Clean up remaining handles
+//     for (auto& h : handles) {
+//         manager.release(h);
+//     }
+    
+//     state.SetComplexityN(hazard_size);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Acquire)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    std::vector<DynamicHandleType> handles;
-    
+
     for (auto _ : state) {
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            handles.push_back(std::move(handle));
-        }
-        
-        // Clean up periodically to avoid exhaustion (keep some slots free)
-        if (handles.size() >= hazard_size - 10) {
-            for (auto& h : handles) {
-                manager.release(h);
-            }
-            handles.clear();
-        }
+        // each iteration we grab a new shared_ptr and protect it
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(0));
+        benchmark::DoNotOptimize(p);
+        // immediately reset to release the hazard slot
+        if (p) p.reset();
     }
-    
-    // Clean up remaining handles
-    for (auto& h : handles) {
-        manager.release(h);
-    }
-    
+
+    // Complexity now is O(n) per protect, where n = hazard_size
     state.SetComplexityN(hazard_size);
     state.SetItemsProcessed(state.iterations());
 }
 
 // Time Complexity: O(1) - Direct access with index
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Release)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+//     std::vector<DynamicHandleType> handles;
+    
+//     // Pre-acquire handles for release testing
+//     const size_t handle_count = std::min(hazard_size - 10, size_t(100));
+//     for (size_t i = 0; i < handle_count; ++i) {
+//         auto handle = manager.acquire();
+//         if (handle.first and handle.second) {
+//             handles.push_back(std::move(handle));
+//         }
+//     }
+    
+//     size_t index = 0;
+//     for (auto _ : state) {
+//         if (index < handles.size()) {
+//             benchmark::DoNotOptimize(manager.release(handles[index]));
+//             index++;
+//         }
+        
+//         // Replenish handles when needed
+//         if (index >= handles.size()) {
+//             handles.clear();
+//             for (size_t i = 0; i < handle_count; ++i) {
+//                 auto handle = manager.acquire();
+//                 if (handle.first and handle.second) {
+//                     handles.push_back(std::move(handle));
+//                 }
+//             }
+//             index = 0;
+//         }
+//     }
+    
+//     state.SetComplexityN(hazard_size);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Release)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    std::vector<DynamicHandleType> handles;
-    
-    // Pre-acquire handles for release testing
-    const size_t handle_count = std::min(hazard_size - 10, size_t(100));
-    for (size_t i = 0; i < handle_count; ++i) {
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            handles.push_back(std::move(handle));
-        }
+
+    // Pre‐warm: grab hazard_size–1 live protects so we can exercise resets only
+    std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+    guards.reserve(hazard_size-1);
+    for (size_t i = 0; i + 1 < hazard_size; ++i) {
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+        if (p) guards.push_back(std::move(p));
     }
-    
-    size_t index = 0;
+
+    size_t idx = 0;
     for (auto _ : state) {
-        if (index < handles.size()) {
-            benchmark::DoNotOptimize(manager.release(handles[index]));
-            index++;
-        }
-        
-        // Replenish handles when needed
-        if (index >= handles.size()) {
-            handles.clear();
-            for (size_t i = 0; i < handle_count; ++i) {
-                auto handle = manager.acquire();
-                if (handle.valid()) {
-                    handles.push_back(std::move(handle));
-                }
-            }
-            index = 0;
-        }
+        // reset one guard at a time
+        guards[idx].reset();
+        benchmark::DoNotOptimize(guards[idx]);
+        // immediately re-protect into the same slot
+        guards[idx] = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(idx)));
+        if (++idx >= guards.size()) idx = 0;
     }
-    
+
     state.SetComplexityN(hazard_size);
     state.SetItemsProcessed(state.iterations());
 }
+
 
 // Time Complexity: O(n) where n = hazard_size (due to acquisition cost)
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectSharedPtr)(benchmark::State& state) {
@@ -245,33 +290,63 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Reclaim)(benchmark::State& sta
 }
 
 // Time Complexity: O(n) where n = hazard_size (proportional cleanup)
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    
+//     for (auto _ : state) {
+//         state.PauseTiming();
+        
+//         // Setup: acquire some handles and retire some objects
+//         std::vector<DynamicHandleType> handles;
+//         const size_t setup_count = std::min(hazard_size - 10, size_t(100));
+//         for (size_t i = 0; i < setup_count; ++i) {
+//             auto handle = manager.acquire();
+//             if (handle.first and handle.second) {
+//                 handles.push_back(std::move(handle));
+//             }
+            
+//             auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
+//             manager.retire(data);
+//         }
+        
+//         state.ResumeTiming();
+        
+//         manager.clear();
+        
+//         benchmark::DoNotOptimize(manager.hazard_size());
+//     }
+    
+//     state.SetComplexityN(hazard_size);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    
+
     for (auto _ : state) {
         state.PauseTiming();
-        
-        // Setup: acquire some handles and retire some objects
-        std::vector<DynamicHandleType> handles;
+
+        // Setup: hold a bunch of protections and retire some objects
+        std::vector<ProtectedPointer<BenchmarkTestData>> guards;
         const size_t setup_count = std::min(hazard_size - 10, size_t(100));
+        guards.reserve(setup_count);
         for (size_t i = 0; i < setup_count; ++i) {
-            auto handle = manager.acquire();
-            if (handle.valid()) {
-                handles.push_back(std::move(handle));
-            }
-            
-            auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
-            manager.retire(data);
+            // grab and hold
+            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            if (p) guards.push_back(std::move(p));
+            // also retire some objects to fill retire‐set
+            manager.retire(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
         }
-        
+
         state.ResumeTiming();
-        
+
+        // this is the operation under test
         manager.clear();
-        
         benchmark::DoNotOptimize(manager.hazard_size());
     }
-    
+
     state.SetComplexityN(hazard_size);
     state.SetItemsProcessed(state.iterations());
 }
@@ -281,35 +356,59 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state
 // ============================================================================
 
 // Test how acquisition performance scales with hazard pointer count
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityAcquisition)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    
+//     for (auto _ : state) {
+//         // Acquire all available hazard pointers
+//         std::vector<DynamicHandleType> handles;
+//         handles.reserve(hazard_size);
+        
+//         for (size_t i = 0; i < hazard_size - 1; ++i) {  // Leave one slot free
+//             auto handle = manager.acquire();
+//             if (handle.first and handle.second) {
+//                 handles.push_back(std::move(handle));
+//             } else {
+//                 break;  // No more slots available
+//             }
+//         }
+        
+//         benchmark::DoNotOptimize(handles.size());
+        
+//         // Release all handles
+//         for (auto& h : handles) {
+//             manager.release(h);
+//         }
+//     }
+    
+//     state.SetComplexityN(hazard_size);
+//     state.SetItemsProcessed(state.iterations() * hazard_size);
+// }
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityAcquisition)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    
+
     for (auto _ : state) {
-        // Acquire all available hazard pointers
-        std::vector<DynamicHandleType> handles;
-        handles.reserve(hazard_size);
-        
-        for (size_t i = 0; i < hazard_size - 1; ++i) {  // Leave one slot free
-            auto handle = manager.acquire();
-            if (handle.valid()) {
-                handles.push_back(std::move(handle));
-            } else {
-                break;  // No more slots available
-            }
+        // fill all but one slot
+        std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+        guards.reserve(hazard_size);
+        for (size_t i = 0; i + 1 < hazard_size; ++i) {
+            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            if (!p) break;
+            guards.push_back(std::move(p));
         }
-        
-        benchmark::DoNotOptimize(handles.size());
-        
-        // Release all handles
-        for (auto& h : handles) {
-            manager.release(h);
-        }
+
+        // record how many we got
+        benchmark::DoNotOptimize(guards.size());
+        // when `guards` goes out of scope, each ProtectedPointer resets itself
     }
-    
+
     state.SetComplexityN(hazard_size);
-    state.SetItemsProcessed(state.iterations() * hazard_size);
+    state.SetItemsProcessed(state.iterations());
 }
+
 
 // Test protection performance with different hazard pool sizes
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityProtection)(benchmark::State& state) {
@@ -372,21 +471,38 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityReclamation)(benchm
 // ============================================================================
 
 // Test rapid acquire/release cycles with different pool sizes
-BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RapidAcquireReleaseCycle)(benchmark::State& state) {
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RapidAcquireReleaseCycle)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     const size_t cycle_count = state.range(1);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    
+//     for (auto _ : state) {
+//         for (size_t i = 0; i < cycle_count; ++i) {
+//             auto handle = manager.acquire();
+//             if (handle.first and handle.second) {
+//                 benchmark::DoNotOptimize(handle.second);
+//                 manager.release(handle);
+//             }
+//         }
+//     }
+    
+//     state.SetComplexityN(hazard_size * cycle_count);
+//     state.SetItemsProcessed(state.iterations() * cycle_count);
+// }
+
+BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RapidProtectResetCycle)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     const size_t cycle_count = state.range(1);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    
+
     for (auto _ : state) {
         for (size_t i = 0; i < cycle_count; ++i) {
-            auto handle = manager.acquire();
-            if (handle.valid()) {
-                benchmark::DoNotOptimize(handle.sp_data);
-                manager.release(handle);
-            }
+            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            benchmark::DoNotOptimize(p);
+            if (p) p.reset();
         }
     }
-    
+
     state.SetComplexityN(hazard_size * cycle_count);
     state.SetItemsProcessed(state.iterations() * cycle_count);
 }
@@ -442,35 +558,60 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RetireReclaimPattern)(benchmar
 }
 
 // Test worst-case scenario: full hazard pool
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::State& state) {
+//     const size_t hazard_size = state.range(0);
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    
+//     // Fill up most of the hazard pool
+//     std::vector<DynamicHandleType> permanent_handles;
+//     for (size_t i = 0; i < hazard_size - 2; ++i) {  // Leave 2 slots
+//         auto handle = manager.acquire();
+//         if (handle.first and handle.second) {
+//             permanent_handles.push_back(std::move(handle));
+//         }
+//     }
+    
+//     auto test_data = std::make_shared<BenchmarkTestData>(42);
+    
+//     for (auto _ : state) {
+//         // Try to acquire from nearly full pool
+//         auto protected_ptr = manager.protect(test_data);
+//         benchmark::DoNotOptimize(protected_ptr);
+//         if (protected_ptr) {
+//             protected_ptr->work();
+//         }
+//     }
+    
+//     // Clean up
+//     for (auto& h : permanent_handles) {
+//         manager.release(h);
+//     }
+    
+//     state.SetComplexityN(hazard_size);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::State& state) {
     const size_t hazard_size = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    
-    // Fill up most of the hazard pool
-    std::vector<DynamicHandleType> permanent_handles;
-    for (size_t i = 0; i < hazard_size - 2; ++i) {  // Leave 2 slots
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            permanent_handles.push_back(std::move(handle));
-        }
-    }
-    
+
+    // permanently hold hazard_size-2 slots
     auto test_data = std::make_shared<BenchmarkTestData>(42);
-    
+    std::vector<ProtectedPointer<BenchmarkTestData>> permanent;
+    permanent.reserve(hazard_size - 2);
+    for (size_t i = 0; i + 2 < hazard_size; ++i) {
+        auto p = manager.protect(test_data);
+        if (!p) break;
+        permanent.push_back(std::move(p));
+    }
+
     for (auto _ : state) {
-        // Try to acquire from nearly full pool
-        auto protected_ptr = manager.protect(test_data);
-        benchmark::DoNotOptimize(protected_ptr);
-        if (protected_ptr) {
-            protected_ptr->work();
-        }
+        // now this protect will usually fail (pool is nearly exhausted)
+        auto p = manager.protect(test_data);
+        benchmark::DoNotOptimize(p);
     }
-    
-    // Clean up
-    for (auto& h : permanent_handles) {
-        manager.release(h);
-    }
-    
+
+    // drop out of scope: permanent guards reset themselves
     state.SetComplexityN(hazard_size);
     state.SetItemsProcessed(state.iterations());
 }
@@ -480,35 +621,61 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::
 // ============================================================================
 
 // Compare acquisition time vs pool utilization
+// BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)(benchmark::State& state) {
+//     const size_t hazard_size = 128;  // Fixed pool size
+//     const size_t utilization_percent = state.range(0);  // 0-90%
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    
+//     // Pre-fill pool to desired utilization
+//     const size_t pre_acquired = (hazard_size * utilization_percent) / 100;
+//     std::vector<DynamicHandleType> background_handles;
+//     for (size_t i = 0; i < pre_acquired; ++i) {
+//         auto handle = manager.acquire();
+//         if (handle.first and handle.second) {
+//             background_handles.push_back(std::move(handle));
+//         }
+//     }
+    
+//     for (auto _ : state) {
+//         auto handle = manager.acquire();
+//         benchmark::DoNotOptimize(handle);
+//         if (handle.first and handle.second) {
+//             manager.release(handle);
+//         }
+//     }
+    
+//     // Clean up
+//     for (auto& h : background_handles) {
+//         manager.release(h);
+//     }
+    
+//     state.SetComplexityN(utilization_percent);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)(benchmark::State& state) {
-    const size_t hazard_size = 128;  // Fixed pool size
-    const size_t utilization_percent = state.range(0);  // 0-90%
+    constexpr size_t hazard_size = 128;
+    const size_t util_pct = state.range(0);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-    
-    // Pre-fill pool to desired utilization
-    const size_t pre_acquired = (hazard_size * utilization_percent) / 100;
-    std::vector<DynamicHandleType> background_handles;
-    for (size_t i = 0; i < pre_acquired; ++i) {
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            background_handles.push_back(std::move(handle));
-        }
+
+    // Pre‐fill
+    size_t to_acquire = (hazard_size * util_pct) / 100;
+    std::vector<ProtectedPointer<BenchmarkTestData>> background;
+    background.reserve(to_acquire);
+    for (size_t i = 0; i < to_acquire; ++i) {
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+        if (!p) break;
+        background.push_back(std::move(p));
     }
-    
+
     for (auto _ : state) {
-        auto handle = manager.acquire();
-        benchmark::DoNotOptimize(handle);
-        if (handle.valid()) {
-            manager.release(handle);
-        }
+        // single protect+reset under that utilization
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(0));
+        benchmark::DoNotOptimize(p);
+        if (p) p.reset();
     }
-    
-    // Clean up
-    for (auto& h : background_handles) {
-        manager.release(h);
-    }
-    
-    state.SetComplexityN(utilization_percent);
+
+    state.SetComplexityN(util_pct);
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -520,7 +687,7 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)(benc
 BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, Acquire)
     ->RangeMultiplier(2)
     ->Range(8, 512)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::o1);
 
 BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, Release)
     ->RangeMultiplier(2)
@@ -582,7 +749,7 @@ BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, ScalabilityReclamation)
     ->Complexity(benchmark::oN);
 
 // Stress tests
-BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, RapidAcquireReleaseCycle)
+BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, RapidProtectResetCycle)
     ->Args({32, 100})    // hazard_size=32, cycle_count=100
     ->Args({64, 100})    // hazard_size=64, cycle_count=100
     ->Args({128, 100})   // hazard_size=128, cycle_count=100

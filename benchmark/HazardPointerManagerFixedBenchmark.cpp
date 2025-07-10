@@ -59,74 +59,113 @@ public:
 
 // Type aliases for cleaner code
 using FixedManagerType = HazardPointerManager<BenchmarkTestData, 64>;
-using FixedHandleType = HazardHandle<typename FixedManagerType::IndexType, HazardPointer<BenchmarkTestData>>;
+using FixedHandleType = std::pair<std::optional<typename FixedManagerType::IndexType>, std::shared_ptr<HazardPointer<BenchmarkTestData>>>;
 
 // ============================================================================
 // Fixed Size Hazard Pointer Manager Benchmarks (HAZARD_POINTERS = 64)
 // ============================================================================
 
 // Time Complexity: O(1) - Direct array access via bitmask table
+// BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Acquire)(benchmark::State& state) {
+//     auto& manager   = HazardPointerManager<BenchmarkTestData, 64>::instance();
+//     std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+//     guards.reserve(64);
+
+//     // we'll re‐use the same shared_ptr for each protect
+//     auto test_data = std::make_shared<BenchmarkTestData>(42);
+
+//     for (auto _ : state) {
+//         // protect() instead of acquire()
+//         auto p = manager.protect(test_data);
+//         benchmark::DoNotOptimize(p);
+
+//         if (p) {
+//             guards.push_back(std::move(p));
+//         }
+
+//         // once we've held ~60 pointers, reset them all to free slots
+//         if (guards.size() >= 60) {
+//             for (auto &g : guards) g.reset();
+//             guards.clear();
+//         }
+//     }
+
+//     // final cleanup
+//     for (auto &g : guards) g.reset();
+
+//     state.SetComplexityN(state.iterations());
+//     state.SetItemsProcessed(state.iterations());
+// }
+
+// Time Complexity: O(1) - Direct array access with index
+// -----------------------------------------------------------------------------
+// Replace “Acquire” with a Protect‐only benchmark
+// -----------------------------------------------------------------------------
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Acquire)(benchmark::State& state) {
-    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    std::vector<FixedHandleType> handles;
-    
+    auto& manager   = HazardPointerManager<BenchmarkTestData, 64>::instance();
+    std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+    guards.reserve(64);
+
+    // we'll re‐use the same shared_ptr for each protect
+    auto test_data = std::make_shared<BenchmarkTestData>(42);
+
     for (auto _ : state) {
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            handles.push_back(std::move(handle));
+        // protect() instead of acquire()
+        auto p = manager.protect(test_data);
+        benchmark::DoNotOptimize(p);
+
+        if (p) {
+            guards.push_back(std::move(p));
         }
-        
-        // Clean up periodically to avoid exhaustion (keep 4 slots free)
-        if (handles.size() >= 60) {
-            for (auto& h : handles) {
-                manager.release(h);
-            }
-            handles.clear();
+
+        // once we've held ~60 pointers, reset them all to free slots
+        if (guards.size() >= 60) {
+            for (auto &g : guards) g.reset();
+            guards.clear();
         }
     }
-    
-    // Clean up remaining handles
-    for (auto& h : handles) {
-        manager.release(h);
-    }
-    
+
+    // final cleanup
+    for (auto &g : guards) g.reset();
+
     state.SetComplexityN(state.iterations());
     state.SetItemsProcessed(state.iterations());
 }
 
-// Time Complexity: O(1) - Direct array access with index
+
+// -----------------------------------------------------------------------------
+// Replace “Release” with a Protect‐reset cycle benchmark
+// -----------------------------------------------------------------------------
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Release)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    std::vector<FixedHandleType> handles;
-    
-    // Pre-acquire handles for release testing
+    std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+    guards.reserve(64);
+
+    // Pre‐protect a batch of 60 pointers
     for (int i = 0; i < 60; ++i) {
-        auto handle = manager.acquire();
-        if (handle.valid()) {
-            handles.push_back(std::move(handle));
-        }
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(i));
+        if (p) guards.push_back(std::move(p));
     }
-    
-    size_t index = 0;
+
+    size_t idx = 0;
     for (auto _ : state) {
-        if (index < handles.size()) {
-            benchmark::DoNotOptimize(manager.release(handles[index]));
-            index++;
+        // “release” == reset one of our guards
+        if (idx < guards.size()) {
+            guards[idx].reset();
+            ++idx;
         }
-        
-        // Replenish handles when needed
-        if (index >= handles.size()) {
-            handles.clear();
+
+        // once they’re all reset, re‐protect another batch
+        if (idx >= guards.size()) {
+            guards.clear();
             for (int i = 0; i < 60; ++i) {
-                auto handle = manager.acquire();
-                if (handle.valid()) {
-                    handles.push_back(std::move(handle));
-                }
+                auto p = manager.protect(std::make_shared<BenchmarkTestData>(i));
+                if (p) guards.push_back(std::move(p));
             }
-            index = 0;
+            idx = 0;
         }
     }
-    
+
     state.SetComplexityN(state.iterations());
     state.SetItemsProcessed(state.iterations());
 }
@@ -237,33 +276,67 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Reclaim)(benchmark::State& state
 }
 
 // Time Complexity: O(1) - Constant time clear operation
+// BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Clear)(benchmark::State& state) {
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
+//     const size_t setup_count = state.range(0);
+    
+//     for (auto _ : state) {
+//         state.PauseTiming();
+        
+//         // Setup: acquire some handles and retire some objects
+//         std::vector<FixedHandleType> handles;
+//         for (size_t i = 0; i < std::min(setup_count, size_t(60)); ++i) {
+//             auto handle = manager.acquire();
+//             if (handle.first and handle.second) {
+//                 handles.push_back(std::move(handle));
+//             }
+            
+//             auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
+//             manager.retire(data);
+//         }
+        
+//         state.ResumeTiming();
+        
+//         manager.clear();
+        
+//         benchmark::DoNotOptimize(manager.hazard_size());
+//     }
+    
+//     state.SetComplexityN(setup_count);
+//     state.SetItemsProcessed(state.iterations());
+// }
+
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Clear)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    const size_t setup_count = state.range(0);
-    
+
     for (auto _ : state) {
+        // Pause timing while we set up some live guards and retired objects:
         state.PauseTiming();
-        
-        // Setup: acquire some handles and retire some objects
-        std::vector<FixedHandleType> handles;
-        for (size_t i = 0; i < std::min(setup_count, size_t(60)); ++i) {
-            auto handle = manager.acquire();
-            if (handle.valid()) {
-                handles.push_back(std::move(handle));
-            }
-            
-            auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
-            manager.retire(data);
+
+        // 1) Create a few protected pointers
+        std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+        guards.reserve(60);
+        for (int i = 0; i < 60; ++i) {
+            auto p = manager.protect(std::make_shared<BenchmarkTestData>(i));
+            if (p) guards.push_back(std::move(p));
         }
-        
+
+        // 2) Retire a handful of objects (to fill retire‐set)
+        for (int i = 0; i < 20; ++i) {
+            manager.retire(std::make_shared<BenchmarkTestData>(i));
+        }
+
         state.ResumeTiming();
-        
+
+        // The actual Clear under test
         manager.clear();
-        
+
+        // Record that we did one clear per iteration
         benchmark::DoNotOptimize(manager.hazard_size());
+        benchmark::DoNotOptimize(manager.retire_size());
     }
-    
-    state.SetComplexityN(setup_count);
+
+    state.SetComplexityN(state.iterations());
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -272,20 +345,39 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Clear)(benchmark::State& state) 
 // ============================================================================
 
 // Test rapid acquire/release cycles
-BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RapidAcquireReleaseCycle)(benchmark::State& state) {
+// BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RapidAcquireReleaseCycle)(benchmark::State& state) {
+//     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
+//     const size_t cycle_count = state.range(0);
+    
+//     for (auto _ : state) {
+//         for (size_t i = 0; i < cycle_count; ++i) {
+//             auto handle = manager.acquire();
+//             if (handle.first and handle.second) {
+//                 benchmark::DoNotOptimize(handle.second);
+//                 manager.release(handle);
+//             }
+//         }
+//     }
+    
+//     state.SetComplexityN(cycle_count);
+//     state.SetItemsProcessed(state.iterations() * cycle_count);
+// }
+
+BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RapidProtectResetCycle)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
     const size_t cycle_count = state.range(0);
-    
+
     for (auto _ : state) {
         for (size_t i = 0; i < cycle_count; ++i) {
-            auto handle = manager.acquire();
-            if (handle.valid()) {
-                benchmark::DoNotOptimize(handle.sp_data);
-                manager.release(handle);
-            }
+            // protect a fresh object
+            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            benchmark::DoNotOptimize(p);
+
+            // immediately release it by resetting
+            if (p) p.reset();
         }
     }
-    
+
     state.SetComplexityN(cycle_count);
     state.SetItemsProcessed(state.iterations() * cycle_count);
 }
@@ -381,7 +473,7 @@ BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, Clear)
     ->Complexity(benchmark::o1);
 
 // Stress tests
-BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RapidAcquireReleaseCycle)
+BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RapidProtectResetCycle)
     ->RangeMultiplier(2)
     ->Range(10, 1000)
     ->Complexity(benchmark::oN);
