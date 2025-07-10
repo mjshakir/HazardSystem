@@ -20,7 +20,7 @@ namespace HazardSystem {
             //--------------------------
             ProtectedPointer(   std::shared_ptr<HazardPointer<T>>&& hazard_pointer,
                                 std::shared_ptr<T>&& protected_pointer,
-                                std::function<bool(std::shared_ptr<HazardPointer<T>>)>&& release) :  m_hazard_pointer(std::move(hazard_pointer)),
+                                std::function<bool(std::shared_ptr<HazardPointer<T>>)>&& release) : m_hazard_pointer(std::move(hazard_pointer)),
                                                                                                     m_protected_pointer(std::move(protected_pointer)),
                                                                                                     m_release(std::move(release)) {
                 //--------------------------
@@ -32,7 +32,7 @@ namespace HazardSystem {
             ProtectedPointer& operator=(const ProtectedPointer&)            = delete;
             //--------------------------
             ~ProtectedPointer(void) noexcept {
-                static_cast<bool>(release_data());
+                static_cast<void>(release_data());
             }// end ~ProtectedPointer(void)
             //--------------------------
             T* operator->(void) const noexcept {
