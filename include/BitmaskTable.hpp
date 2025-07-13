@@ -25,11 +25,18 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             static constexpr uint16_t C_ARRAY_LIMIT = 1024U;
+            //--------------------------
+            using SlotType          = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<std::shared_ptr<T>>>,
+                                                                std::array<std::atomic<std::shared_ptr<T>>, N>>;
+
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
-            using IndexType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), size_t, 
+            using IndexType         = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), size_t, 
                                                     std::conditional_t<(N <= std::numeric_limits<uint8_t>::max()), uint8_t, uint16_t>>;
+            //--------------------------
+            using iterator          = typename SlotType::iterator;
+            using const_iterator    = typename SlotType::const_iterator;
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
@@ -115,6 +122,10 @@ namespace HazardSystem {
                 return set_data(sp_data);
             }// end std::optional<IndexType> data(std::shared_ptr<T> sp_data)
             //--------------------------
+            bool set(const_iterator it, std::shared_ptr<T> sp_data) {
+                return set_data(it, std::move(sp_data));
+            }// end bool set(const_iterator it, std::shared_ptr<T> sp_data)
+            //--------------------------
             template<typename... Args>
             std::optional<IndexType> emplace(Args&&... args) {
                 return emplace_data(std::forward<Args>(args)...);
@@ -124,6 +135,20 @@ namespace HazardSystem {
             std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return(Args&&... args) {
                 return emplace_return_data(std::forward<Args>(args)...);
             }// end std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<iterator> emplace_iterator(Args&&... args) {
+                //--------------------------
+                return emplace_return_iterator(std::forward<Args>(args)...);
+                //--------------------------
+            }// end std::optional<iterator> emplace_iterator(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<const_iterator> emplace_iterator(Args&&... args) const {
+                //--------------------------
+                return emplace_return_iterator(std::forward<Args>(args)...);
+                //--------------------------
+            }// end std::optional<const_iterator> emplace_return_iterator(Args&&... args) const
             //--------------------------
             std::shared_ptr<T> at(const IndexType& index) const {
                 return at_data(index);
@@ -176,6 +201,22 @@ namespace HazardSystem {
             constexpr IndexType capacity(void) const {
                 return get_capacity();
             }// end constexpr uint16_t capacity(void) const
+            //--------------------------
+            iterator begin(void) noexcept {
+                return m_slots.begin();
+            }// end iterator begin(void) noexcept
+            //--------------------------
+            iterator end(void) noexcept {
+                return m_slots.end();
+            }// end iterator end(void) noexcept
+            //--------------------------
+            const_iterator begin(void) const noexcept {
+                return m_slots.begin();
+            }// end const_iterator begin(void) const noexcept 
+            //--------------------------
+            const_iterator end(void) const noexcept {
+                return m_slots.end();
+            }// end const_iterator end(void) const noexcept
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
@@ -336,6 +377,18 @@ namespace HazardSystem {
                 //--------------------------
             }// end std::optional<IndexType> set_data(std::shared_ptr<T> sp_data)
             //--------------------------
+            bool set_data(const_iterator it, std::shared_ptr<T> sp_data) {
+                //--------------------------
+                auto first = m_slots.begin();
+                //--------------------------
+                if (it < first or it >= m_slots.end()) {
+                    return false;
+                }// end if (it < first or it >= m_slots.end())
+                //--------------------------
+                return set_data(static_cast<IndexType>(it - first), std::move(sp_data));
+                //--------------------------
+            }// end bool set_data(iterator it, std::shared_ptr<T> sp_data)
+            //--------------------------
             template<typename... Args>
             std::optional<IndexType> emplace_data(Args&&... args) {
                 //--------------------------
@@ -366,6 +419,36 @@ namespace HazardSystem {
                 return std::make_pair(_index.value(), std::move(_sp_data));
                 //--------------------------
             }//end std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return_data(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<iterator> emplace_return_iterator(Args&&... args) {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                auto _sp_data = std::make_shared<T>(std::forward<Args>(args)...);
+                set_data(_index.value(), _sp_data);
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<iterator> emplace_return_iterator(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<const_iterator> emplace_return_iterator(Args&&... args) const {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                auto _sp_data = std::make_shared<T>(std::forward<Args>(args)...);
+                set_data(_index.value(), _sp_data);
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<iterator> emplace_return_iterator(Args&&... args)
             //--------------------------
             std::shared_ptr<T> at_data(const IndexType& index) const {
                 //--------------------------
@@ -632,10 +715,6 @@ namespace HazardSystem {
             using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,
                                     std::conditional_t<(N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT ), std::array<std::atomic<uint64_t>, C_MASK_COUNT>,
                                     std::atomic<uint64_t>>>;
-            //--------------------------
-            using SlotType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<std::shared_ptr<T>>>,
-                                                                std::array<std::atomic<std::shared_ptr<T>>, N>>;
-
             //--------------------------
             SlotType m_slots;
             BitmaskType m_bitmask;
