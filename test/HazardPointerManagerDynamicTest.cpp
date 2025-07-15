@@ -96,7 +96,7 @@ TEST(DynamicHazardPointerManager, ProtectSharedPtr) {
   using TestData = ProtectSharedPtr_TestData;
   using Manager  = HazardPointerManager<TestData, 0>;
   auto& mgr = Manager::instance(10, 10);
-
+ 
   auto data = std::make_shared<TestData>(42);
   auto p = mgr.protect(data);
   EXPECT_TRUE(static_cast<bool>(p));

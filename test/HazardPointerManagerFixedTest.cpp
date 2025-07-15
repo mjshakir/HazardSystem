@@ -96,7 +96,7 @@ TEST_F(FixedHazardPointerManagerTest, ProtectReservesAndReleasesOneSlot) {
     {   // protect() should grab exactly one slot
         auto p = mgr.protect(data);
         ASSERT_TRUE(static_cast<bool>(p));
-        EXPECT_EQ(mgr.hazard_size(), before + 1);
+        EXPECT_EQ(mgr.hazard_size(), before + 1UL);
     }   // p’s destructor must release that slot
 
     EXPECT_EQ(mgr.hazard_size(), before);
@@ -842,7 +842,7 @@ TEST_F(FixedHazardPointerManagerTest, ClearOperationViaProtect) {
 
     // 1) Start from a known-clean state
     mgr.clear();
-    EXPECT_EQ(mgr.hazard_size(), 1u);
+    EXPECT_EQ(mgr.hazard_size(), 0u);
 
     // 2) Acquire N slots
     std::vector<ProtectedPointer<TestData>> guards;
@@ -850,25 +850,25 @@ TEST_F(FixedHazardPointerManagerTest, ClearOperationViaProtect) {
     for (size_t i = 0; i < N; ++i) {
         guards.push_back(mgr.protect(std::make_shared<TestData>(int(i))));
     }
-    EXPECT_EQ(mgr.hazard_size(), N+1);
+    EXPECT_EQ(mgr.hazard_size(), N);
 
     // 3) Release those slots by destroying the pointers
     guards.clear();
-    EXPECT_EQ(mgr.hazard_size(), 1u);
+    EXPECT_EQ(mgr.hazard_size(), 0u);
 
     // 4) Clear manager’s tables (just to exercise clear())
     mgr.clear();
     EXPECT_EQ(mgr.retire_size(), 0u);
-    EXPECT_EQ(mgr.hazard_size(), 1u);
+    EXPECT_EQ(mgr.hazard_size(), 0u);
 
     // 5) Test a final protect/reset cycle
     {
       auto p = mgr.protect(std::make_shared<TestData>(42));
       EXPECT_TRUE(static_cast<bool>(p));
-      EXPECT_EQ(mgr.hazard_size(), 2u);
+      EXPECT_EQ(mgr.hazard_size(), 1u);
       p.reset();  // returns that last slot
     }
-    EXPECT_EQ(mgr.hazard_size(), 1u);  // now truly zero
+    EXPECT_EQ(mgr.hazard_size(), 0u);  // now truly zero
 }
 
 // ============================================================================
@@ -911,7 +911,7 @@ TEST_F(FixedHazardPointerManagerTest, ConcurrentProtectSharedPtr) {
 
     // And after all ProtectedPointer destructors have run,
     // we should have released every slot
-    EXPECT_EQ(mgr.hazard_size(), 1u);
+    EXPECT_EQ(mgr.hazard_size(), 0u);
 }
 
 
@@ -959,7 +959,7 @@ TEST_F(FixedHazardPointerManagerTest, ConcurrentProtectAtomicSharedPtr) {
     EXPECT_GT(readers.load(), 0);
 
     // Finally, no slots still held
-    EXPECT_EQ(mgr.hazard_size(), 1u);
+    EXPECT_EQ(mgr.hazard_size(), 0u);
 }
 
 // at top of your test file, before any TEST_F:
