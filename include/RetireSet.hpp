@@ -18,8 +18,8 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             explicit RetireSet( const size_t& threshold,
-                                const std::function<bool(std::shared_ptr<T>)>& is_hazard) : m_threshold(std::bit_ceil(threshold)),
-                                                                                            m_hazard(is_hazard) {
+                                const std::function<bool(const std::shared_ptr<T>&)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
+                                                                                                    m_hazard(is_hazard) {
                 //--------------------------
                 m_retired.reserve(threshold);                                                                                            
                 //--------------------------
@@ -119,7 +119,7 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(std::shared_ptr<T>)> m_hazard;
+            std::function<bool(const std::shared_ptr<T>&)> m_hazard;
             std::unordered_set<std::shared_ptr<T>> m_retired;
         //--------------------------------------------------------------
     };// end clas class RetireSet
