@@ -68,6 +68,10 @@ namespace HazardSystem {
                 return &m_pointer;
             }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
             //--------------------------
+            const std::atomic<std::shared_ptr<T>>& atomic_ref(void) const noexcept {
+                return &m_pointer;
+            }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
+            //--------------------------
             std::shared_ptr<T> load(const std::memory_order& memory = std::memory_order_acquire) const noexcept {
                 return m_pointer.load(memory);
             }// end std::shared_ptr<T> load(const std::memory_order& memory = std::memory_order_acquire) const noexcept
