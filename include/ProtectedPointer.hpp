@@ -61,6 +61,10 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool release_data(void) noexcept {
                 //--------------------------
+                if(!m_protected_pointer or !m_release) {
+                    return false;
+                }// end if(!m_protected_pointer or !m_release)
+                //--------------------------
                 if (m_release) {
                     m_release();
                 }// end if (m_release)
