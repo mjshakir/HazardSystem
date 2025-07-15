@@ -17,6 +17,10 @@
 #include <cmath>
 #include <functional>
 //--------------------------------------------------------------
+// User Defined Headers
+//--------------------------------------------------------------
+#include "HazardPointer.hpp"
+//--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     template<typename T, uint16_t N = 0>
@@ -25,11 +29,20 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             static constexpr uint16_t C_ARRAY_LIMIT = 1024U;
+            //--------------------------
+            using SlotType                  = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<HazardPointer<T>>,
+                                                                std::array<HazardPointer<T>, N>>;
+
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
-            using IndexType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), size_t, 
+            using IndexType                 = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), size_t, 
                                                     std::conditional_t<(N <= std::numeric_limits<uint8_t>::max()), uint8_t, uint16_t>>;
+            //--------------------------
+            using iterator                  = typename SlotType::iterator;
+            using const_iterator            = typename SlotType::const_iterator;
+            using reverse_iterator          = typename SlotType::reverse_iterator;
+            using const_reverse_iterator    = typename SlotType::const_reverse_iterator;
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
@@ -83,6 +96,14 @@ namespace HazardSystem {
                 return acquire_data();
             }// end std::optional<IndexType> acquire_data(void)
             //--------------------------
+            std::optional<iterator> acquire_iterator(void) {
+                return acquire_data_iterator();
+            }// end acquire_iterator
+            //--------------------------
+            std::optional<const_iterator> acquire_iterator(void) const {
+                return acquire_data_iterator();
+            }// std::optional<const_iterator> acquire_data_iterator(void) const
+            //--------------------------
             bool release(const IndexType& index) {
                 return release_data(index);
             }// end bool release(const IndexType& index)
@@ -115,6 +136,10 @@ namespace HazardSystem {
                 return set_data(sp_data);
             }// end std::optional<IndexType> data(std::shared_ptr<T> sp_data)
             //--------------------------
+            bool set(const_iterator it, std::shared_ptr<T> sp_data) {
+                return set_data(it, std::move(sp_data));
+            }// end bool set(const_iterator it, std::shared_ptr<T> sp_data)
+            //--------------------------
             template<typename... Args>
             std::optional<IndexType> emplace(Args&&... args) {
                 return emplace_data(std::forward<Args>(args)...);
@@ -124,6 +149,20 @@ namespace HazardSystem {
             std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return(Args&&... args) {
                 return emplace_return_data(std::forward<Args>(args)...);
             }// end std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<iterator> emplace_iterator(Args&&... args) {
+                //--------------------------
+                return emplace_return_iterator(std::forward<Args>(args)...);
+                //--------------------------
+            }// end std::optional<iterator> emplace_iterator(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<const_iterator> emplace_iterator(Args&&... args) const {
+                //--------------------------
+                return emplace_return_iterator(std::forward<Args>(args)...);
+                //--------------------------
+            }// end std::optional<const_iterator> emplace_return_iterator(Args&&... args) const
             //--------------------------
             std::shared_ptr<T> at(const IndexType& index) const {
                 return at_data(index);
@@ -176,6 +215,54 @@ namespace HazardSystem {
             constexpr IndexType capacity(void) const {
                 return get_capacity();
             }// end constexpr uint16_t capacity(void) const
+            //--------------------------
+            iterator begin(void) noexcept {
+                return m_slots.begin();
+            }// end iterator begin(void) noexcept
+            //--------------------------
+            iterator end(void) noexcept {
+                return m_slots.end();
+            }// end iterator end(void) noexcept
+            //--------------------------
+            const_iterator begin(void) const noexcept {
+                return m_slots.begin();
+            }// end const_iterator begin(void) const noexcept 
+            //--------------------------
+            const_iterator end(void) const noexcept {
+                return m_slots.end();
+            }// end const_iterator end(void) const noexcept
+            //--------------------------
+            const_iterator cbegin(void) const noexcept {
+                return m_slots.cbegin();
+            }//end const_iterator cbegin(void) const noexcept
+            //--------------------------
+            const_iterator cend(void) const noexcept {
+                return m_slots.cend();
+            }//end const_iterator cend(void) const noexcept
+            //--------------------------
+            reverse_iterator rbegin(void) noexcept {
+                return m_slots.rbegin();
+            }//end reverse_iterator rbegin(void) noexcept
+            //--------------------------
+            reverse_iterator rend(void) noexcept {
+                return m_slots.rend();
+            }//end reverse_iterator rend(void) noexcept
+            //--------------------------
+            const_reverse_iterator rbegin(void) const noexcept {
+                return m_slots.rbegin();
+            }//end const_reverse_iterator rbegin(void) const
+            //--------------------------
+            const_reverse_iterator rend(void) const noexcept {
+                return m_slots.rend();
+            }//end const_reverse_iterator rend(void) const noexcept
+            //--------------------------
+            const_reverse_iterator crbegin(void) const noexcept {
+                return m_slots.crbegin();
+            }//end const_reverse_iterator crbegin(void) const noexcept
+            //--------------------------
+            const_reverse_iterator crend(void) const noexcept {
+                return m_slots.crend();
+            }//end const_reverse_iterator crend(void) const noexcept
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
@@ -196,7 +283,7 @@ namespace HazardSystem {
                     uint64_t desired = mask | flag;
                     //--------------------------
                     if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
-                        // m_size.fetch_add(1, std::memory_order_relaxed);
+                        m_size.fetch_add(1, std::memory_order_relaxed);
                         return index;
                     }// end if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)))
                 }// end while (mask != ~0ULL)
@@ -226,7 +313,7 @@ namespace HazardSystem {
                         uint64_t desired    = mask | flag;
                         //--------------------------
                         if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
-                            // m_size.fetch_add(1, std::memory_order_relaxed);
+                            m_size.fetch_add(1, std::memory_order_relaxed);
                             return base + index;
                         }// end if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
                     }// end while (mask != ~0ULL)
@@ -235,6 +322,28 @@ namespace HazardSystem {
                 return std::nullopt;
                 //--------------------------
             }// end std::enable_if_t<(M == 0) or (M > 64), std::optional<IndexType>> acquire_data(void)
+            //--------------------------
+            std::optional<iterator> acquire_data_iterator(void) {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<iterator> acquire_data_iterator(void)
+            //--------------------------
+            std::optional<const_iterator> acquire_data_iterator(void) const {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<const_iterator> acquire_data_iterator(void) const
             //--------------------------
             bool release_data(const IndexType& index) {
                 //--------------------------
@@ -260,7 +369,7 @@ namespace HazardSystem {
                     //--------------------------
                 }// end if constexpr (N <= 64)
                 //--------------------------
-                m_size.fetch_sub(1, std::memory_order_relaxed);
+                atomic_sub();
                 return true;
                 //--------------------------
             }// end bool release_data(const IndexType& index)
@@ -281,9 +390,9 @@ namespace HazardSystem {
                     }// end if (!prev)
                 } else {
                     m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
-                    if (prev) {
-                        m_size.fetch_sub(1, std::memory_order_acq_rel);
-                    }// end if (prev) 
+                    // if (prev) {
+                        atomic_sub();
+                    // }// end if (prev) 
                 }// end  if (sp_data)
                 //--------------------------
                 return true;
@@ -309,9 +418,9 @@ namespace HazardSystem {
                     }// end if (!prev)
                 } else {
                     m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
-                    if (prev) {
-                        m_size.fetch_sub(1, std::memory_order_acq_rel);
-                    }// end if (prev) 
+                    // if (prev) {
+                        atomic_sub();
+                    // }// end if (prev) 
                 }// end if (sp_data)
                 //--------------------------
                 return true;
@@ -335,6 +444,18 @@ namespace HazardSystem {
                 return _index;
                 //--------------------------
             }// end std::optional<IndexType> set_data(std::shared_ptr<T> sp_data)
+            //--------------------------
+            bool set_data(const_iterator it, std::shared_ptr<T> sp_data) {
+                //--------------------------
+                auto first = m_slots.begin();
+                //--------------------------
+                if (it < first or it >= m_slots.end()) {
+                    return false;
+                }// end if (it < first or it >= m_slots.end())
+                //--------------------------
+                return set_data(static_cast<IndexType>(it - first), std::move(sp_data));
+                //--------------------------
+            }// end bool set_data(iterator it, std::shared_ptr<T> sp_data)
             //--------------------------
             template<typename... Args>
             std::optional<IndexType> emplace_data(Args&&... args) {
@@ -366,6 +487,36 @@ namespace HazardSystem {
                 return std::make_pair(_index.value(), std::move(_sp_data));
                 //--------------------------
             }//end std::optional<std::pair<IndexType, std::shared_ptr<T>>> emplace_return_data(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<iterator> emplace_return_iterator(Args&&... args) {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                auto _sp_data = std::make_shared<T>(std::forward<Args>(args)...);
+                set_data(_index.value(), _sp_data);
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<iterator> emplace_return_iterator(Args&&... args)
+            //--------------------------
+            template<typename... Args>
+            std::optional<const_iterator> emplace_return_iterator(Args&&... args) const {
+                //--------------------------
+                auto _index = acquire_data();
+                if (!_index) {
+                    return std::nullopt;
+                }// end if (!_index)
+                //--------------------------
+                auto _sp_data = std::make_shared<T>(std::forward<Args>(args)...);
+                set_data(_index.value(), _sp_data);
+                //--------------------------
+                return m_slots.begin() + _index.value();
+                //--------------------------
+            }// end std::optional<iterator> emplace_return_iterator(Args&&... args)
             //--------------------------
             std::shared_ptr<T> at_data(const IndexType& index) const {
                 //--------------------------
@@ -566,9 +717,19 @@ namespace HazardSystem {
             }// end std::enable_if_t<(M == 0) or (M > 64), bool> find_data(Func&& fn) const
             //--------------------------
             void clear_data(void) {
-                for_each_active_fast([this](IndexType idx, std::shared_ptr<T>&) {
-                    m_slots.at(idx).exchange(nullptr, std::memory_order_acq_rel);
+                //--------------------------
+                for_each_active_fast([this](IndexType index, std::shared_ptr<T>&) {
+                    static_cast<void>(m_slots.at(index).exchange(nullptr, std::memory_order_acq_rel));
                 });
+                //--------------------------
+                if constexpr ((N > 0) and (N <= 64)) {
+                    m_bitmask.store(0ULL, std::memory_order_release);
+                } else {
+                    static_cast<void>(Initialization(0ULL));
+                }// end if constexpr ((N > 0) and (N <= 64))
+                //--------------------------
+                m_size.store(0UL, std::memory_order_release);
+                //--------------------------
             }// end void clear_data(void)
             //--------------------------
             IndexType size_data(void) const {
@@ -585,6 +746,14 @@ namespace HazardSystem {
                 return true;
                 //--------------------------
             }// end std::enable_if_t<(M > 64), bool> Initialization(void)
+            //--------------------------
+            void atomic_sub(void) {
+                //--------------------------
+                if(m_size.load(std::memory_order_acquire)) {
+                    m_size.fetch_sub(1, std::memory_order_acq_rel);
+                }// end if(m_size.load(std::memory_order_acquire))
+                //--------------------------
+            }//end void atomic_sub(void)
             //--------------------------
             constexpr IndexType get_capacity(void) const {
                 //--------------------------
@@ -632,10 +801,6 @@ namespace HazardSystem {
             using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,
                                     std::conditional_t<(N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT ), std::array<std::atomic<uint64_t>, C_MASK_COUNT>,
                                     std::atomic<uint64_t>>>;
-            //--------------------------
-            using SlotType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<std::shared_ptr<T>>>,
-                                                                std::array<std::atomic<std::shared_ptr<T>>, N>>;
-
             //--------------------------
             SlotType m_slots;
             BitmaskType m_bitmask;
