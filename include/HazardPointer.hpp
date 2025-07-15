@@ -58,9 +58,9 @@ namespace HazardSystem {
                 return *this;
             }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
             //--------------------------
-            void store_safe(std::shared_ptr<T> p) noexcept {
-                std::shared_ptr<T> desired = p, expected = this->load(std::memory_order_acquire);
-                while (!this->compare_exchange_weak(expected, desired, std::memory_order_acq_rel, std::memory_order_relaxed));
+            void store_safe(std::shared_ptr<T> sp_data) noexcept {
+                std::shared_ptr<T> expected = this->load(std::memory_order_acquire);
+                while (!this->compare_exchange_weak(expected, sp_data, std::memory_order_acq_rel, std::memory_order_relaxed));
             }// end bool store(std::shared_ptr<T> p) noexcept
         //--------------------------
     }; // end struct HazardPointer    
