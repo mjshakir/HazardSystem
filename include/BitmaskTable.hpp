@@ -50,6 +50,7 @@ namespace HazardSystem {
             BitmaskTable(void) :    m_capacity(0UL),
                                     m_mask_count(0UL),
                                     m_size(0UL),
+                                    m_hint(0U),
                                     m_bitmask(0ULL),
                                     m_initialized(std::nullopt) {
                 //--------------------------
@@ -59,6 +60,7 @@ namespace HazardSystem {
             BitmaskTable(void) :    m_capacity(0UL),
                                     m_mask_count(0UL),
                                     m_size(0UL),
+                                    m_hint(0U),
                                     m_initialized(Initialization(0ULL)) { 
                 //--------------------------
             }// end BitmaskTable(void)
@@ -67,6 +69,7 @@ namespace HazardSystem {
             BitmaskTable(const size_t& capacity) :  m_capacity(bitmask_capacity_calculator(capacity)),
                                                     m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_acquire))),
                                                     m_size(0UL),
+                                                    m_hint(0UL),
                                                     m_slots(m_capacity.load(std::memory_order_acquire)),
                                                     m_bitmask(m_mask_count.load(std::memory_order_acquire)),
                                                     m_initialized(Initialization(0ULL)) {
@@ -77,6 +80,7 @@ namespace HazardSystem {
             BitmaskTable(void) :    m_capacity(bitmask_capacity_calculator(N)),
                                     m_mask_count(bitmask_table_calculator(m_capacity.load(std::memory_order_acquire))),
                                     m_size(0UL),
+                                    m_hint(0U),
                                     m_slots(m_capacity.load(std::memory_order_acquire)),
                                     m_bitmask(m_mask_count.load(std::memory_order_acquire)),
                                     m_initialized(Initialization(0ULL)) {
@@ -295,26 +299,30 @@ namespace HazardSystem {
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), std::optional<IndexType>> acquire_data(void) {
                 //--------------------------
-                const IndexType _capacity = get_capacity();
+                const IndexType _capacity   = get_capacity();
+                const IndexType _mask_count  = get_mask_count();
+                const IndexType start_part   = m_hint.load(std::memory_order_relaxed) % _mask_count;
                 //--------------------------
-                for (uint16_t part = 0; part < get_mask_count(); ++part) {
+                for (uint16_t i = 0; i < _mask_count; ++i) {
                     //--------------------------
-                    IndexType base  = static_cast<IndexType>(part * C_BITS_PER_MASK);
-                    uint64_t mask   = m_bitmask.at(part).load(std::memory_order_relaxed);
+                    const IndexType part    = (start_part + i) % _mask_count;
+                    const IndexType base    = static_cast<IndexType>(part * C_BITS_PER_MASK);
+                    uint64_t mask           = m_bitmask.at(part).load(std::memory_order_relaxed);
                     //--------------------------
                     while (mask != ~0ULL) {
                         //--------------------------
-                        IndexType index = static_cast<IndexType>(std::countr_zero(~mask));
-                        if (base + index >= _capacity) {
+                        const IndexType index       = static_cast<IndexType>(std::countr_zero(~mask));
+                        const IndexType slot_index  = base + index;
+                        if (slot_index >= _capacity) {
                             break;
-                        }// end if (base + index >= _capacity)
+                        }// end if (slot_index>= _capacity)
                         //--------------------------
                         uint64_t flag       = 1ULL << index;
                         uint64_t desired    = mask | flag;
                         //--------------------------
                         if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                             m_size.fetch_add(1, std::memory_order_relaxed);
-                            return base + index;
+                            return slot_index;
                         }// end if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel))
                     }// end while (mask != ~0ULL)
                 }// end for (uint16_t part = 0; part < get_mask_count(); ++part) 
@@ -366,6 +374,7 @@ namespace HazardSystem {
                     uint16_t bit  = bit_index(index);
                     //--------------------------
                     m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
+                    m_hint.store(part, std::memory_order_relaxed);
                     //--------------------------
                 }// end if constexpr (N <= 64)
                 //--------------------------
@@ -421,6 +430,7 @@ namespace HazardSystem {
                     // if (prev) {
                         atomic_sub();
                     // }// end if (prev) 
+                    m_hint.store(part, std::memory_order_relaxed);
                 }// end if (sp_data)
                 //--------------------------
                 return true;
@@ -635,10 +645,14 @@ namespace HazardSystem {
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), void> for_each_active_fast(std::function<void(IndexType index, std::shared_ptr<T>&)>&& fn) const {
                 //--------------------------
-                for (IndexType part = 0; part < get_mask_count(); ++part) {
+                const IndexType mask_count = get_mask_count();
+                const IndexType start_part = m_hint.load(std::memory_order_relaxed) % mask_count;
+                //--------------------------
+                for (IndexType i = 0; i < mask_count; ++i) {
                     //--------------------------
-                    uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
-                    const IndexType _base    = static_cast<IndexType>(part * C_BITS_PER_MASK);
+                    const IndexType _part    = (start_part + i) % mask_count;
+                    uint64_t mask           = m_bitmask[_part].load(std::memory_order_acquire);
+                    const IndexType _base   = static_cast<IndexType>(_part * C_BITS_PER_MASK);
                     //--------------------------
                     while (mask) {
                         //--------------------------
@@ -726,6 +740,7 @@ namespace HazardSystem {
                     m_bitmask.store(0ULL, std::memory_order_release);
                 } else {
                     static_cast<void>(Initialization(0ULL));
+                    m_hint.store(0UL, std::memory_order_relaxed);
                 }// end if constexpr ((N > 0) and (N <= 64))
                 //--------------------------
                 m_size.store(0UL, std::memory_order_release);
@@ -797,6 +812,7 @@ namespace HazardSystem {
             static constexpr uint16_t C_MASK_COUNT      = (N == 0 ? 0 : static_cast<uint16_t>((N + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK));
             //--------------------------
             std::atomic<size_t> m_capacity, m_mask_count, m_size;
+            std::atomic<IndexType> m_hint;
             //--------------------------
             using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,
                                     std::conditional_t<(N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT ), std::array<std::atomic<uint64_t>, C_MASK_COUNT>,
