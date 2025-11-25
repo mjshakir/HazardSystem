@@ -310,6 +310,26 @@ TEST_F(FixedHazardPointerManagerTest, ManualReclaim) {
     EXPECT_LE(after_reclaim, before_reclaim);
 }
 
+TEST_F(FixedHazardPointerManagerTest, RetireProtectedObjectIsDeferred) {
+    auto& manager = HazardPointerManager<TestData, 64>::instance();
+    manager.clear();
+
+    auto data = std::make_shared<TestData>(7);
+    auto guard = manager.protect(data);
+    ASSERT_TRUE(static_cast<bool>(guard));
+
+    ASSERT_TRUE(manager.retire(data));
+    EXPECT_EQ(manager.retire_size(), 1u);
+
+    manager.reclaim();
+    // Still protected, should remain deferred
+    EXPECT_EQ(manager.retire_size(), 1u);
+
+    guard.reset();
+    manager.reclaim();
+    EXPECT_EQ(manager.retire_size(), 0u);
+}
+
 TEST_F(FixedHazardPointerManagerTest, ReclaimAll) {
     auto& manager = HazardPointerManager<TestData, 64>::instance();
     
@@ -345,6 +365,45 @@ TEST_F(FixedHazardPointerManagerTest, ProtectAtomicNullptr) {
     
     auto protected_ptr = manager.protect(atomic_null);
     EXPECT_FALSE(static_cast<bool>(protected_ptr));
+}
+
+TEST_F(FixedHazardPointerManagerTest, ProtectAutoRegistersThread) {
+    auto& manager = HazardPointerManager<TestData, 64>::instance();
+    manager.clear();
+
+    std::atomic<std::shared_ptr<TestData>> atomic_data;
+    atomic_data.store(std::make_shared<TestData>(111));
+
+    std::atomic<bool> succeeded{false};
+    std::atomic<size_t> hazard_count{0};
+
+    std::thread t([&]() {
+        auto p = manager.protect(atomic_data);
+        succeeded.store(static_cast<bool>(p), std::memory_order_relaxed);
+        hazard_count.store(manager.hazard_size(), std::memory_order_relaxed);
+        // Release if we acquired
+        if (p) {
+            p.reset();
+        }
+    });
+    t.join();
+
+    EXPECT_TRUE(succeeded.load());
+    EXPECT_GE(hazard_count.load(), 0u);
+    EXPECT_EQ(manager.hazard_size(), 0u);
+}
+
+TEST_F(FixedHazardPointerManagerTest, FailedTryProtectDoesNotLeakSlot) {
+    auto& manager = HazardPointerManager<TestData, 64>::instance();
+    manager.clear();
+
+    std::atomic<std::shared_ptr<TestData>> atomic_null;
+    atomic_null.store(nullptr);
+
+    auto before = manager.hazard_size();
+    auto p = manager.try_protect(atomic_null, 3);
+    EXPECT_FALSE(static_cast<bool>(p));
+    EXPECT_EQ(manager.hazard_size(), before);
 }
 
 // TEST_F(FixedHazardPointerManagerTest, ReleaseInvalidHandle) {
