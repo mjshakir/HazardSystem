@@ -391,17 +391,20 @@ namespace HazardSystem {
                 }// end if (index >= get_capacity())
                 //--------------------------
                 auto prev = m_slots.at(index).exchange(sp_data, std::memory_order_acq_rel);
+                static_cast<void>(prev);
+                //--------------------------
+                const uint64_t bit = 1ULL << index;
                 //--------------------------
                 if (sp_data) {
-                    m_bitmask.fetch_or(1ULL << index, std::memory_order_acq_rel);
-                    if (!prev) {
+                    const uint64_t old = m_bitmask.fetch_or(bit, std::memory_order_acq_rel);
+                    if ((old & bit) == 0) {
                         m_size.fetch_add(1, std::memory_order_acq_rel);
-                    }// end if (!prev)
+                    }// end if ((old & bit) == 0)
                 } else {
-                    m_bitmask.fetch_and(~(1ULL << index), std::memory_order_acq_rel);
-                    // if (prev) {
+                    const uint64_t old = m_bitmask.fetch_and(~bit, std::memory_order_acq_rel);
+                    if (old & bit) {
                         atomic_sub();
-                    // }// end if (prev) 
+                    }// end if (old & bit)
                 }// end  if (sp_data)
                 //--------------------------
                 return true;
@@ -416,20 +419,22 @@ namespace HazardSystem {
                 }// end if (index >= get_capacity())
                 //--------------------------
                 auto prev = m_slots.at(index).exchange(sp_data, std::memory_order_acq_rel);
+                static_cast<void>(prev);
                 //--------------------------
                 uint16_t part = part_index(index);
                 uint16_t bit  = bit_index(index);
+                const uint64_t bitmask = 1ULL << bit;
                 //--------------------------
                 if (sp_data) {
-                    m_bitmask.at(part).fetch_or(1ULL << bit, std::memory_order_acq_rel);
-                    if (!prev) {
+                    const uint64_t old = m_bitmask.at(part).fetch_or(bitmask, std::memory_order_acq_rel);
+                    if ((old & bitmask) == 0) {
                         m_size.fetch_add(1, std::memory_order_acq_rel);
-                    }// end if (!prev)
+                    }// end if ((old & bitmask) == 0)
                 } else {
-                    m_bitmask.at(part).fetch_and(~(1ULL << bit), std::memory_order_acq_rel);
-                    // if (prev) {
+                    const uint64_t old = m_bitmask.at(part).fetch_and(~bitmask, std::memory_order_acq_rel);
+                    if (old & bitmask) {
                         atomic_sub();
-                    // }// end if (prev) 
+                    }// end if (old & bitmask)
                     m_hint.store(part, std::memory_order_relaxed);
                 }// end if (sp_data)
                 //--------------------------
