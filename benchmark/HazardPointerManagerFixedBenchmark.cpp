@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <numeric>
 #include <array>
+#include <mutex>
 #include <iostream>
 
 // Include the headers under test
@@ -429,6 +430,80 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireReclaimPattern)(benchmark:
     state.SetItemsProcessed(state.iterations() * operations);
 }
 
+// Contended protect on a stable shared_ptr; benchmark threads control contention level
+BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, ContendedProtectShared)(benchmark::State& state) {
+    ThreadRegistry::instance().register_id();
+    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
+    auto shared   = std::make_shared<BenchmarkTestData>(7);
+
+    for (auto _ : state) {
+        auto p = manager.protect(shared);
+        benchmark::DoNotOptimize(p);
+        if (p) p->work();
+    }
+
+    state.SetComplexityN(state.iterations());
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Contended protect on an atomic shared_ptr with occasional writers
+BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, ContendedProtectAtomic)(benchmark::State& state) {
+    ThreadRegistry::instance().register_id();
+    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
+
+    static std::atomic<std::shared_ptr<BenchmarkTestData>> atomic_data;
+    static std::once_flag init_flag;
+    std::call_once(init_flag, [] {
+        atomic_data.store(std::make_shared<BenchmarkTestData>(0), std::memory_order_relaxed);
+    });
+
+    size_t iter = 0;
+    for (auto _ : state) {
+        // Every so often, emulate a writer swapping the pointer
+        if ((iter++ & 0x3F) == 0) {
+            atomic_data.exchange(std::make_shared<BenchmarkTestData>(static_cast<int>(iter)),
+                                 std::memory_order_acq_rel);
+        }
+        auto p = manager.try_protect(atomic_data, 3);
+        benchmark::DoNotOptimize(p);
+        if (p) p->work();
+    }
+
+    state.SetComplexityN(state.iterations());
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Retire/reclaim throughput while some hazards are held
+BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireWithHazards)(benchmark::State& state) {
+    ThreadRegistry::instance().register_id();
+    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
+
+    // Hold a handful of long-lived hazards to force filtering during reclaim
+    std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+    for (int i = 0; i < 8; ++i) {
+        auto p = manager.protect(std::make_shared<BenchmarkTestData>(i));
+        if (p) guards.push_back(std::move(p));
+    }
+
+    const size_t batch = static_cast<size_t>(state.range(0));
+    for (auto _ : state) {
+        state.PauseTiming();
+        std::vector<std::shared_ptr<BenchmarkTestData>> retired;
+        retired.reserve(batch);
+        for (size_t i = 0; i < batch; ++i) {
+            retired.push_back(std::make_shared<BenchmarkTestData>(int(i)));
+            manager.retire(retired.back());
+        }
+        state.ResumeTiming();
+
+        manager.reclaim();
+        benchmark::DoNotOptimize(manager.retire_size());
+    }
+
+    state.SetComplexityN(batch);
+    state.SetItemsProcessed(state.iterations() * batch);
+}
+
 // ============================================================================
 // Register Fixed Size Benchmarks
 // ============================================================================
@@ -488,6 +563,20 @@ BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RetireReclaimPattern)
     ->Args({5, 25})     // retire_threshold=5, operations=25
     ->Args({10, 50})    // retire_threshold=10, operations=50
     ->Args({20, 100})   // retire_threshold=20, operations=100
+    ->Complexity(benchmark::oN);
+
+// Contention/throughput focused benchmarks
+BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, ContendedProtectShared)
+    ->ThreadRange(1, std::max(1u, std::thread::hardware_concurrency()))
+    ->Complexity(benchmark::o1);
+
+BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, ContendedProtectAtomic)
+    ->ThreadRange(1, std::max(1u, std::thread::hardware_concurrency()))
+    ->Complexity(benchmark::o1);
+
+BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RetireWithHazards)
+    ->RangeMultiplier(2)
+    ->Range(4, 512)
     ->Complexity(benchmark::oN);
 
 // ============================================================================

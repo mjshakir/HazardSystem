@@ -58,4 +58,8 @@ create_benchmark_target(${PROJECT_NAME}_HashTable_Benchmark HashTableBenchmark.c
 # create_benchmark_target(${PROJECT_NAME}_Benchmark HazardPointerManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Fixed_Benchmark     HazardPointerManagerFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Dynamic_Benchmark     HazardPointerManagerDynamicBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Fixed_Benchmark   BitmaskTableFixedBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Dynamic_Benchmark BitmaskTableDynamicBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_HashSet_Benchmark              HashSetBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_ProtectedPointer_Benchmark     ProtectedPointerBenchmark.cpp)
 #------------------------------------------------------------------------------------------

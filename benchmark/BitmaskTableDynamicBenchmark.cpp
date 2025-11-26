@@ -1,0 +1,256 @@
+#include <benchmark/benchmark.h>
+#include <array>
+#include <atomic>
+#include <iostream>
+#include <memory>
+#include <vector>
+#include <algorithm>
+
+#include "BitmaskTable.hpp"
+
+using namespace HazardSystem;
+
+struct BenchmarkTestData {
+    std::array<int, 16> data{};
+    std::atomic<int> counter{0};
+
+    explicit BenchmarkTestData(int seed = 0) {
+        for (size_t i = 0; i < data.size(); ++i) {
+            data[i] = static_cast<int>(seed + static_cast<int>(i));
+        }
+    }
+
+    void work() {
+        counter.fetch_add(1, std::memory_order_relaxed);
+        int sum = 0;
+        for (auto v : data) {
+            sum += v;
+        }
+        benchmark::DoNotOptimize(sum);
+    }
+};
+
+using DynamicTable = BitmaskTable<BenchmarkTestData, 0>;
+
+class BitmaskDynamicFixture : public benchmark::Fixture {
+public:
+    void SetUp(const ::benchmark::State& state) override {
+        capacity = static_cast<size_t>(state.range(0));
+        table = std::make_unique<DynamicTable>(capacity);
+    }
+
+    void TearDown(const ::benchmark::State&) override {
+        table.reset();
+    }
+
+    size_t capacity{};
+    std::unique_ptr<DynamicTable> table;
+};
+
+// Acquire + release against a growing bitmask vector
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireRelease)(benchmark::State& state) {
+    auto payload = std::make_shared<BenchmarkTestData>(11);
+
+    for (auto _ : state) {
+        auto idx = table->acquire();
+        benchmark::DoNotOptimize(idx);
+        if (idx) {
+            table->set(idx.value(), payload);
+            table->release(idx.value());
+        }
+    }
+
+    state.SetComplexityN(capacity);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Iterate across active entries to exercise bitmask scanning logic
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, IterateActive)(benchmark::State& state) {
+    const size_t fill_target = std::min<size_t>(capacity, 512);
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        table->clear();
+        for (size_t i = 0; i < fill_target; ++i) {
+            auto idx = table->emplace(static_cast<int>(i));
+            if (!idx) {
+                break;
+            }
+        }
+        state.ResumeTiming();
+
+        size_t visited = 0;
+        table->for_each_fast([&](DynamicTable::IndexType, std::shared_ptr<BenchmarkTestData>& ptr) {
+            benchmark::DoNotOptimize(ptr);
+            ptr->work();
+            ++visited;
+        });
+        benchmark::DoNotOptimize(visited);
+    }
+
+    state.SetComplexityN(fill_target);
+    state.SetItemsProcessed(state.iterations() * fill_target);
+}
+
+// Clear the dynamically sized table to capture cleanup overhead
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, Clear)(benchmark::State& state) {
+    auto payload = std::make_shared<BenchmarkTestData>(5);
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        table->clear();
+        for (size_t i = 0; i < capacity; ++i) {
+            auto idx = table->acquire();
+            if (!idx) {
+                break;
+            }
+            table->set(idx.value(), payload);
+        }
+        state.ResumeTiming();
+
+        table->clear();
+        benchmark::DoNotOptimize(table->size());
+    }
+
+    state.SetComplexityN(capacity);
+    state.SetItemsProcessed(state.iterations() * capacity);
+}
+
+// Iterator-based acquisition + set + release
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireIteratorSet)(benchmark::State& state) {
+    auto payload = std::make_shared<BenchmarkTestData>(13);
+
+    for (auto _ : state) {
+        auto it = table->acquire_iterator();
+        benchmark::DoNotOptimize(it);
+        if (!it) {
+            continue;
+        }
+        table->set(it.value(), payload);
+        const auto index = static_cast<DynamicTable::IndexType>(it.value() - table->begin());
+        table->release(index);
+    }
+
+    state.SetComplexityN(capacity);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Active/at scanning on a prefilled dynamic table
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, ActiveChecks)(benchmark::State& state) {
+    const size_t fill_count = std::min<size_t>(capacity, static_cast<size_t>(state.range(0)));
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        table->clear();
+        for (size_t i = 0; i < fill_count; ++i) {
+            auto idx = table->emplace(static_cast<int>(i));
+            if (!idx) {
+                break;
+            }
+        }
+        state.ResumeTiming();
+
+        size_t hits = 0;
+        for (size_t i = 0; i < capacity; ++i) {
+            const bool active = table->active(static_cast<DynamicTable::IndexType>(i));
+            if (active) {
+                auto sp = table->at(static_cast<DynamicTable::IndexType>(i));
+                benchmark::DoNotOptimize(sp);
+                ++hits;
+            }
+        }
+        benchmark::DoNotOptimize(hits);
+    }
+
+    state.SetComplexityN(fill_count);
+    state.SetItemsProcessed(state.iterations() * fill_count);
+}
+
+// Predicate-based find across dynamic masks
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, FindPredicate)(benchmark::State& state) {
+    constexpr int target_seed = 909;
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        table->clear();
+        const size_t fill_count = std::min<size_t>(capacity, 512);
+        for (size_t i = 0; i < fill_count; ++i) {
+            auto idx = table->emplace(static_cast<int>(i == fill_count - 1 ? target_seed : static_cast<int>(i)));
+            if (!idx) {
+                break;
+            }
+        }
+        state.ResumeTiming();
+
+        const bool found = table->find([&](const std::shared_ptr<BenchmarkTestData>& ptr) {
+            return ptr && ptr->data.front() == target_seed;
+        });
+        benchmark::DoNotOptimize(found);
+    }
+
+    state.SetComplexityN(capacity);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Emplace-return pair path with release
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, EmplaceReturn)(benchmark::State& state) {
+    for (auto _ : state) {
+        auto res = table->emplace_return(17);
+        benchmark::DoNotOptimize(res);
+        if (res) {
+            table->release(res->first);
+        }
+    }
+
+    state.SetComplexityN(capacity);
+    state.SetItemsProcessed(state.iterations());
+}
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireRelease)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, IterateActive)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, Clear)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireIteratorSet)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, ActiveChecks)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, FindPredicate)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, EmplaceReturn)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oN);
+
+int main(int argc, char** argv) {
+    ::benchmark::Initialize(&argc, argv);
+    if (::benchmark::ReportUnrecognizedArguments(argc, argv)) {
+        return 1;
+    }
+
+    std::cout << "=== BitmaskTable Dynamic Benchmark ===\n";
+    std::cout << "Capacity varies per run; expect O(n) scan characteristics.\n\n";
+
+    ::benchmark::RunSpecifiedBenchmarks();
+    ::benchmark::Shutdown();
+    return 0;
+}

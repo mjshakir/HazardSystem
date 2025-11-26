@@ -277,6 +277,38 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
     }
 }
 
+TEST(BitmaskTableTest, SizeAccountingNoDoubleCount) {
+    constexpr size_t N = 8;
+    BitmaskTable<int, N> table;
+
+    std::vector<size_t> idxs;
+    for (size_t i = 0; i < N / 2; ++i) {
+        auto idx = table.acquire();
+        ASSERT_TRUE(idx);
+        idxs.push_back(*idx);
+    }
+    // Size should reflect acquires only once
+    ASSERT_EQ(table.size(), idxs.size());
+
+    // Setting non-null should not bump size again
+    for (size_t i = 0; i < idxs.size(); ++i) {
+        ASSERT_TRUE(table.set(idxs[i], std::make_shared<int>(int(i))));
+        ASSERT_EQ(table.size(), idxs.size());
+    }
+
+    // Overwrite with new values; size stays constant
+    for (size_t i = 0; i < idxs.size(); ++i) {
+        ASSERT_TRUE(table.set(idxs[i], std::make_shared<int>(int(i + 100))));
+        ASSERT_EQ(table.size(), idxs.size());
+    }
+
+    // Clearing with nullptr decrements
+    for (auto idx : idxs) {
+        ASSERT_TRUE(table.set(idx, nullptr));
+    }
+    ASSERT_EQ(table.size(), 0u);
+}
+
 // Test: for_each lambda is called only for active slots
 TEST(BitmaskTableTest, ForEachActive) {
     constexpr size_t N = 10;
@@ -595,4 +627,3 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
         ASSERT_FALSE(table.at(i));
     }
 }
-
