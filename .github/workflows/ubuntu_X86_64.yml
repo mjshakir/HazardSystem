@@ -1,0 +1,56 @@
+name: Ubuntu X86_64
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86]
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y libgtest-dev libbenchmark-dev cmake 
+
+    - name: Setup CMake and Ninja
+      uses: lukka/get-cmake@v4.2.0
+
+    - name: Check GCC Version
+      run: g++ --version
+
+    - name: Create build directory
+      run: mkdir build
+
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Test
+      working-directory: build
+      run: ctest -LE benchmark --output-on-failure
+
+    - name: Run Static HazardSystem Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_Fixed_Benchmark
+  
+    - name: Run Dynamic HazardSystem Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_Dynamic_Benchmark
+    
+    - name: Run Static Bitmask Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_BitmaskTable_Fixed_Benchmark
+
+    - name: Run Dynamic Bitmask Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_BitmaskTable_Dynamic_Benchmark
+
+    - name: Run HashSet Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_HashSet_Benchmark
+
+    - name: Run Dynamic Bitmask Benchmarks
+      run: ./build/benchmarkbin/HazardSystem_ProtectedPointer_Benchmark
