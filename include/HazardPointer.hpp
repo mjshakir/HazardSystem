@@ -30,7 +30,7 @@ namespace HazardSystem {
             HazardPointer& operator=(HazardPointer&&)       = default;
             //--------------------------
             explicit operator bool(void) const noexcept {
-                return this->load(std::memory_order_acquire) != nullptr;
+                return !!this->load(std::memory_order_acquire);
             }// explicit operator bool(void) const noexcept
             //--------------------------
             T* operator->(void) const noexcept {

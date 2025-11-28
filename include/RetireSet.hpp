@@ -3,12 +3,12 @@
 // Standard C++ library
 //--------------------------------------------------------------
 #include <cstddef>
-#include <unordered_map>
+#include <unordered_set>
 #include <bit>
+#include <memory>
 #include <optional>
 #include <functional>
 #include <algorithm>
-#include <memory>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -18,34 +18,24 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             explicit RetireSet( const size_t& threshold,
-                                const std::function<bool(const T*)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
-                                                                                     m_hazard(is_hazard) {
+                                const std::function<bool(const std::shared_ptr<T>&)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
+                                                                                                    m_hazard(is_hazard) {
                 //--------------------------
-                m_retired.reserve(threshold);
+                m_retired.reserve(threshold);                                                                                            
                 //--------------------------
             }// end RetireSet(const size_t& thresholdxw)
             //--------------------------
             RetireSet(void)                         = delete;
-            ~RetireSet(void)                        {
-                clear_data();
-            }
+            ~RetireSet(void)                        = default;
             //--------------------------
             RetireSet(const RetireSet&)             = delete;
             RetireSet& operator=(const RetireSet&)  = delete;
-            RetireSet(RetireSet&& other) noexcept   = default;
-            RetireSet& operator=(RetireSet&& other) noexcept {
-                if (this != &other) {
-                    clear_data();
-                    m_threshold = other.m_threshold;
-                    m_hazard    = std::move(other.m_hazard);
-                    m_retired   = std::move(other.m_retired);
-                }// end if (this != &other)
-                return *this;
-            }
+            RetireSet(RetireSet&&)                  = default;
+            RetireSet& operator=(RetireSet&&)       = default;
             //--------------------------
-            bool retire(T* ptr, std::function<void(T*)> deleter = std::default_delete<T>()) {
-                return retire_data(ptr, std::move(deleter));
-            }// end bool retire(T* ptr, ...)
+            bool retire(std::shared_ptr<T> ptr) {
+                return retire_data(ptr);
+            }// end bool retire(std::shared_ptr<T> ptr)
             //--------------------------
             std::optional<size_t> reclaim(void) {
                 return scan_and_reclaim();
@@ -69,7 +59,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            bool retire_data(T* ptr, std::function<void(T*)>&& deleter) {
+            bool retire_data(std::shared_ptr<T> ptr) {
                 //--------------------------
                 if (!ptr) {
                     return false;
@@ -86,12 +76,7 @@ namespace HazardSystem {
                     }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
                 //--------------------------
-                if (m_retired.find(ptr) != m_retired.end()) {
-                    return false;
-                }// end if (m_retired.find(ptr) != m_retired.end())
-                //--------------------------
-                OwnedPtr owned(ptr, std::move(deleter));
-                return m_retired.emplace(ptr, std::move(owned)).second;
+                return m_retired.insert(std::move(ptr)).second;
                 //--------------------------
             }// end bool retire_data(std::shared_ptr<T> ptr)
             //--------------------------
@@ -146,9 +131,8 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(const T*)> m_hazard;
-            using OwnedPtr = std::unique_ptr<T, std::function<void(T*)>>;
-            std::unordered_map<T*, OwnedPtr> m_retired;
+            std::function<bool(const std::shared_ptr<T>&)> m_hazard;
+            std::unordered_set<std::shared_ptr<T>> m_retired;
         //--------------------------------------------------------------
     };// end clas class RetireSet
     //--------------------------------------------------------------
