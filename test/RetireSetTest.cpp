@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <memory>
 #include <vector>
 #include <set>
 #include <random>
@@ -12,34 +11,35 @@ struct Dummy {
     explicit Dummy(int v) : value(v) {}
 };
 
-// Helper for unique shared_ptrs for stress
-std::vector<std::shared_ptr<Dummy>> make_ptrs(const size_t& n) {
-    std::vector<std::shared_ptr<Dummy>> v;
+// Helper for unique raw pointers for stress
+std::vector<Dummy*> make_ptrs(const size_t& n) {
+    std::vector<Dummy*> v;
     v.reserve(n);
-    for (size_t i = 0; i < n; ++i)
-        v.emplace_back(std::make_shared<Dummy>(int(i)));
+    for (size_t i = 0; i < n; ++i) {
+        v.emplace_back(new Dummy(static_cast<int>(i)));
+    }// end for (size_t i = 0; i < n; ++i)
     return v;
 }
 
 // Always hazard: never reclaim
-auto always_hazard = [](const std::shared_ptr<Dummy>&) { return true; };
+auto always_hazard = [](const Dummy*) { return true; };
 
 // Never hazard: always reclaim
-auto never_hazard = [](const std::shared_ptr<Dummy>&) { return false; };
+auto never_hazard = [](const Dummy*) { return false; };
 
 // Hazard even/odd: reclaim half
-auto hazard_even = [](const std::shared_ptr<Dummy>& ptr) {
+auto hazard_even = [](const Dummy* ptr) {
     return ptr && (ptr->value % 2 == 0);
 };
 
-auto hazard_mod3 = [](const std::shared_ptr<Dummy>& ptr) {
+auto hazard_mod3 = [](const Dummy* ptr) {
     return ptr && (ptr->value % 3 == 0);
 };
 
 TEST(RetireSetTest, ConstructAndBasicOps) {
     RetireSet<Dummy> s(8, always_hazard);
     EXPECT_EQ(s.size(), 0u);
-    EXPECT_TRUE(s.retire(std::make_shared<Dummy>(42)));
+    EXPECT_TRUE(s.retire(new Dummy(42)));
     EXPECT_EQ(s.size(), 1u);
     s.clear();
     EXPECT_EQ(s.size(), 0u);
@@ -53,7 +53,7 @@ TEST(RetireSetTest, NullPointerNotInserted) {
 
 TEST(RetireSetTest, DuplicateNotInsertedTwice) {
     RetireSet<Dummy> s(8, always_hazard);
-    auto ptr = std::make_shared<Dummy>(5);
+    auto* ptr = new Dummy(5);
     EXPECT_TRUE(s.retire(ptr));
     EXPECT_FALSE(s.retire(ptr)); // duplicate
     EXPECT_EQ(s.size(), 1u);
@@ -61,8 +61,8 @@ TEST(RetireSetTest, DuplicateNotInsertedTwice) {
 
 TEST(RetireSetTest, ReclaimRemovesAllIfNoHazard) {
     RetireSet<Dummy> s(8, never_hazard);
-    auto ptr1 = std::make_shared<Dummy>(1);
-    auto ptr2 = std::make_shared<Dummy>(2);
+    auto* ptr1 = new Dummy(1);
+    auto* ptr2 = new Dummy(2);
     s.retire(ptr1);
     s.retire(ptr2);
     auto removed = s.reclaim();
@@ -73,8 +73,8 @@ TEST(RetireSetTest, ReclaimRemovesAllIfNoHazard) {
 
 TEST(RetireSetTest, ReclaimKeepsHazard) {
     RetireSet<Dummy> s(8, always_hazard);
-    auto ptr1 = std::make_shared<Dummy>(1);
-    auto ptr2 = std::make_shared<Dummy>(2);
+    auto* ptr1 = new Dummy(1);
+    auto* ptr2 = new Dummy(2);
     s.retire(ptr1);
     s.retire(ptr2);
     auto removed = s.reclaim();
@@ -85,10 +85,10 @@ TEST(RetireSetTest, ReclaimKeepsHazard) {
 TEST(RetireSetTest, ReclaimRemovesSome) {
     RetireSet<Dummy> s(8, hazard_even);
 
-    auto ptr1 = std::make_shared<Dummy>(1);
-    auto ptr2 = std::make_shared<Dummy>(2);
-    auto ptr3 = std::make_shared<Dummy>(3);
-    auto ptr4 = std::make_shared<Dummy>(4);
+    auto* ptr1 = new Dummy(1);
+    auto* ptr2 = new Dummy(2);
+    auto* ptr3 = new Dummy(3);
+    auto* ptr4 = new Dummy(4);
 
     EXPECT_TRUE(s.retire(ptr1));
     EXPECT_TRUE(s.retire(ptr2));
@@ -107,12 +107,12 @@ TEST(RetireSetTest, ReclaimRemovesSome) {
     EXPECT_EQ(s.size(), 2u);
 
     // Retiring a new even pointer should return true and increase size.
-    auto ptr6 = std::make_shared<Dummy>(6);
+    auto* ptr6 = new Dummy(6);
     EXPECT_TRUE(s.retire(ptr6));
     EXPECT_EQ(s.size(), 3u);
 
     // Retiring nullptr should return false, not increase size
-    std::shared_ptr<Dummy> null_ptr;
+    Dummy* null_ptr = nullptr;
     EXPECT_FALSE(s.retire(null_ptr));
     EXPECT_EQ(s.size(), 3u);
 }
@@ -122,7 +122,7 @@ TEST(RetireSetTest, ResizeIncreasesThreshold) {
     EXPECT_TRUE(s.resize(128));
     EXPECT_GE(s.size(), 0u);
     for (int i = 0; i < 120; ++i) {
-        EXPECT_TRUE(s.retire(std::make_shared<Dummy>(i)));
+        EXPECT_TRUE(s.retire(new Dummy(i)));
     }
     EXPECT_GE(s.size(), 120u);
 }
@@ -130,7 +130,7 @@ TEST(RetireSetTest, ResizeIncreasesThreshold) {
 TEST(RetireSetTest, ResizeFailsOnShrink) {
     RetireSet<Dummy> s(8, always_hazard);
     for (int i = 0; i < 16; ++i)
-        s.retire(std::make_shared<Dummy>(i));
+        s.retire(new Dummy(i));
     EXPECT_FALSE(s.resize(4)); // too small
     EXPECT_LE(s.size(), 16u);
 }
@@ -151,8 +151,9 @@ TEST(RetireSetTest, StressTest10000Pointers) {
     EXPECT_EQ(s.size(), count);
 
     // Now reclaim with never hazard (all should be removed)
+    auto ptrs2 = make_ptrs(count);
     s = RetireSet<Dummy>(count, never_hazard);
-    for (auto& ptr : ptrs)
+    for (auto& ptr : ptrs2)
         s.retire(ptr);
     EXPECT_EQ(s.size(), count);
     auto removed = s.reclaim();
@@ -170,8 +171,9 @@ TEST(RetireSetTest, RealWorldLikeHazardChange) {
     EXPECT_EQ(s.size(), 64u);
 
     // Swap to never hazard, reclaim all
+    auto ptrs2 = make_ptrs(64);
     s = RetireSet<Dummy>(64, never_hazard); // threshold matches count
-    for (auto& ptr : ptrs)
+    for (auto& ptr : ptrs2)
         s.retire(ptr);
     auto removed = s.reclaim();
     EXPECT_TRUE(removed.has_value());
@@ -184,30 +186,29 @@ TEST(RetireSetTest, RandomHazardFunction) {
     constexpr size_t count = 500;
     constexpr size_t threshold = 32;
     // Hazard: keep if value divisible by 3
-    RetireSet<Dummy> s(threshold, [](const std::shared_ptr<Dummy>& ptr) {
+    RetireSet<Dummy> s(threshold, [](const Dummy* ptr) {
         return ptr && (ptr->value % 3 == 0);
     });
     auto ptrs = make_ptrs(count);
-
-    for (auto& ptr : ptrs)
+    size_t expected_survivors = 0;
+    std::vector<Dummy*> survivors;
+    for (auto ptr : ptrs) {
+        if (ptr->value % 3 == 0) {
+            ++expected_survivors;
+            survivors.push_back(ptr);
+        }// end if (ptr->value % 3 == 0)
         s.retire(ptr);
+    }
 
     // Trigger reclaim
     auto removed = s.reclaim();
     EXPECT_TRUE(removed.has_value());
 
-    // Compute expected survivors
-    size_t expected_survivors = 0;
-    for (const auto& ptr : ptrs)
-        if (ptr->value % 3 == 0)
-            ++expected_survivors;
-
     EXPECT_EQ(s.size(), expected_survivors);
 
     // Try to retire all survivors again (should not insert duplicates)
-    for (const auto& ptr : ptrs) {
-        if (ptr->value % 3 == 0)
-            EXPECT_FALSE(s.retire(ptr)); // Already present!
+    for (const auto& ptr : survivors) {
+        EXPECT_FALSE(s.retire(ptr)); // Already present!
     }
     EXPECT_EQ(s.size(), expected_survivors);
 }

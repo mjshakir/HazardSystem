@@ -3,12 +3,12 @@
 // Standard C++ library
 //--------------------------------------------------------------
 #include <cstddef>
-#include <unordered_set>
+#include <unordered_map>
 #include <bit>
-#include <memory>
 #include <optional>
 #include <functional>
 #include <algorithm>
+#include <memory>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -18,24 +18,34 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             explicit RetireSet( const size_t& threshold,
-                                const std::function<bool(const std::shared_ptr<T>&)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
-                                                                                                    m_hazard(is_hazard) {
+                                const std::function<bool(const T*)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
+                                                                                     m_hazard(is_hazard) {
                 //--------------------------
-                m_retired.reserve(threshold);                                                                                            
+                m_retired.reserve(threshold);
                 //--------------------------
             }// end RetireSet(const size_t& thresholdxw)
             //--------------------------
             RetireSet(void)                         = delete;
-            ~RetireSet(void)                        = default;
+            ~RetireSet(void)                        {
+                clear_data();
+            }
             //--------------------------
             RetireSet(const RetireSet&)             = delete;
             RetireSet& operator=(const RetireSet&)  = delete;
-            RetireSet(RetireSet&&)                  = default;
-            RetireSet& operator=(RetireSet&&)       = default;
+            RetireSet(RetireSet&& other) noexcept   = default;
+            RetireSet& operator=(RetireSet&& other) noexcept {
+                if (this != &other) {
+                    clear_data();
+                    m_threshold = other.m_threshold;
+                    m_hazard    = std::move(other.m_hazard);
+                    m_retired   = std::move(other.m_retired);
+                }// end if (this != &other)
+                return *this;
+            }
             //--------------------------
-            bool retire(std::shared_ptr<T> ptr) {
-                return retire_data(ptr);
-            }// end bool retire(std::shared_ptr<T> ptr)
+            bool retire(T* ptr, std::function<void(T*)> deleter = std::default_delete<T>()) {
+                return retire_data(ptr, std::move(deleter));
+            }// end bool retire(T* ptr, ...)
             //--------------------------
             std::optional<size_t> reclaim(void) {
                 return scan_and_reclaim();
@@ -55,7 +65,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            bool retire_data(std::shared_ptr<T> ptr) {
+            bool retire_data(T* ptr, std::function<void(T*)>&& deleter) {
                 //--------------------------
                 if (!ptr) {
                     return false;
@@ -74,7 +84,7 @@ namespace HazardSystem {
                     }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
                 //--------------------------
-                return m_retired.insert(std::move(ptr)).second;
+                return m_retired.emplace(ptr, std::move(deleter)).second;
                 //--------------------------
             }// end bool retire_data(std::shared_ptr<T> ptr)
             //--------------------------
@@ -82,7 +92,16 @@ namespace HazardSystem {
                 //--------------------------
                 const size_t _before = m_retired.size();
                 //--------------------------
-                std::erase_if(m_retired, [this](const std::shared_ptr<T>& ptr) {return !m_hazard(ptr);});
+                for (auto it = m_retired.begin(); it != m_retired.end();) {
+                    if (!m_hazard(it->first)) {
+                        if (it->second) {
+                            it->second(it->first);
+                        }// end if (it->second)
+                        it = m_retired.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }// end for (auto it = m_retired.begin(); it != m_retired.end();)
                 //--------------------------
                 const size_t _removed = _before -  m_retired.size();
                 return _removed ? std::optional<size_t>(_removed) : std::nullopt;
@@ -113,14 +132,19 @@ namespace HazardSystem {
             }// end bool should_resize(void)
             //--------------------------
             void clear_data(void) { 
+                for (auto& [ptr, deleter] : m_retired) {
+                    if (ptr && deleter) {
+                        deleter(ptr);
+                    }// end if (ptr && deleter)
+                }// end for (auto& [ptr, deleter] : m_retired)
                 m_retired.clear();
             }// end void clear_data(void)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(const std::shared_ptr<T>&)> m_hazard;
-            std::unordered_set<std::shared_ptr<T>> m_retired;
+            std::function<bool(const T*)> m_hazard;
+            std::unordered_map<T*, std::function<void(T*)>> m_retired;
         //--------------------------------------------------------------
     };// end clas class RetireSet
     //--------------------------------------------------------------

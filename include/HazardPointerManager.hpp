@@ -50,13 +50,31 @@ class HazardPointerManager {
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
+        ProtectedPointer<T> protect(T* data) {
+            return protect_data(data);
+        }// end ProtectedPointer<T> protect(T* data)
+        //--------------------------
         ProtectedPointer<T> protect(std::shared_ptr<T> sp_data) {
             return protect_data(std::move(sp_data));
         }// end ProtectedPointer<T> protect(std::shared_ptr<T> sp_data)
         //--------------------------
+        ProtectedPointer<T> protect(const std::atomic<T*>& a_data) {
+            return protect_data(a_data);
+        }// end ProtectedPointer<T> protect(const std::atomic<T*>& a_data)
+        //--------------------------
         ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& a_sp_data) {
             return protect_data(a_sp_data);
         }// end ProtectedPointer<T> protect(const std::atomic<std::shared_ptr<T>>& a_sp_data)
+        //--------------------------
+        ProtectedPointer<T> try_protect(const std::atomic<T*>& a_data, const size_t& max_retries = 100UL) {
+            //--------------------------
+            if(!max_retries) {
+                return protect_data(a_data);
+            }// end if(!max_retries)
+            //--------------------------
+            return protect_data(a_data, max_retries);
+            //--------------------------
+        }// end ProtectedPointer<T> try_protect(const std::atomic<T*>& a_data, const size_t& max_retries = 100UL)
         //--------------------------
         ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries = 100UL) {
             //--------------------------
@@ -78,8 +96,14 @@ class HazardPointerManager {
         //     return release_data(hp);
         // } // end bool release(std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> hp)
         //--------------------------
+        bool retire(T* node) {
+            return retire_node(node, std::default_delete<T>());
+        } // end bool retire(T* node)
+        //--------------------------
         bool retire(std::shared_ptr<T> node) {
-            return retire_node(std::move(node));
+            return retire_node(node.get(), [holder = std::move(node)](T*) mutable {
+                holder.reset();
+            });
         } // end bool retire(std::shared_ptr<T> node)
         //--------------------------
         void reclaim(void) {
@@ -127,22 +151,56 @@ class HazardPointerManager {
         //--------------------------
         ~HazardPointerManager(void) = default;
         //--------------------------------------------------------------
-        ProtectedPointer<T> protect_data(std::shared_ptr<T> sp_data) {
+        ProtectedPointer<T> protect_data(T* data) {
             //--------------------------
-            if (!sp_data) {
+            if (!data) {
                 return ProtectedPointer<T>();
-            }// end if (!sp_data)
+            }// end if (!data)
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            it_opt.value()->store(sp_data);//, std::memory_order_release);
+            it_opt.value()->store(data, std::memory_order_release);
             //--------------------------
-            return create_protected_pointer(it_opt.value(), std::move(sp_data));
+            return create_protected_pointer(it_opt.value(), data);
+            //--------------------------
+        }// end ProtectedPointer<T> protect_data(T* data)
+        //--------------------------
+        ProtectedPointer<T> protect_data(std::shared_ptr<T> sp_data) {
+            //--------------------------
+            if (!sp_data) {
+                return ProtectedPointer<T>();
+            }// end if (!sp_data)
+            //--------------------------
+            return protect_with_owner(sp_data.get(), std::move(sp_data));
             //--------------------------
         }// end ProtectedPointer<T> protect(std::shared_ptr<T> sp_data)
+        //--------------------------
+        ProtectedPointer<T> protect_data(const std::atomic<T*>& a_data) {
+            //--------------------------
+            auto it_opt = acquire_data_iterator();
+            if (!it_opt) {
+                return ProtectedPointer<T>();
+            }// end if (!it_opt)
+            //--------------------------
+            auto protected_obj = a_data.load(std::memory_order_acquire);
+            if (!protected_obj) {
+                release_data_iterator(it_opt.value());
+                return ProtectedPointer<T>();
+            }// end if (!protected_obj) 
+            //--------------------------
+            it_opt.value()->store_safe(protected_obj);
+            //--------------------------
+            if (a_data.load(std::memory_order_acquire) == protected_obj) {
+                return create_protected_pointer(it_opt.value(), protected_obj);
+            }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
+            //--------------------------
+            release_data_iterator(it_opt.value());
+            return ProtectedPointer<T>();
+            //--------------------------
+        }// end ProtectedPointer<T> protect_data(const std::atomic<T*>& a_data)
         //--------------------------
         ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data) {
             //--------------------------
@@ -157,16 +215,45 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!protected_obj) 
             //--------------------------
-           it_opt.value()->store_safe(protected_obj);
+            it_opt.value()->store_safe(protected_obj.get());
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
-                return create_protected_pointer(it_opt.value(), std::move(protected_obj));
+                return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
             }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
             //--------------------------
             release_data_iterator(it_opt.value());
             return ProtectedPointer<T>();
             //--------------------------
         }// end ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data)
+        //--------------------------
+        ProtectedPointer<T> protect_data(const std::atomic<T*>& a_data, const size_t& max_retries) {
+            //--------------------------
+            auto it_opt = acquire_data_iterator();
+            if (!it_opt) {
+                return ProtectedPointer<T>();
+            }// end if (!it_opt)
+            //--------------------------
+            T* protected_obj = nullptr;
+            //--------------------------
+            for (size_t attempt = 0; attempt < max_retries; ++attempt) {
+                protected_obj = a_data.load(std::memory_order_acquire);
+                if (!protected_obj) {
+                    release_data_iterator(it_opt.value());
+                    return ProtectedPointer<T>();
+                }// end if (!protected_obj)
+                //--------------------------
+                it_opt.value()->store(protected_obj, std::memory_order_release);
+                //--------------------------
+                if (a_data.load(std::memory_order_acquire) == protected_obj) {
+                    return create_protected_pointer(it_opt.value(), protected_obj);
+                }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
+                //--------------------------
+            }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
+            //--------------------------
+            release_data_iterator(it_opt.value());
+            return ProtectedPointer<T>();
+            //--------------------------
+        }// end ProtectedPointer<T> try_protect(const std::atomic<T*>& a_data, const size_t& max_retries)
         //--------------------------
         ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
             //--------------------------
@@ -184,10 +271,10 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
-                it_opt.value()->store(protected_obj);
+                it_opt.value()->store(protected_obj.get(), std::memory_order_release);
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
-                    return create_protected_pointer(it_opt.value(), std::move(protected_obj));
+                    return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
                 }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
                 //--------------------------
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
@@ -198,27 +285,27 @@ class HazardPointerManager {
         }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries)
         //--------------------------
         ProtectedPointer<T> create_protected_pointer(typename BitmaskType::iterator it, 
-                                                    std::shared_ptr<T>&& protected_obj) {
-            return ProtectedPointer<T>(std::move(protected_obj), std::bind(&HazardPointerManager::release_data_iterator, this, std::move(it)));
+                                                    T* protected_obj,
+                                                    std::shared_ptr<T> owner = nullptr) {
+            return ProtectedPointer<T>(protected_obj, std::bind(&HazardPointerManager::release_data_iterator, this, std::move(it)), std::move(owner));
         }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
-        std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void) {
+        ProtectedPointer<T> protect_with_owner(T* ptr, std::shared_ptr<T> owner) {
             //--------------------------
-            HazardThreadManager::instance();
+            if (!ptr) {
+                return ProtectedPointer<T>();
+            }// end if (!ptr)
             //--------------------------
-            if (!ThreadRegistry::instance().registered()) {
-                return {std::nullopt, nullptr};
-            }// end if (!ThreadRegistry::instance().registered())
+            auto it_opt = acquire_data_iterator();
+            if (!it_opt) {
+                return ProtectedPointer<T>();
+            }// end if (!it_opt)
             //--------------------------
-            std::optional<std::pair<IndexType, std::shared_ptr<HazardPointer<T>>>> _data = m_hazard_pointers.emplace_return();
+            it_opt.value()->store(ptr, std::memory_order_release);
             //--------------------------
-            if (!_data.has_value()) {
-                return {std::nullopt, nullptr};
-            }// end if (!idx_opt.has_value())
+            return create_protected_pointer(it_opt.value(), ptr, std::move(owner));
             //--------------------------
-            return {_data->first, _data->second};
-            //--------------------------
-        } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
+        }// end ProtectedPointer<T> protect_with_owner(T* ptr, std::shared_ptr<T> owner)
         //--------------------------
         std::optional<typename BitmaskType::iterator> acquire_data_iterator(void) {
             //--------------------------
@@ -232,51 +319,32 @@ class HazardPointerManager {
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
-        bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& handle) {
-            //--------------------------        
-            if (!handle.first and !handle.second) {
-                return false;
-            }// end if (!handle.first and !handle.second)
-            //--------------------------
-            return m_hazard_pointers.set(handle.first.value(), nullptr);
-            //--------------------------
-        } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
-        //--------------------------
         bool release_data_iterator(typename BitmaskType::iterator it) {
             //--------------------------        
             return m_hazard_pointers.set(it, nullptr);
             //--------------------------
         } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
         //--------------------------
-        bool retire_node(std::shared_ptr<T> node) {
+        bool retire_node(T* node, std::function<void(T*)> deleter) {
             //--------------------------
             if (!node) {
                 return false;
             }// end if (!node)
             //--------------------------
-            return retired_nodes().retire(std::move(node));
+            return retired_nodes().retire(node, std::move(deleter));
             //--------------------------
-        }// end bool retire_node(std::shared_ptr<T> node)
+        }// end bool retire_node(T* node, std::function<void(T*)> deleter)
         //--------------------------
-        bool is_hazard(const std::shared_ptr<T>& node) const {
+        bool is_hazard(const T* node) const {
             //--------------------------
             if (!node) {
                 return false;
             }// end if (!node)
             //--------------------------
-            return m_hazard_pointers.find([&node](const std::shared_ptr<T>& hp) {
-                        //--------------------------
-                        // if (!hp) {
-                        //     return false;
-                        // }// end if (!hp)
-                        // //--------------------------
-                        // auto hp_ptr = hp->load();
-                        // return hp_ptr and hp_ptr.get() == node.get();
-                        //--------------------------
-                        return hp.get() == node.get();
-                        //--------------------------
+            return m_hazard_pointers.find([&node](const T* hp) {
+                        return hp == node;
                     });
-        } // end bool is_hazard(std::shared_ptr<T> node)
+        } // end bool is_hazard(const T* node)
         //--------------------------
         void scan_and_reclaim(void) {
             retired_nodes().reclaim();

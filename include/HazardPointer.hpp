@@ -3,21 +3,20 @@
 // Standard cpp library
 //--------------------------------------------------------------
 #include <atomic>
-#include <memory>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     template<typename T>
-    struct HazardPointer : public std::atomic<std::shared_ptr<T>>{
+    struct HazardPointer : public std::atomic<T*>{
         //--------------------------
         public:
             //--------------------------
-            using atomic_type = std::atomic<std::shared_ptr<T>>;
+            using atomic_type = std::atomic<T*>;
             using atomic_type::atomic_type;
             //--------------------------
         public:
             //--------------------------
-            HazardPointer(void) = default;
+            HazardPointer(void) : atomic_type(nullptr) {}
             //--------------------------
             ~HazardPointer(void) {
                 //--------------------------
@@ -31,36 +30,36 @@ namespace HazardSystem {
             HazardPointer& operator=(HazardPointer&&)       = default;
             //--------------------------
             explicit operator bool(void) const noexcept {
-                return !!this->load(std::memory_order_acquire);
+                return this->load(std::memory_order_acquire) != nullptr;
             }// explicit operator bool(void) const noexcept
             //--------------------------
             T* operator->(void) const noexcept {
-                return this->load(std::memory_order_acquire).get();
+                return this->load(std::memory_order_acquire);
             }// end T* operator->(void) const noexcept 
             //--------------------------
             T& operator*(void) const {
                 return *this->load(std::memory_order_acquire);
             }// end T& operator*(void) const
             //--------------------------
-            std::shared_ptr<T> operator()() const noexcept {
+            T* operator()() const noexcept {
                 return this->load(std::memory_order_acquire);
-            }// end std::shared_ptr<T> operator()() const noexcept
+            }// end T* operator()() const noexcept
             //--------------------------
-            explicit operator std::shared_ptr<T>() const noexcept {
+            explicit operator T*() const noexcept {
                 return this->load(std::memory_order_acquire);
-            }// end explicit operator std::shared_ptr<T>() const noexcept
+            }// end explicit operator T*() const noexcept
             //--------------------------
-            std::atomic<std::shared_ptr<T>>& atomic_ref(void) noexcept {
+            std::atomic<T*>& atomic_ref(void) noexcept {
                 return *this;
             }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
             //--------------------------
-            const std::atomic<std::shared_ptr<T>>& atomic_ref(void) const noexcept {
+            const std::atomic<T*>& atomic_ref(void) const noexcept {
                 return *this;
             }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
             //--------------------------
-            void store_safe(std::shared_ptr<T> sp_data) noexcept {
-                std::shared_ptr<T> expected = this->load(std::memory_order_acquire);
-                while (!this->compare_exchange_weak(expected, sp_data, std::memory_order_acq_rel, std::memory_order_relaxed));
+            void store_safe(T* ptr) noexcept {
+                T* expected = this->load(std::memory_order_acquire);
+                while (!this->compare_exchange_weak(expected, ptr, std::memory_order_acq_rel, std::memory_order_relaxed));
             }// end bool store(std::shared_ptr<T> p) noexcept
         //--------------------------
     }; // end struct HazardPointer    
