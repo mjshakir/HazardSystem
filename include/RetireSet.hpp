@@ -18,17 +18,18 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             explicit RetireSet( const size_t& threshold,
-                                const std::function<bool(const T*)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
-                                                                                     m_hazard(is_hazard) {
+                                const std::function<bool(const T*)>& is_hazard) :   m_threshold(std::bit_ceil(threshold)),
+                                                                                    m_hazard(is_hazard) {
                 //--------------------------
                 m_retired.reserve(threshold);
                 //--------------------------
             }// end RetireSet(const size_t& thresholdxw)
             //--------------------------
             RetireSet(void)                         = delete;
+            //--------------------------
             ~RetireSet(void) {
                 clear_data();
-            }
+            }// end ~RetireSet(void)
             //--------------------------
             RetireSet(const RetireSet&)             = delete;
             RetireSet& operator=(const RetireSet&)  = delete;
@@ -134,8 +135,6 @@ namespace HazardSystem {
                     std::function<void(T*)> custom;
             }; // struct Deleter
             //--------------------------
-            using OwnedPtr = std::unique_ptr<T, Deleter>;
-            //--------------------------
             bool retire_data(T* ptr, Deleter&& deleter) {
                 //--------------------------
                 if (!ptr) {
@@ -159,7 +158,7 @@ namespace HazardSystem {
                     return false;
                 }// end if (m_retired.find(ptr) != m_retired.end())
                 //--------------------------
-                OwnedPtr owned(ptr, std::move(deleter));
+                std::unique_ptr<T, Deleter> owned(ptr, std::move(deleter));
                 return m_retired.emplace(ptr, std::move(owned)).second;
                 //--------------------------
             }// end bool retire_data(std::shared_ptr<T> ptr)
