@@ -84,7 +84,12 @@ namespace HazardSystem {
                     }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
                 //--------------------------
-                return m_retired.emplace(ptr, std::move(deleter)).second;
+                if (m_retired.find(ptr) != m_retired.end()) {
+                    return false;
+                }// end if (m_retired.find(ptr) != m_retired.end())
+                //--------------------------
+                OwnedPtr owned(ptr, std::move(deleter));
+                return m_retired.emplace(ptr, std::move(owned)).second;
                 //--------------------------
             }// end bool retire_data(std::shared_ptr<T> ptr)
             //--------------------------
@@ -94,9 +99,6 @@ namespace HazardSystem {
                 //--------------------------
                 for (auto it = m_retired.begin(); it != m_retired.end();) {
                     if (!m_hazard(it->first)) {
-                        if (it->second) {
-                            it->second(it->first);
-                        }// end if (it->second)
                         it = m_retired.erase(it);
                     } else {
                         ++it;
@@ -132,11 +134,6 @@ namespace HazardSystem {
             }// end bool should_resize(void)
             //--------------------------
             void clear_data(void) { 
-                for (auto& [ptr, deleter] : m_retired) {
-                    if (ptr && deleter) {
-                        deleter(ptr);
-                    }// end if (ptr && deleter)
-                }// end for (auto& [ptr, deleter] : m_retired)
                 m_retired.clear();
             }// end void clear_data(void)
             //--------------------------------------------------------------
@@ -144,7 +141,8 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             size_t m_threshold;
             std::function<bool(const T*)> m_hazard;
-            std::unordered_map<T*, std::function<void(T*)>> m_retired;
+            using OwnedPtr = std::unique_ptr<T, std::function<void(T*)>>;
+            std::unordered_map<T*, OwnedPtr> m_retired;
         //--------------------------------------------------------------
     };// end clas class RetireSet
     //--------------------------------------------------------------
