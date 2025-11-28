@@ -2,6 +2,7 @@
 #include <vector>
 #include <set>
 #include <random>
+#include <atomic>
 #include "RetireSet.hpp" // <-- Adjust path as needed
 
 using HazardSystem::RetireSet;
@@ -139,6 +140,38 @@ TEST(RetireSetTest, ReclaimOnEmptyIsNoop) {
     RetireSet<Dummy> s(8, always_hazard);
     auto removed = s.reclaim();
     EXPECT_FALSE(removed.has_value());
+    EXPECT_EQ(s.size(), 0u);
+}
+
+TEST(RetireSetTest, CustomDeleterCalledOnReclaim) {
+    std::atomic<int> deleted{0};
+    RetireSet<Dummy> s(4, [](const Dummy*) { return false; });
+    auto* ptr = new Dummy(11);
+    ASSERT_TRUE(s.retire(ptr, [&](Dummy* p) {
+        ++deleted;
+        delete p;
+    }));
+    auto removed = s.reclaim();
+    EXPECT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, 1u);
+    EXPECT_EQ(deleted.load(), 1);
+    EXPECT_EQ(s.size(), 0u);
+}
+
+TEST(RetireSetTest, ClearInvokesDeleters) {
+    std::atomic<int> deleted{0};
+    RetireSet<Dummy> s(8, [](const Dummy*) { return true; });
+    ASSERT_TRUE(s.retire(new Dummy(1), [&](Dummy* p) {
+        ++deleted;
+        delete p;
+    }));
+    ASSERT_TRUE(s.retire(new Dummy(2), [&](Dummy* p) {
+        ++deleted;
+        delete p;
+    }));
+    EXPECT_EQ(s.size(), 2u);
+    s.clear();
+    EXPECT_EQ(deleted.load(), 2);
     EXPECT_EQ(s.size(), 0u);
 }
 
