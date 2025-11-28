@@ -97,13 +97,11 @@ class HazardPointerManager {
         // } // end bool release(std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> hp)
         //--------------------------
         bool retire(T* node) {
-            return retire_node(node, std::default_delete<T>());
+            return retire_node(node);
         } // end bool retire(T* node)
         //--------------------------
         bool retire(std::shared_ptr<T> node) {
-            return retire_node(node.get(), [holder = std::move(node)](T*) mutable {
-                holder.reset();
-            });
+            return retire_node(std::move(node));
         } // end bool retire(std::shared_ptr<T> node)
         //--------------------------
         void reclaim(void) {
@@ -334,6 +332,20 @@ class HazardPointerManager {
             return retired_nodes().retire(node, std::move(deleter));
             //--------------------------
         }// end bool retire_node(T* node, std::function<void(T*)> deleter)
+        //--------------------------
+        bool retire_node(T* node) {
+            if (!node) {
+                return false;
+            }
+            return retired_nodes().retire(node);
+        }// end bool retire_node(T* node)
+        //--------------------------
+        bool retire_node(std::shared_ptr<T> node) {
+            if (!node) {
+                return false;
+            }
+            return retired_nodes().retire(std::move(node));
+        }// end bool retire_node(std::shared_ptr<T> node)
         //--------------------------
         bool is_hazard(const T* node) const {
             //--------------------------
