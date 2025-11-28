@@ -56,4 +56,5 @@ create_test_target(${PROJECT_NAME}_BitmaskTable_Dynamic_Test    BitmaskTableDyna
 create_test_target(${PROJECT_NAME}_Fixed_Test                   HazardPointerManagerFixedTest.cpp)
 create_test_target(${PROJECT_NAME}_Dynamic_Test                 HazardPointerManagerDynamicTest.cpp)
 create_test_target(${PROJECT_NAME}_Test                         HazardPointerManagerTest.cpp)
+create_test_target(${PROJECT_NAME}_ProtectedPointer_Test        ProtectedPointerTest.cpp)
 #------------------------------------------------------------------------------------------
