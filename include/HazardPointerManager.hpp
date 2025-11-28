@@ -12,6 +12,8 @@
 #include <optional>
 #include <algorithm>
 #include <utility>
+#include <bit>
+#include <unordered_set>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -23,6 +25,8 @@
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireMap.hpp"
+#include "RetireSet.hpp"
+#include "HazardRegistry.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
@@ -131,14 +135,16 @@ class HazardPointerManager {
     protected:
         //--------------------------------------------------------------
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
-        HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL) {
+        HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
+                                                          m_registry(hazard_limiter(HAZARD_POINTERS)) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N == 0), int> = 0>
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
-                                                                m_hazard_pointers(hazard_limiter(hazards_size)){
+                                                                m_hazard_pointers(hazard_limiter(hazards_size)),
+                                                                m_registry(hazard_limiter(hazards_size)){
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -161,6 +167,7 @@ class HazardPointerManager {
             }// end if (!it_opt)
             //--------------------------
             it_opt.value()->store(data, std::memory_order_release);
+            m_registry.add(data);
             //--------------------------
             return create_protected_pointer(it_opt.value(), data);
             //--------------------------
@@ -190,6 +197,7 @@ class HazardPointerManager {
             }// end if (!protected_obj) 
             //--------------------------
             it_opt.value()->store_safe(protected_obj);
+            m_registry.add(protected_obj);
             //--------------------------
             if (a_data.load(std::memory_order_acquire) == protected_obj) {
                 return create_protected_pointer(it_opt.value(), protected_obj);
@@ -214,6 +222,7 @@ class HazardPointerManager {
             }// end if (!protected_obj) 
             //--------------------------
             it_opt.value()->store_safe(protected_obj.get());
+            m_registry.add(protected_obj.get());
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                 return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
@@ -241,6 +250,7 @@ class HazardPointerManager {
                 }// end if (!protected_obj)
                 //--------------------------
                 it_opt.value()->store(protected_obj, std::memory_order_release);
+                m_registry.add(protected_obj);
                 //--------------------------
                 if (a_data.load(std::memory_order_acquire) == protected_obj) {
                     return create_protected_pointer(it_opt.value(), protected_obj);
@@ -270,6 +280,7 @@ class HazardPointerManager {
                 }// end if (!protected_obj)
                 //--------------------------
                 it_opt.value()->store(protected_obj.get(), std::memory_order_release);
+                m_registry.add(protected_obj.get());
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                     return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
@@ -300,6 +311,7 @@ class HazardPointerManager {
             }// end if (!it_opt)
             //--------------------------
             it_opt.value()->store(ptr, std::memory_order_release);
+            m_registry.add(ptr);
             //--------------------------
             return create_protected_pointer(it_opt.value(), ptr, std::move(owner));
             //--------------------------
@@ -319,6 +331,10 @@ class HazardPointerManager {
         //--------------------------
         bool release_data_iterator(typename BitmaskType::iterator it) {
             //--------------------------        
+            T* ptr = it->load(std::memory_order_acquire);
+            if (ptr) {
+                m_registry.remove(ptr);
+            }
             return m_hazard_pointers.set(it, nullptr);
             //--------------------------
         } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
@@ -353,13 +369,13 @@ class HazardPointerManager {
                 return false;
             }// end if (!node)
             //--------------------------
-            return m_hazard_pointers.find([&node](const T* hp) {
-                        return hp == node;
-                    });
+            return m_registry.contains(node);
         } // end bool is_hazard(const T* node)
         //--------------------------
         void scan_and_reclaim(void) {
-            retired_nodes().reclaim();
+            retired_nodes().reclaim_with([this](const T* ptr) {
+                return m_registry.contains(ptr);
+            });
         } // end void scan_and_reclaim(void)
         //--------------------------
         void scan_and_reclaim_all(void) {
@@ -368,6 +384,7 @@ class HazardPointerManager {
         //--------------------------
         void clear_data(void) {
             m_hazard_pointers.clear();
+            m_registry.clear();
             retired_nodes().clear();
         } // end void clear_data(void)
         //--------------------------
@@ -389,6 +406,7 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         const size_t m_retired_threshold;
         BitmaskType m_hazard_pointers;
+        HazardRegistry<T> m_registry;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
