@@ -3,12 +3,12 @@
 // Standard C++ library
 //--------------------------------------------------------------
 #include <cstddef>
-#include <unordered_map>
+#include <unordered_set>
 #include <bit>
+#include <memory>
 #include <optional>
 #include <functional>
 #include <algorithm>
-#include <memory>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -18,43 +18,24 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             explicit RetireSet( const size_t& threshold,
-                                const std::function<bool(const T*)>& is_hazard) :   m_threshold(std::bit_ceil(threshold)),
-                                                                                    m_hazard(is_hazard) {
+                                const std::function<bool(const std::shared_ptr<T>&)>& is_hazard) :  m_threshold(std::bit_ceil(threshold)),
+                                                                                                    m_hazard(is_hazard) {
                 //--------------------------
-                m_retired.reserve(threshold);
+                m_retired.reserve(threshold);                                                                                            
                 //--------------------------
             }// end RetireSet(const size_t& thresholdxw)
             //--------------------------
             RetireSet(void)                         = delete;
-            //--------------------------
-            ~RetireSet(void) {
-                clear_data();
-            }// end ~RetireSet(void)
+            ~RetireSet(void)                        = default;
             //--------------------------
             RetireSet(const RetireSet&)             = delete;
             RetireSet& operator=(const RetireSet&)  = delete;
-            RetireSet(RetireSet&& other) noexcept   = default;
-            RetireSet& operator=(RetireSet&& other) noexcept {
-                if (this != &other) {
-                    clear_data();
-                    m_threshold = other.m_threshold;
-                    m_hazard    = std::move(other.m_hazard);
-                    m_retired   = std::move(other.m_retired);
-                }// end if (this != &other)
-                return *this;
-            }
+            RetireSet(RetireSet&&)                  = default;
+            RetireSet& operator=(RetireSet&&)       = default;
             //--------------------------
-            bool retire(T* ptr) {
-                return retire_data(ptr, Deleter());
-            }// end bool retire(T* ptr)
-            //--------------------------
-            bool retire(T* ptr, std::function<void(T*)> deleter) {
-                return retire_data(ptr, Deleter(std::move(deleter)));
-            }// end bool retire(T* ptr, std::function<void(T*)>)
-            //--------------------------
-            bool retire(std::shared_ptr<T> owner) {
-                return retire_shared(std::move(owner));
-            }// end bool retire(std::shared_ptr<T> owner)
+            bool retire(std::shared_ptr<T> ptr) {
+                return retire_data(ptr);
+            }// end bool retire(std::shared_ptr<T> ptr)
             //--------------------------
             std::optional<size_t> reclaim(void) {
                 return scan_and_reclaim();
@@ -74,68 +55,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            class Deleter {
-                private:
-                    //--------------------------------------------------------------
-                    enum class Kind : uint8_t {
-                        Default     = 1 << 0,
-                        SharedOwner = 1 << 1,
-                        Custom      = 1 << 2
-                    }; // end enum class Kind : uint8_t
-                    //--------------------------------------------------------------
-                public:
-                    Deleter(void) : kind(Kind::Default),
-                                    owner(nullptr),
-                                    custom(nullptr) {
-                        //--------------------------
-                    }// end Deleter(void)
-                    //--------------------------
-                    ~Deleter(void) = default;
-                    //--------------------------
-                    explicit Deleter(std::function<void(T*)> fn) :  kind(Kind::Custom),
-                                                                    custom(std::move(fn)) {
-                        //--------------------------
-                    }// end explicit Deleter(std::function<void(T*)> fn)
-                    //--------------------------
-                    explicit Deleter(std::shared_ptr<T> owner_ptr) : kind(Kind::SharedOwner),
-                                                                    owner(std::move(owner_ptr)) {
-                    }// end explicit Deleter(std::shared_ptr<T> owner_ptr)
-                    //--------------------------
-                    Deleter(Deleter&&) noexcept            = default;
-                    Deleter& operator=(Deleter&&) noexcept = default;
-                    Deleter(const Deleter&)                = delete;
-                    Deleter& operator=(const Deleter&)     = delete;
-                    //--------------------------
-                    void operator()(T* ptr) {
-                        selector(ptr);
-                    }// end void operator()(T* ptr)
-                    //--------------------------------------------------------------
-                protected:
-                    //--------------------------------------------------------------
-                    void selector(T* ptr) {
-                        switch (kind) {
-                            case Kind::Default:
-                                std::default_delete<T>()(ptr);
-                                break;
-                            case Kind::SharedOwner:
-                                owner.reset();
-                                break;
-                            case Kind::Custom:
-                                custom(ptr);
-                                break;
-                            default:
-                                std::default_delete<T>()(ptr);
-                                break;
-                        }// end switch (kind)
-                    }// end void selector(T* ptr)
-                    //--------------------------------------------------------------
-                private:
-                    Kind kind;
-                    std::shared_ptr<T> owner;
-                    std::function<void(T*)> custom;
-            }; // struct Deleter
-            //--------------------------
-            bool retire_data(T* ptr, Deleter&& deleter) {
+            bool retire_data(std::shared_ptr<T> ptr) {
                 //--------------------------
                 if (!ptr) {
                     return false;
@@ -154,33 +74,15 @@ namespace HazardSystem {
                     }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
                 //--------------------------
-                if (m_retired.find(ptr) != m_retired.end()) {
-                    return false;
-                }// end if (m_retired.find(ptr) != m_retired.end())
-                //--------------------------
-                std::unique_ptr<T, Deleter> owned(ptr, std::move(deleter));
-                return m_retired.emplace(ptr, std::move(owned)).second;
+                return m_retired.insert(std::move(ptr)).second;
                 //--------------------------
             }// end bool retire_data(std::shared_ptr<T> ptr)
-            //--------------------------
-            bool retire_shared(std::shared_ptr<T>&& owner) {
-                if (!owner) {
-                    return false;
-                }
-                return retire_data(owner.get(), Deleter(std::move(owner)));
-            }// end bool retire_shared(std::shared_ptr<T>&& owner)
             //--------------------------
             std::optional<size_t> scan_and_reclaim(void) {
                 //--------------------------
                 const size_t _before = m_retired.size();
                 //--------------------------
-                for (auto it = m_retired.begin(); it != m_retired.end();) {
-                    if (!m_hazard(it->first)) {
-                        it = m_retired.erase(it);
-                    } else {
-                        ++it;
-                    }
-                }// end for (auto it = m_retired.begin(); it != m_retired.end();)
+                std::erase_if(m_retired, [this](const std::shared_ptr<T>& ptr) {return !m_hazard(ptr);});
                 //--------------------------
                 const size_t _removed = _before -  m_retired.size();
                 return _removed ? std::optional<size_t>(_removed) : std::nullopt;
@@ -217,8 +119,8 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(const T*)> m_hazard;
-            std::unordered_map<T*, std::unique_ptr<T, Deleter>> m_retired;
+            std::function<bool(const std::shared_ptr<T>&)> m_hazard;
+            std::unordered_set<std::shared_ptr<T>> m_retired;
         //--------------------------------------------------------------
     };// end clas class RetireSet
     //--------------------------------------------------------------

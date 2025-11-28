@@ -22,7 +22,7 @@
 #include "HazardThreadManager.hpp"
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
-#include "RetireSet.hpp"
+#include "RetireMap.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
@@ -376,14 +376,14 @@ class HazardPointerManager {
             return std::max(c_min_limit, size);
         }// end constexpr size_t retired_limiter(size_t size) const
         //--------------------------
-        RetireSet<T>& retired_nodes(void) const {
+        RetireMap<T>& retired_nodes(void) const {
             //--------------------------
-            static thread_local RetireSet<T> tls_retired(   m_retired_threshold,
+            static thread_local RetireMap<T> tls_retired(   m_retired_threshold,
                                                             std::bind(&HazardPointerManager::is_hazard, this, std::placeholders::_1));
             //--------------------------
             return tls_retired;
             //--------------------------
-        }// end RetireSet<T>& retired_nodes(void)
+        }// end RetireMap<T>& retired_nodes(void)
         //--------------------------------------------------------------
     private:
         //--------------------------------------------------------------
