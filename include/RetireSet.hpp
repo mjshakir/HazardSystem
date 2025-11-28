@@ -51,6 +51,10 @@ namespace HazardSystem {
                 return scan_and_reclaim();
             }// end std::optional<size_t> reclaim(void)
             //--------------------------
+            std::optional<size_t> reclaim_with(const std::function<bool(const T*)>& hazard_view) {
+                return scan_and_reclaim(hazard_view);
+            }// end reclaim_with
+            //--------------------------
             size_t size(void) const {
                 return size_data();
             }// end size_t size(void) const
@@ -72,9 +76,7 @@ namespace HazardSystem {
                 }// end if (!ptr)
                 //--------------------------
                 if (m_retired.size() >= m_threshold) {
-                    if (!scan_and_reclaim()) {
-                        return false;
-                    }
+                    static_cast<void>(scan_and_reclaim());
                 }// end if (m_retired.size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
@@ -94,11 +96,15 @@ namespace HazardSystem {
             }// end bool retire_data(std::shared_ptr<T> ptr)
             //--------------------------
             std::optional<size_t> scan_and_reclaim(void) {
+                return scan_and_reclaim(m_hazard);
+            }
+            //--------------------------
+            std::optional<size_t> scan_and_reclaim(const std::function<bool(const T*)>& hazard_view) {
                 //--------------------------
                 const size_t _before = m_retired.size();
                 //--------------------------
                 for (auto it = m_retired.begin(); it != m_retired.end();) {
-                    if (!m_hazard(it->first)) {
+                    if (!hazard_view(it->first)) {
                         it = m_retired.erase(it);
                     } else {
                         ++it;
