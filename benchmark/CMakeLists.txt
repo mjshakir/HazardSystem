@@ -63,4 +63,5 @@ create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Dynamic_Benchmark BitmaskTa
 create_benchmark_target(${PROJECT_NAME}_HashSet_Benchmark              HashSetBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ProtectedPointer_Benchmark     ProtectedPointerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardRegistry_Benchmark       HazardRegistryBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_AtomicUniquePtr_Benchmark      AtomicUniquePtrBenchmark.cpp)
 #------------------------------------------------------------------------------------------
