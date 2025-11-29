@@ -25,7 +25,7 @@
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireMap.hpp"
-#include "RetireSet.hpp"
+// #include "RetireSet.hpp"
 #include "HazardRegistry.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
