@@ -108,6 +108,10 @@ namespace HazardSystem {
                 return acquire_data_iterator();
             }// std::optional<const_iterator> acquire_data_iterator(void) const
             //--------------------------
+            bool try_acquire(iterator it) {
+                return reacquire_iterator(it);
+            }// end bool try_acquire(iterator it)
+            //--------------------------
             bool release(const IndexType& index) {
                 return release_data(index);
             }// end bool release(const IndexType& index)
@@ -328,6 +332,62 @@ namespace HazardSystem {
                 return m_slots.begin() + _index.value();
                 //--------------------------
             }// end std::optional<const_iterator> acquire_data_iterator(void) const
+            //--------------------------
+            bool reacquire_iterator(const_iterator it) {
+                //--------------------------
+                const auto first = m_slots.begin();
+                const auto last  = m_slots.end();
+                //--------------------------
+                if (it < first or it >= last) {
+                    return false;
+                }// end if (it < first or it >= last)
+                //--------------------------
+                const IndexType index = static_cast<IndexType>(it - first);
+                if (index >= get_capacity()) {
+                    return false;
+                }// end if (index >= get_capacity())
+                //--------------------------
+                if (m_slots.at(index).load(std::memory_order_acquire)) {
+                    return false;
+                }// end if (m_slots.at(index).load(std::memory_order_acquire))
+                //--------------------------
+                if constexpr ((N > 0) and (N <= 64)) {
+                    //--------------------------
+                    const uint64_t bit = 1ULL << index;
+                    uint64_t mask      = m_bitmask.load(std::memory_order_relaxed);
+                    //--------------------------
+                    while ((mask & bit) == 0) {
+                        const uint64_t desired = mask | bit;
+                        if (m_bitmask.compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                            m_size.fetch_add(1, std::memory_order_relaxed);
+                            return true;
+                        }
+                    }// end while ((mask & bit) == 0)
+                    //--------------------------
+                    return false;
+                    //--------------------------
+                } else {
+                    //--------------------------
+                    const uint16_t part = part_index(index);
+                    const uint16_t bit  = bit_index(index);
+                    const uint64_t flag = 1ULL << bit;
+                    //--------------------------
+                    uint64_t mask = m_bitmask.at(part).load(std::memory_order_relaxed);
+                    //--------------------------
+                    while ((mask & flag) == 0) {
+                        const uint64_t desired = mask | flag;
+                        if (m_bitmask.at(part).compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                            m_size.fetch_add(1, std::memory_order_relaxed);
+                            m_hint.store(part, std::memory_order_relaxed);
+                            return true;
+                        }
+                    }// end while ((mask & flag) == 0)
+                    //--------------------------
+                    return false;
+                    //--------------------------
+                }// end if constexpr ((N > 0) and (N <= 64))
+                //--------------------------
+            }// end bool reacquire_iterator(const_iterator it)
             //--------------------------
             bool release_data(const IndexType& index) {
                 //--------------------------
