@@ -78,21 +78,12 @@ namespace HazardSystem {
                 if (!_current or _current == _tomb) {
                   //--------------------------
                   T* _expected   = _current;
-                  bool _swapped  = false;
-                  //--------------------------
-                  do {
-                    //--------------------------
-                    if (_expected == ptr) {
-                      return true;
-                    }// end if (_expected == ptr)
-                    //--------------------------
-                    // _swapped = m_slots[_idx].compare_exchange_weak(_expected, ptr, std::memory_order_acq_rel, std::memory_order_acquire);
-                    //--------------------------
-                  } while (!m_slots[_idx].compare_exchange_weak(_expected, ptr, std::memory_order_acq_rel, std::memory_order_acquire) and (_expected == _current or _expected == _tomb));
-                  //--------------------------
-                  if (_swapped or _expected == ptr) {
+                  if (m_slots[_idx].compare_exchange_weak(_expected, ptr, std::memory_order_acq_rel, std::memory_order_acquire)) {
                     return true;
-                  }// end if (_swapped or _expected == ptr)
+                  }
+                  if (_expected == ptr) {
+                    return true;
+                  }
                 }// end if (!_current or _current == _tomb)
               }// end for (size_t i = 0; i < m_capacity; ++i)
               //--------------------------
