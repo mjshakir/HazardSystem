@@ -108,7 +108,7 @@ namespace HazardSystem {
                 return acquire_data_iterator();
             }// std::optional<const_iterator> acquire_data_iterator(void) const
             //--------------------------
-            bool try_acquire(iterator it) {
+            bool acquire(iterator it) {
                 return reacquire_iterator(it);
             }// end bool try_acquire(iterator it)
             //--------------------------
