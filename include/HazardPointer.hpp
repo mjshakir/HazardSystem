@@ -16,7 +16,9 @@ namespace HazardSystem {
             //--------------------------
         public:
             //--------------------------
-            HazardPointer(void) : atomic_type(nullptr) {}
+            HazardPointer(void) : atomic_type(nullptr) {
+                //--------------------------
+            }// end HazardPointer(void)
             //--------------------------
             ~HazardPointer(void) {
                 //--------------------------
