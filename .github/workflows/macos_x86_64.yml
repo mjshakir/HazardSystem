@@ -19,7 +19,7 @@ jobs:
     - name: Install dependencies
       run: |
         brew update
-        brew install googletest benchmark
+        brew install git googletest google-benchmark
         echo "CMAKE_PREFIX_PATH=$(brew --prefix)/opt/googletest;$(brew --prefix)/opt/benchmark" >> $GITHUB_ENV
 
     - name: Setup CMake and Ninja
