@@ -321,7 +321,9 @@ class HazardPointerManager {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
-            if (!ThreadRegistry::instance().registered()) {
+            // Make sure the current thread is known to the registry; without this
+            // the hazard slot acquisition fails and protect() returns empty.
+            if (!ThreadRegistry::instance().registered() and !ThreadRegistry::instance().register_id()) {
                 return std::nullopt;
             }// end if (!ThreadRegistry::instance().registered())
             //--------------------------
