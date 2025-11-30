@@ -1,5 +1,5 @@
-# Try Finding Installed Google Test
-find_package(GTest QUIET)
+# Try Finding Installed Google Test (with gmock)
+find_package(GTest QUIET COMPONENTS gtest gtest_main gmock gmock_main)
 #------------------------------------------------------------------------------------------
 # Use Installed Version or Fetch
 if(NOT GTest_FOUND)
@@ -17,6 +17,8 @@ if(NOT GTest_FOUND)
     FetchContent_MakeAvailable(googletest)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main ALIAS gtest_main)
+    add_library(GTest::gmock ALIAS gmock)
+    add_library(GTest::gmock_main ALIAS gmock_main)
 endif()
 #------------------------------------------------------------------------------------------
 # Function to setup a test executable
@@ -35,9 +37,9 @@ function(create_test_target TARGET_NAME SOURCE_FILE)
     # Link the main project library and Google Test
     target_link_libraries(${TARGET_NAME} PRIVATE ${PROJECT_NAME})
     if(GTest_FOUND)
-        target_link_libraries(${TARGET_NAME} PRIVATE GTest::GTest GTest::Main)
+        target_link_libraries(${TARGET_NAME} PRIVATE GTest::gmock_main)
     else()
-        target_link_libraries(${TARGET_NAME} PRIVATE gtest gtest_main)
+        target_link_libraries(${TARGET_NAME} PRIVATE gmock_main)
     endif()
 
     # Enable testing and add the test to CTest
