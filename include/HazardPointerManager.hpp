@@ -360,7 +360,9 @@ class HazardPointerManager {
                             dbg.thread_registered ? 1 : 0, dbg.retired_size);
                 const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
                 std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
-                if (dbg.hazard_size == 0) {
+                // Retry after probe; if still failing and table is empty, force a clear and retry once more
+                it = m_hazard_pointers.acquire_iterator();
+                if (!it && dbg.hazard_size == 0) {
                     m_hazard_pointers.clear();
                     m_registry.clear();
                     it = m_hazard_pointers.acquire_iterator();
