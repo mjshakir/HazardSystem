@@ -61,4 +61,7 @@ create_test_target(${PROJECT_NAME}_Dynamic_Test                 HazardPointerMan
 create_test_target(${PROJECT_NAME}_Test                         HazardPointerManagerTest.cpp)
 create_test_target(${PROJECT_NAME}_ProtectedPointer_Test        ProtectedPointerTest.cpp)
 create_test_target(${PROJECT_NAME}_HazardRegistry_Test          HazardRegistryTest.cpp)
+create_test_target(${PROJECT_NAME}_ThreadRegistry_Test          ThreadRegistryTest.cpp)
+create_test_target(${PROJECT_NAME}_HazardThreadManager_Test     HazardThreadManagerTest.cpp)
+create_test_target(${PROJECT_NAME}_HashSet_Fixed_Test           HashSetFixedTest.cpp)
 #------------------------------------------------------------------------------------------
