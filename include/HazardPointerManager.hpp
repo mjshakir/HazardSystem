@@ -325,7 +325,14 @@ class HazardPointerManager {
             auto& registry = ThreadRegistry::instance();
             static_cast<void>(registry.register_id());
             //--------------------------
-            return m_hazard_pointers.acquire_iterator();
+            auto it = m_hazard_pointers.acquire_iterator();
+            if (!it && m_hazard_pointers.size() == 0) {
+                // Defensive: if the table reports empty yet no slot is acquired, reinitialize.
+                m_hazard_pointers.clear();
+                m_registry.clear();
+                it = m_hazard_pointers.acquire_iterator();
+            }
+            return it;
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
