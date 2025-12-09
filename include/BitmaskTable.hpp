@@ -206,6 +206,36 @@ namespace HazardSystem {
                 return get_mask_count();
             }// end debug_mask_count
             //--------------------------
+            // Debug hook: dump masks and attempt a single acquisition/release.
+            bool debug_probe_acquire(void) {
+                const IndexType cap       = get_capacity();
+                const IndexType mask_cnt  = get_mask_count();
+                const IndexType start_hint = m_hint.load(std::memory_order_relaxed);
+                std::printf("[bitmask-debug] cap=%zu masks=%zu hint=%zu size=%zu bits=[",
+                            static_cast<size_t>(cap),
+                            static_cast<size_t>(mask_cnt),
+                            static_cast<size_t>(start_hint),
+                            static_cast<size_t>(m_size.load(std::memory_order_relaxed)));
+                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
+                    const auto v = m_bitmask.load(std::memory_order_acquire);
+                    std::printf("%zx", static_cast<size_t>(v));
+                } else {
+                    for (IndexType p = 0; p < mask_cnt; ++p) {
+                        const auto v = m_bitmask[p].load(std::memory_order_acquire);
+                        std::printf("%zx%s", static_cast<size_t>(v), (p + 1 < mask_cnt ? "," : ""));
+                    }
+                }
+                std::printf("]\n");
+                auto slot = acquire_data();
+                if (slot) {
+                    std::printf("[bitmask-debug] acquire success slot=%zu\n", static_cast<size_t>(slot.value()));
+                    release_data(slot.value());
+                    return true;
+                }
+                std::printf("[bitmask-debug] acquire failed\n");
+                return false;
+            }// end debug_probe_acquire
+            //--------------------------
             std::vector<uint64_t> debug_masks(void) const {
                 std::vector<uint64_t> masks;
                 if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {

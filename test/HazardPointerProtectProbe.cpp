@@ -49,6 +49,9 @@ bool probe_size(HazardPointerManager<T, 0>& mgr,
         if (!p) {
             std::cout << "[probe] protect failed at iteration " << i << std::endl;
             dump_state("failure", mgr);
+            std::cout << "[probe] invoking debug_probe_acquire()" << std::endl;
+            const bool dbg_acquire = mgr.debug_probe_acquire();
+            std::cout << "[probe] debug_probe_acquire success=" << dbg_acquire << std::endl;
             // Try one explicit re-registration and another attempt for extra signal
             const bool reg2 = ThreadRegistry::instance().register_id();
             std::cout << "[probe] retry register_id() -> " << (reg2 ? "true" : "false") << std::endl;

@@ -151,6 +151,10 @@ class HazardPointerManager {
             };
             return s;
         } // end DebugState debug_state(void) const
+        //--------------------------
+        bool debug_probe_acquire(void) {
+            return m_hazard_pointers.debug_probe_acquire();
+        }// end bool debug_probe_acquire(void)
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
