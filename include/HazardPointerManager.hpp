@@ -383,47 +383,34 @@ class HazardPointerManager {
                 std::printf("[protect-debug] register_id failed\n");
             }
             //--------------------------
-            // Prefer raw index acquisition to bypass any iterator quirks.
+            // Fast path: direct index acquisition (O(1)).
             auto idx_opt = m_hazard_pointers.acquire();
-            std::optional<typename BitmaskType::iterator> it;
             if (idx_opt) {
-                it = m_hazard_pointers.begin() + idx_opt.value();
+                return m_hazard_pointers.begin() + idx_opt.value();
             }
-            // Fallback: linear scan + reacquire on any free slot.
-            if (!it) {
+            // If the table reports full, we bail quickly unless size < capacity
+            // (which would indicate a transient or bookkeeping mismatch).
+            const auto cap = m_hazard_pointers.capacity();
+            const auto sz  = m_hazard_pointers.size();
+            const bool expect_free = sz < cap;
+            // Fallback: single linear scan + reacquire on the first free slot.
+            if (!idx_opt && expect_free) {
                 for (auto iter = m_hazard_pointers.begin(); iter != m_hazard_pointers.end(); ++iter) {
                     if (iter->load(std::memory_order_acquire) == nullptr) {
                         if (m_hazard_pointers.acquire(iter)) {
-                            it = iter;
-                            break;
+                            return iter;
                         }
                     }
                 }
             }
-            if (!it) {
-                auto dbg = debug_state();
-                std::printf("[protect-debug] acquire_iterator failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
-                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
-                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
-                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
-                std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
-                // Retry once more after probe; if still failing and table is empty, force a clear and retry once more
-                if (!it) {
-                    idx_opt = m_hazard_pointers.acquire();
-                    if (idx_opt) {
-                        it = m_hazard_pointers.begin() + idx_opt.value();
-                    }
-                }
-                if (!it && dbg.hazard_size == 0) {
-                    m_hazard_pointers.clear();
-                    m_registry.clear();
-                    idx_opt = m_hazard_pointers.acquire();
-                    if (idx_opt) {
-                        it = m_hazard_pointers.begin() + idx_opt.value();
-                    }
-                }
-            }
-            return it;
+            // Final diagnostic if acquisition failed.
+            auto dbg = debug_state();
+            std::printf("[protect-debug] acquire_iterator failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu expect_free=%d\n",
+                        dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                        dbg.thread_registered ? 1 : 0, dbg.retired_size, expect_free ? 1 : 0);
+            const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+            std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
+            return std::nullopt;
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
