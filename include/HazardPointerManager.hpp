@@ -191,6 +191,12 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
+                auto dbg = debug_state();
+                std::printf("[protect-debug] protect(T*) acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
+                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
+                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+                std::printf("[protect-debug] protect(T*) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
@@ -240,6 +246,12 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
+                auto dbg = debug_state();
+                std::printf("[protect-debug] protect(shared_ptr) acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
+                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
+                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+                std::printf("[protect-debug] protect(shared_ptr) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
@@ -295,6 +307,12 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
+                auto dbg = debug_state();
+                std::printf("[protect-debug] protect(shared_ptr,retries) acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
+                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
+                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+                std::printf("[protect-debug] protect(shared_ptr,retries) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
@@ -335,6 +353,12 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
+                auto dbg = debug_state();
+                std::printf("[protect-debug] protect_with_owner acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
+                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
+                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+                std::printf("[protect-debug] protect_with_owner debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
