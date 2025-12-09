@@ -360,8 +360,14 @@ class HazardPointerManager {
                             dbg.thread_registered ? 1 : 0, dbg.retired_size);
                 const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
                 std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
-                // Retry after probe; if still failing and table is empty, force a clear and retry once more
-                it = m_hazard_pointers.acquire_iterator();
+                // Fallback: try raw index acquire and map to iterator
+                auto idx_opt = m_hazard_pointers.acquire();
+                if (idx_opt) {
+                    it = m_hazard_pointers.begin() + idx_opt.value();
+                } else {
+                    // Retry after probe; if still failing and table is empty, force a clear and retry once more
+                    it = m_hazard_pointers.acquire_iterator();
+                }
                 if (!it && dbg.hazard_size == 0) {
                     m_hazard_pointers.clear();
                     m_registry.clear();
