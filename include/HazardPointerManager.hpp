@@ -321,11 +321,9 @@ class HazardPointerManager {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
-            // Ensure the calling thread is registered; retry registration if missing
+            // Best effort: make sure the calling thread is registered, but never fail slot acquisition on registration issues.
             auto& registry = ThreadRegistry::instance();
-            if (!registry.registered() && !registry.register_id()) {
-                return std::nullopt;
-            }// end if (!registry.registered() && !registry.register_id())
+            static_cast<void>(registry.register_id());
             //--------------------------
             return m_hazard_pointers.acquire_iterator();
             //--------------------------
