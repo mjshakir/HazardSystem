@@ -229,6 +229,8 @@ namespace HazardSystem {
                 auto slot = acquire_data();
                 if (slot) {
                     std::printf("[bitmask-debug] acquire success slot=%zu\n", static_cast<size_t>(slot.value()));
+                    // Mark slot as non-null so release clears the bit/size
+                    m_slots.at(slot.value()).store(reinterpret_cast<T*>(1), std::memory_order_release);
                     release_data(slot.value());
                     return true;
                 }

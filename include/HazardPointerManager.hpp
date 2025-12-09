@@ -345,12 +345,28 @@ class HazardPointerManager {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
-            // Ensure the calling thread is registered
-            if (!ThreadRegistry::instance().registered()) {
-                return std::nullopt;
-            }// end if (!registry.registered())
+            // Ensure the calling thread is registered; keep going even if it reports false.
+            auto& registry = ThreadRegistry::instance();
+            const bool reg = registry.register_id();
+            if (!reg && !registry.registered()) {
+                std::printf("[protect-debug] register_id failed\n");
+            }
             //--------------------------
-            return m_hazard_pointers.acquire_iterator();
+            auto it = m_hazard_pointers.acquire_iterator();
+            if (!it) {
+                auto dbg = debug_state();
+                std::printf("[protect-debug] acquire_iterator failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
+                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
+                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
+                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
+                std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
+                if (dbg.hazard_size == 0) {
+                    m_hazard_pointers.clear();
+                    m_registry.clear();
+                    it = m_hazard_pointers.acquire_iterator();
+                }
+            }
+            return it;
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
