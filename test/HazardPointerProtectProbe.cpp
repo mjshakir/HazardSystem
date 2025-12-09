@@ -52,6 +52,9 @@ bool probe_size(HazardPointerManager<T, 0>& mgr,
             std::cout << "[probe] invoking debug_probe_acquire()" << std::endl;
             const bool dbg_acquire = mgr.debug_probe_acquire();
             std::cout << "[probe] debug_probe_acquire success=" << dbg_acquire << std::endl;
+            std::cout << "[probe] invoking acquire_data_iterator directly" << std::endl;
+            auto it_opt = mgr.debug_acquire_iterator();
+            std::cout << "[probe] direct acquire_data_iterator success=" << (it_opt.has_value() ? 1 : 0) << std::endl;
             // Try one explicit re-registration and another attempt for extra signal
             const bool reg2 = ThreadRegistry::instance().register_id();
             std::cout << "[probe] retry register_id() -> " << (reg2 ? "true" : "false") << std::endl;

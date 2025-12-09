@@ -155,6 +155,10 @@ class HazardPointerManager {
         bool debug_probe_acquire(void) {
             return m_hazard_pointers.debug_probe_acquire();
         }// end bool debug_probe_acquire(void)
+        //--------------------------
+        std::optional<typename BitmaskType::iterator> debug_acquire_iterator(void) {
+            return acquire_data_iterator();
+        }// end debug_acquire_iterator
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
@@ -352,7 +356,12 @@ class HazardPointerManager {
                 std::printf("[protect-debug] register_id failed\n");
             }
             //--------------------------
-            auto it = m_hazard_pointers.acquire_iterator();
+            // Prefer raw index acquisition to bypass any iterator quirks.
+            auto idx_opt = m_hazard_pointers.acquire();
+            std::optional<typename BitmaskType::iterator> it;
+            if (idx_opt) {
+                it = m_hazard_pointers.begin() + idx_opt.value();
+            }
             if (!it) {
                 auto dbg = debug_state();
                 std::printf("[protect-debug] acquire_iterator failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
@@ -360,18 +369,20 @@ class HazardPointerManager {
                             dbg.thread_registered ? 1 : 0, dbg.retired_size);
                 const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
                 std::printf("[protect-debug] debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
-                // Fallback: try raw index acquire and map to iterator
-                auto idx_opt = m_hazard_pointers.acquire();
-                if (idx_opt) {
-                    it = m_hazard_pointers.begin() + idx_opt.value();
-                } else {
-                    // Retry after probe; if still failing and table is empty, force a clear and retry once more
-                    it = m_hazard_pointers.acquire_iterator();
+                // Retry once more after probe; if still failing and table is empty, force a clear and retry once more
+                if (!it) {
+                    idx_opt = m_hazard_pointers.acquire();
+                    if (idx_opt) {
+                        it = m_hazard_pointers.begin() + idx_opt.value();
+                    }
                 }
                 if (!it && dbg.hazard_size == 0) {
                     m_hazard_pointers.clear();
                     m_registry.clear();
-                    it = m_hazard_pointers.acquire_iterator();
+                    idx_opt = m_hazard_pointers.acquire();
+                    if (idx_opt) {
+                        it = m_hazard_pointers.begin() + idx_opt.value();
+                    }
                 }
             }
             return it;
