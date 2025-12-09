@@ -78,6 +78,10 @@ jobs:
     - name: Build
       run: cmake --build build --config Release --verbose
 
+    - name: Probe hazard protect path first
+      working-directory: build
+      run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure -C Release
+
     - name: Test
       working-directory: build
       run: ctest -LE benchmark --output-on-failure -C Release
