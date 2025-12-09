@@ -64,4 +64,6 @@ create_test_target(${PROJECT_NAME}_HazardRegistry_Test          HazardRegistryTe
 create_test_target(${PROJECT_NAME}_ThreadRegistry_Test          ThreadRegistryTest.cpp)
 create_test_target(${PROJECT_NAME}_HazardThreadManager_Test     HazardThreadManagerTest.cpp)
 create_test_target(${PROJECT_NAME}_HashSet_Fixed_Test           HashSetFixedTest.cpp)
+# Diagnostic probe (non-gtest): exercises protect/reset loops and logs on failure
+create_test_target(${PROJECT_NAME}_HazardPointer_Protect_Probe  HazardPointerProtectProbe.cpp)
 #------------------------------------------------------------------------------------------
