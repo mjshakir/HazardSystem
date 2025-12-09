@@ -131,6 +131,26 @@ class HazardPointerManager {
         size_t hazard_capacity(void) const {
             return m_hazard_pointers.capacity();
         } // end size_t hazard_capacity(void) const
+        //--------------------------
+        struct DebugState {
+            size_t hazard_capacity;
+            size_t hazard_size;
+            size_t hazard_mask_count;
+            std::vector<uint64_t> masks;
+            bool thread_registered;
+            size_t retired_size;
+        };
+        DebugState debug_state(void) const {
+            DebugState s{
+                m_hazard_pointers.capacity(),
+                m_hazard_pointers.size(),
+                m_hazard_pointers.debug_mask_count(),
+                m_hazard_pointers.debug_masks(),
+                ThreadRegistry::instance().registered(),
+                retired_nodes().size()
+            };
+            return s;
+        } // end DebugState debug_state(void) const
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------

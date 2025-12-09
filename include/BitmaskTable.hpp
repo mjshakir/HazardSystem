@@ -200,6 +200,23 @@ namespace HazardSystem {
                 return get_capacity();
             }// end constexpr uint16_t capacity(void) const
             //--------------------------
+            IndexType debug_mask_count(void) const {
+                return get_mask_count();
+            }// end debug_mask_count
+            //--------------------------
+            std::vector<uint64_t> debug_masks(void) const {
+                std::vector<uint64_t> masks;
+                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
+                    masks.push_back(m_bitmask.load(std::memory_order_acquire));
+                } else {
+                    masks.reserve(get_mask_count());
+                    for (IndexType i = 0; i < get_mask_count(); ++i) {
+                        masks.push_back(m_bitmask[i].load(std::memory_order_acquire));
+                    }
+                }
+                return masks;
+            }// end debug_masks
+            //--------------------------
             iterator begin(void) noexcept {
                 return m_slots.begin();
             }// end iterator begin(void) noexcept
