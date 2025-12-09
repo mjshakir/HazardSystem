@@ -63,6 +63,15 @@ namespace HazardSystem {
             static constexpr size_t C_CAPACITY  = C_USE_ARRAY ? std::bit_ceil(safe_double_const(N)) : 0;
             using Storage                       = std::conditional_t<C_USE_ARRAY, std::array<Slot, C_CAPACITY>, std::vector<Slot>>;
             //--------------------------------------------------------------
+            static constexpr size_t mix_hash(uint64_t h) {
+                // SplitMix64: good avalanche while staying constexpr
+                h += 0x9e3779b97f4a7c15ULL;
+                h = (h ^ (h >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+                h = (h ^ (h >> 27U)) * 0x94d049bb133111ebULL;
+                h ^= (h >> 31U);
+                return static_cast<size_t>(h);
+            }// end static constexpr size_t mix_hash(uint64_t h)
+            //--------------------------
         public:
             //--------------------------------------------------------------
             template <size_t M = N, std::enable_if_t<M == 0, int> = 0>
@@ -157,17 +166,19 @@ namespace HazardSystem {
             //--------------------------
             bool insert_data(const Key& key) {
                 //--------------------------
+                if (m_size.load(std::memory_order_relaxed) >= m_max_load) {
+                    return false;
+                }// end if (m_size.load(std::memory_order_relaxed) >= m_max_load)
+                //--------------------------
                 const size_t hash       = hasher(key);
                 const size_t step       = step_hash(hash);
                 size_t first_tombstone  = C_NPOS;
+                size_t idx              = hash & m_mask;
                 //--------------------------
                 for (size_t probe = 0; probe < m_capacity; ++probe) {
-                    //--------------------------
                     if (m_size.load(std::memory_order_relaxed) >= m_max_load) {
                         return false; // avoid pathological probe chains when nearly full
                     }// end if (m_size.load(std::memory_order_relaxed) >= m_max_load)
-                    //--------------------------
-                    const size_t idx    = (hash + probe * step) & m_mask;
                     Slot& slot          = slot_at(idx);
                     SlotState state     = static_cast<SlotState>(slot.state.load(std::memory_order_acquire));
                     //--------------------------
@@ -210,7 +221,9 @@ namespace HazardSystem {
                                     m_size.fetch_add(1, std::memory_order_relaxed);
                                     //--------------------------
                                     if (first_tombstone != C_NPOS) {
-                                        m_deleted.fetch_sub(1, std::memory_order_relaxed);
+                                        if (m_deleted.load(std::memory_order_relaxed) > 0) {
+                                            m_deleted.fetch_sub(1, std::memory_order_relaxed);
+                                        }// end if (m_deleted.load(std::memory_order_relaxed) > 0)
                                     }// end if (first_tombstone != C_NPOS)
                                     //--------------------------
                                     return true;
@@ -220,10 +233,29 @@ namespace HazardSystem {
                             break;
                         }// end case SlotState::Empty
                         default:
-                            return false;
+                            break;
                         //--------------------------
                     }//end switch (state)
+                    idx = (idx + step) & m_mask;
                 }// end for (size_t probe = 0; probe < m_capacity; ++probe)
+                //--------------------------
+                if (first_tombstone != C_NPOS) {
+                    Slot& target_slot = slot_at(first_tombstone);
+                    uint8_t expected  = static_cast<uint8_t>(SlotState::Deleted);
+                    if (target_slot.state.compare_exchange_strong(
+                            expected,
+                            static_cast<uint8_t>(SlotState::Busy),
+                            std::memory_order_acq_rel,
+                            std::memory_order_acquire)) {
+                        target_slot.key = key;
+                        target_slot.state.store(static_cast<uint8_t>(SlotState::Occupied), std::memory_order_release);
+                        m_size.fetch_add(1, std::memory_order_relaxed);
+                        if (m_deleted.load(std::memory_order_relaxed) > 0) {
+                            m_deleted.fetch_sub(1, std::memory_order_relaxed);
+                        }// end if (m_deleted.load(std::memory_order_relaxed) > 0)
+                        return true;
+                    }// end if (target_slot.state.compare_exchange_strong
+                }// end if (first_tombstone != C_NPOS)
                 //--------------------------
                 return false; // table full or high contention
                 //--------------------------
@@ -233,10 +265,10 @@ namespace HazardSystem {
                 //--------------------------
                 const size_t hash = hasher(key);
                 const size_t step = step_hash(hash);
+                size_t idx        = hash & m_mask;
                 //--------------------------
                 for (size_t probe = 0; probe < m_capacity; ++probe) {
                     //--------------------------
-                    const size_t idx    = (hash + probe * step) & m_mask;
                     const Slot& slot    = slot_at(idx);
                     SlotState state     = static_cast<SlotState>(slot.state.load(std::memory_order_acquire));
                     //--------------------------
@@ -252,6 +284,7 @@ namespace HazardSystem {
                         return true;
                     }// end if (state == SlotState::Occupied and slot.key == key)
                     //--------------------------
+                    idx = (idx + step) & m_mask;
                 }// end for (size_t probe = 0; probe < m_capacity; ++probe)
                 //--------------------------
                 return false;
@@ -262,10 +295,10 @@ namespace HazardSystem {
                 //--------------------------
                 const size_t hash = hasher(key);
                 const size_t step = step_hash(hash);
+                size_t idx        = hash & m_mask;
                 //--------------------------
                 for (size_t probe = 0; probe < m_capacity; ++probe) {
                     //--------------------------
-                    const size_t idx    = (hash + probe * step) & m_mask;
                     Slot& slot          = slot_at(idx);
                     SlotState state     = static_cast<SlotState>(slot.state.load(std::memory_order_acquire));
                     //--------------------------
@@ -293,6 +326,7 @@ namespace HazardSystem {
                             }// end if (slot.state.compare_exchange_weak
                         }// end while (expected == static_cast<uint8_t>(SlotState::Occupied))
                     }// end if (state == SlotState::Occupied and slot.key == key)
+                    idx = (idx + step) & m_mask;
                 }// end for (size_t probe = 0; probe < m_capacity; ++probe)
                 //--------------------------
                 return false;
@@ -333,12 +367,13 @@ namespace HazardSystem {
             }// end void clear_data(void)
             //--------------------------
             size_t hasher(const Key& key) const {
-                return std::hash<Key>{}(key) & m_mask;
+                return mix_hash(static_cast<uint64_t>(std::hash<Key>{}(key)));
             }// end size_t hasher(const Key& key) const
             //--------------------------
             size_t step_hash(size_t h) const {
-                size_t step = ((h >> 16) | 1ULL) & m_mask;
-                return step ? step : 1ULL;
+                constexpr unsigned k_shift = (sizeof(size_t) == 8U) ? 33U : 17U;
+                size_t step = (((h >> k_shift) ^ (h << 1U)) | 1ULL) & m_mask;
+                return step ? step : 1ULL; // keep probe cycle relatively prime to capacity
             }// end size_t step_hash(size_t h) const
             //--------------------------
             constexpr size_t next_power_of_two(size_t n) {
