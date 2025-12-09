@@ -200,10 +200,11 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            it_opt.value()->store(data, std::memory_order_release);
+            auto it = it_opt.value();
+            it->store(data, std::memory_order_release);
             m_registry.add(data);
             //--------------------------
-            return create_protected_pointer(it_opt.value(), data);
+            return create_protected_pointer(it, data);
             //--------------------------
         }// end ProtectedPointer<T> protect_data(T* data)
         //--------------------------
@@ -223,21 +224,22 @@ class HazardPointerManager {
             if (!it_opt) {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
+            auto it = it_opt.value();
             //--------------------------
             auto protected_obj = a_data.load(std::memory_order_acquire);
             if (!protected_obj) {
-                release_data_iterator(it_opt.value());
+                release_data_iterator(it);
                 return ProtectedPointer<T>();
             }// end if (!protected_obj) 
             //--------------------------
-            it_opt.value()->store_safe(protected_obj);
+            it->store_safe(protected_obj);
             m_registry.add(protected_obj);
             //--------------------------
             if (a_data.load(std::memory_order_acquire) == protected_obj) {
-                return create_protected_pointer(it_opt.value(), protected_obj);
+                return create_protected_pointer(it, protected_obj);
             }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
             //--------------------------
-            release_data_iterator(it_opt.value());
+            release_data_iterator(it);
             return ProtectedPointer<T>();
             //--------------------------
         }// end ProtectedPointer<T> protect_data(const std::atomic<T*>& a_data)
@@ -303,7 +305,7 @@ class HazardPointerManager {
             //--------------------------
         }// end ProtectedPointer<T> try_protect(const std::atomic<T*>& a_data, const size_t& max_retries)
         //--------------------------
-        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
+       ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
@@ -315,26 +317,27 @@ class HazardPointerManager {
                 std::printf("[protect-debug] protect(shared_ptr,retries) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
+            auto it = it_opt.value();
             //--------------------------
             std::shared_ptr<T> protected_obj;
             //--------------------------
             for (size_t attempt = 0; attempt < max_retries; ++attempt) {
                 protected_obj = a_sp_data.load(std::memory_order_acquire);
                 if (!protected_obj) {
-                    release_data_iterator(it_opt.value());
+                    release_data_iterator(it);
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
-                it_opt.value()->store(protected_obj.get(), std::memory_order_release);
+                it->store(protected_obj.get(), std::memory_order_release);
                 m_registry.add(protected_obj.get());
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
-                    return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
+                    return create_protected_pointer(it, protected_obj.get(), std::move(protected_obj));
                 }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
                 //--------------------------
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
             //--------------------------
-            release_data_iterator(it_opt.value());
+            release_data_iterator(it);
             return ProtectedPointer<T>();
             //--------------------------
         }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries)
@@ -385,6 +388,17 @@ class HazardPointerManager {
             std::optional<typename BitmaskType::iterator> it;
             if (idx_opt) {
                 it = m_hazard_pointers.begin() + idx_opt.value();
+            }
+            // Fallback: linear scan + reacquire on any free slot.
+            if (!it) {
+                for (auto iter = m_hazard_pointers.begin(); iter != m_hazard_pointers.end(); ++iter) {
+                    if (iter->load(std::memory_order_acquire) == nullptr) {
+                        if (m_hazard_pointers.acquire(iter)) {
+                            it = iter;
+                            break;
+                        }
+                    }
+                }
             }
             if (!it) {
                 auto dbg = debug_state();

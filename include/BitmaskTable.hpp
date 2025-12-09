@@ -359,12 +359,15 @@ namespace HazardSystem {
                 }// end for (uint16_t part = 0; part < get_mask_count(); ++part) 
                 //--------------------------
                 if (m_debug_once.test_and_set(std::memory_order_relaxed) == false) {
-                    // One-shot diagnostic: unexpected failure to acquire despite available capacity.
+                    // One-shot diagnostic when acquisition fails. Only attempt a reset
+                    // if the table is *not* fully occupied (i.e., failure is unexpected).
+                    const auto current_size = m_size.load(std::memory_order_acquire);
                     std::ostringstream oss;
                     oss << "[bitmask] acquire_data failed "
                         << "cap=" << _capacity
                         << " masks=" << _mask_count
                         << " hint=" << start_part
+                        << " size=" << current_size
                         << " bits=[";
                     for (IndexType p = 0; p < _mask_count; ++p) {
                         oss << std::hex << m_bitmask.at(p).load(std::memory_order_acquire) << std::dec;
@@ -373,14 +376,16 @@ namespace HazardSystem {
                     oss << "]";
                     std::fprintf(stderr, "%s\n", oss.str().c_str());
                     std::fflush(stderr);
-                    // Attempt a single reset + retry.
-                    for (IndexType p = 0; p < _mask_count; ++p) {
-                        m_bitmask.at(p).store(0ULL, std::memory_order_relaxed);
-                    }
-                    m_size.store(0, std::memory_order_relaxed);
-                    auto retry = acquire_data();
-                    if (retry) {
-                        return retry;
+                    if (current_size < _capacity) {
+                        // Unexpected miss: attempt a single reset + retry.
+                        for (IndexType p = 0; p < _mask_count; ++p) {
+                            m_bitmask.at(p).store(0ULL, std::memory_order_relaxed);
+                        }
+                        m_size.store(0, std::memory_order_relaxed);
+                        auto retry = acquire_data();
+                        if (retry) {
+                            return retry;
+                        }
                     }
                 }
                 return std::nullopt;
