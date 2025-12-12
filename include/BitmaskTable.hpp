@@ -202,58 +202,6 @@ namespace HazardSystem {
                 return get_capacity();
             }// end constexpr uint16_t capacity(void) const
             //--------------------------
-<<<<<<< HEAD
-            IndexType debug_mask_count(void) const {
-                return get_mask_count();
-            }// end debug_mask_count
-            //--------------------------
-            // Debug hook: dump masks and attempt a single acquisition/release.
-            bool debug_probe_acquire(void) {
-                const IndexType cap       = get_capacity();
-                const IndexType mask_cnt  = get_mask_count();
-                const IndexType start_hint = m_hint.load(std::memory_order_relaxed);
-                std::printf("[bitmask-debug] cap=%zu masks=%zu hint=%zu size=%zu bits=[",
-                            static_cast<size_t>(cap),
-                            static_cast<size_t>(mask_cnt),
-                            static_cast<size_t>(start_hint),
-                            static_cast<size_t>(m_size.load(std::memory_order_relaxed)));
-                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
-                    const auto v = m_bitmask.load(std::memory_order_acquire);
-                    std::printf("%zx", static_cast<size_t>(v));
-                } else {
-                    for (IndexType p = 0; p < mask_cnt; ++p) {
-                        const auto v = m_bitmask[p].load(std::memory_order_acquire);
-                        std::printf("%zx%s", static_cast<size_t>(v), (p + 1 < mask_cnt ? "," : ""));
-                    }
-                }
-                std::printf("]\n");
-                auto slot = acquire_data();
-                if (slot) {
-                    std::printf("[bitmask-debug] acquire success slot=%zu\n", static_cast<size_t>(slot.value()));
-                    // Mark slot as non-null so release clears the bit/size
-                    m_slots.at(slot.value()).store(reinterpret_cast<T*>(1), std::memory_order_release);
-                    release_data(slot.value());
-                    return true;
-                }
-                std::printf("[bitmask-debug] acquire failed\n");
-                return false;
-            }// end debug_probe_acquire
-            //--------------------------
-            std::vector<uint64_t> debug_masks(void) const {
-                std::vector<uint64_t> masks;
-                if constexpr ((N > 0) and (N <= C_BITS_PER_MASK)) {
-                    masks.push_back(m_bitmask.load(std::memory_order_acquire));
-                } else {
-                    masks.reserve(get_mask_count());
-                    for (IndexType i = 0; i < get_mask_count(); ++i) {
-                        masks.push_back(m_bitmask[i].load(std::memory_order_acquire));
-                    }
-                }
-                return masks;
-            }// end debug_masks
-            //--------------------------
-=======
->>>>>>> parent of dc7764f (Add: temp debug struck)
             iterator begin(void) noexcept {
                 return m_slots.begin();
             }// end iterator begin(void) noexcept
