@@ -167,11 +167,12 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            it_opt.value()->store(data, std::memory_order_release);
             if (!m_registry.add(data)) {
+                // Slot is acquired but still empty; just release it.
                 release_data_iterator(it_opt.value());
                 return ProtectedPointer<T>();
             }
+            it_opt.value()->store(data, std::memory_order_release);
             //--------------------------
             return create_protected_pointer(it_opt.value(), data);
             //--------------------------
@@ -183,7 +184,10 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!sp_data)
             //--------------------------
-            return protect_with_owner(sp_data.get(), std::move(sp_data));
+            // Capture the raw pointer before moving the shared_ptr.
+            // Argument evaluation order is unspecified, so avoid sp_data.get() after move.
+            T* ptr = sp_data.get();
+            return protect_with_owner(ptr, std::move(sp_data));
             //--------------------------
         }// end ProtectedPointer<T> protect(std::shared_ptr<T> sp_data)
         //--------------------------
@@ -235,7 +239,8 @@ class HazardPointerManager {
             it_opt.value()->store_safe(protected_obj.get());
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
-                return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
+                T* ptr = protected_obj.get();
+                return create_protected_pointer(it_opt.value(), ptr, std::move(protected_obj));
             }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
             //--------------------------
             release_data_iterator(it_opt.value());
@@ -302,7 +307,8 @@ class HazardPointerManager {
                 it_opt.value()->store(protected_obj.get(), std::memory_order_release);
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
-                    return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
+                    T* ptr = protected_obj.get();
+                    return create_protected_pointer(it_opt.value(), ptr, std::move(protected_obj));
                 }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
                 //--------------------------
                 // Drop our hazard before retrying
@@ -332,11 +338,12 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            it_opt.value()->store(ptr, std::memory_order_release);
             if (!m_registry.add(ptr)) {
+                // Slot is acquired but still empty; just release it.
                 release_data_iterator(it_opt.value());
                 return ProtectedPointer<T>();
             }
+            it_opt.value()->store(ptr, std::memory_order_release);
             //--------------------------
             return create_protected_pointer(it_opt.value(), ptr, std::move(owner));
             //--------------------------
@@ -357,10 +364,12 @@ class HazardPointerManager {
         bool release_data_iterator(typename BitmaskType::iterator it) {
             //--------------------------        
             T* ptr = it->load(std::memory_order_acquire);
+            // Clear the hazard slot first, then drop from registry.
+            const bool cleared = m_hazard_pointers.set(it, nullptr);
             if (ptr) {
                 m_registry.remove(ptr);
             }
-            return m_hazard_pointers.set(it, nullptr);
+            return cleared;
             //--------------------------
         } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
         //--------------------------
