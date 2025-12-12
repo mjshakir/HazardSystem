@@ -131,6 +131,7 @@ class HazardPointerManager {
         size_t hazard_capacity(void) const {
             return m_hazard_pointers.capacity();
         } // end size_t hazard_capacity(void) const
+<<<<<<< HEAD
         //--------------------------
         struct DebugState {
             size_t hazard_capacity;
@@ -159,6 +160,8 @@ class HazardPointerManager {
         std::optional<typename BitmaskType::iterator> debug_acquire_iterator(void) {
             return acquire_data_iterator();
         }// end debug_acquire_iterator
+=======
+>>>>>>> parent of dc7764f (Add: temp debug struck)
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------

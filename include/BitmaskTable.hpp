@@ -202,6 +202,7 @@ namespace HazardSystem {
                 return get_capacity();
             }// end constexpr uint16_t capacity(void) const
             //--------------------------
+<<<<<<< HEAD
             IndexType debug_mask_count(void) const {
                 return get_mask_count();
             }// end debug_mask_count
@@ -251,6 +252,8 @@ namespace HazardSystem {
                 return masks;
             }// end debug_masks
             //--------------------------
+=======
+>>>>>>> parent of dc7764f (Add: temp debug struck)
             iterator begin(void) noexcept {
                 return m_slots.begin();
             }// end iterator begin(void) noexcept
