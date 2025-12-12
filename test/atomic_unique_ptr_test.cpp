@@ -223,12 +223,15 @@ TEST_F(AtomicUniquePtrTest, ReleaseOnEmptyIsIdempotent) {
 // Test case 6: Multithreaded transfer test
 TEST_F(AtomicUniquePtrTest, MultiThread_TransferTest) {
     atomic_unique_ptr<int> atomic_ptr(new int(42));
-    std::shared_ptr<int> shared_ptr;
+    std::atomic<bool> transferred{false};
 
     auto thread_func = [&]() {
-        // Try to transfer ownership to shared_ptr
-        if (atomic_ptr.transfer(shared_ptr)) {
-            ASSERT_EQ(*shared_ptr, 42);
+        // Each thread uses its own destination to avoid races on shared_ptr.
+        std::shared_ptr<int> local;
+        if (atomic_ptr.transfer(local)) {
+            ASSERT_NE(local, nullptr);
+            ASSERT_EQ(*local, 42);
+            transferred.store(true, std::memory_order_release);
         }
     };
 
@@ -239,8 +242,7 @@ TEST_F(AtomicUniquePtrTest, MultiThread_TransferTest) {
     t1.join();
     t2.join();
 
-    ASSERT_NE(shared_ptr, nullptr);  // Ensure the shared_ptr is not null
-    ASSERT_EQ(*shared_ptr, 42);      // Ensure the value transferred correctly
+    ASSERT_TRUE(transferred.load(std::memory_order_acquire));
 }
 
 // Test case 7: Stress test with concurrent operations

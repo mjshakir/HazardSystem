@@ -1062,7 +1062,6 @@ TEST_F(FixedHazardPointerManagerTest, RealWorldMixedStressTest) {
 
     const int N_THREADS             = std::thread::hardware_concurrency(); //16;
     constexpr int OPS_PER_THREAD    = 20000;
-    std::mt19937_64 rnd{12345};
 
     // 4) Launch a mix of readers, writers, bulk retires, reclaim, clear
     std::vector<std::thread> threads;
@@ -1072,6 +1071,7 @@ TEST_F(FixedHazardPointerManagerTest, RealWorldMixedStressTest) {
             // Every thread must register itself
             ThreadRegistry::instance().register_id();
 
+            std::mt19937_64 rnd{static_cast<uint64_t>(12345u + t)};
             std::uniform_int_distribution<int> action(0, 5);
             for (int i = 0; i < OPS_PER_THREAD; ++i) {
                 switch (action(rnd)) {

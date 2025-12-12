@@ -438,13 +438,13 @@ TEST(DynamicHazardPointerManager, RealWorldDynamicProtectStressTest) {
 
   const int THREADS = std::thread::hardware_concurrency();
   constexpr int OPS = 5000;
-  std::mt19937_64 rnd{12345};
   std::vector<std::thread> ths;
   ths.reserve(THREADS);
 
   for(int t=0;t<THREADS;++t){
-    ths.emplace_back([&](){
+    ths.emplace_back([&, t](){
       ThreadRegistry::instance().register_id();
+      std::mt19937_64 rnd{static_cast<uint64_t>(12345u + t)};
       std::uniform_int_distribution<int> act(0,4);
       for(int i=0;i<OPS;++i){
         switch(act(rnd)){
@@ -554,13 +554,13 @@ TEST(DynamicHazardPointerManager, RealWorldMixedConcurrency) {
 
     const int THREADS = std::thread::hardware_concurrency();
     constexpr int OPS = 25000;
-    std::mt19937_64 rnd{123456};
 
     std::vector<std::thread> ths;
     ths.reserve(THREADS);
     for (int t = 0; t < THREADS; ++t) {
         ths.emplace_back([&, t]() {
             ThreadRegistry::instance().register_id();
+            std::mt19937_64 rnd{static_cast<uint64_t>(123456u + t)};
             std::uniform_int_distribution<int> action(0,5);
             for (int i = 0; i < OPS; ++i) {
                 switch (action(rnd)) {
