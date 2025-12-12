@@ -53,9 +53,9 @@ jobs:
     - name: Build
       run: cmake --build build
 
-    - name: Probe hazard protect path first
-      working-directory: build
-      run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure
+    # - name: Probe hazard protect path first
+    #   working-directory: build
+    #   run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure
 
     - name: Test (no benchmarks)
       working-directory: build
