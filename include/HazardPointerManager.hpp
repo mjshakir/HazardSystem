@@ -163,20 +163,13 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
-                auto dbg = debug_state();
-                std::printf("[protect-debug] protect(T*) acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
-                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
-                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
-                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
-                std::printf("[protect-debug] protect(T*) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            auto it = it_opt.value();
-            it->store(data, std::memory_order_release);
+            it_opt.value()->store(data, std::memory_order_release);
             m_registry.add(data);
             //--------------------------
-            return create_protected_pointer(it, data);
+            return create_protected_pointer(it_opt.value(), data);
             //--------------------------
         }// end ProtectedPointer<T> protect_data(T* data)
         //--------------------------
@@ -196,22 +189,21 @@ class HazardPointerManager {
             if (!it_opt) {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
-            auto it = it_opt.value();
             //--------------------------
             auto protected_obj = a_data.load(std::memory_order_acquire);
             if (!protected_obj) {
-                release_data_iterator(it);
+                release_data_iterator(it_opt.value());
                 return ProtectedPointer<T>();
             }// end if (!protected_obj) 
             //--------------------------
-            it->store_safe(protected_obj);
+            it_opt.value()->store_safe(protected_obj);
             m_registry.add(protected_obj);
             //--------------------------
             if (a_data.load(std::memory_order_acquire) == protected_obj) {
-                return create_protected_pointer(it, protected_obj);
+                return create_protected_pointer(it_opt.value(), protected_obj);
             }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
             //--------------------------
-            release_data_iterator(it);
+            release_data_iterator(it_opt.value());
             return ProtectedPointer<T>();
             //--------------------------
         }// end ProtectedPointer<T> protect_data(const std::atomic<T*>& a_data)
@@ -220,12 +212,6 @@ class HazardPointerManager {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
-                auto dbg = debug_state();
-                std::printf("[protect-debug] protect(shared_ptr) acquire failed cap=%zu size=%zu masks=%zu registered=%d retire_size=%zu\n",
-                            dbg.hazard_capacity, dbg.hazard_size, dbg.hazard_mask_count,
-                            dbg.thread_registered ? 1 : 0, dbg.retired_size);
-                const bool probe_ok = m_hazard_pointers.debug_probe_acquire();
-                std::printf("[protect-debug] protect(shared_ptr) debug_probe_acquire=%d\n", probe_ok ? 1 : 0);
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
@@ -277,7 +263,7 @@ class HazardPointerManager {
             //--------------------------
         }// end ProtectedPointer<T> try_protect(const std::atomic<T*>& a_data, const size_t& max_retries)
         //--------------------------
-       ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
+        ProtectedPointer<T> protect_data(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries) {
             //--------------------------
             auto it_opt = acquire_data_iterator();
             if (!it_opt) {
@@ -335,13 +321,18 @@ class HazardPointerManager {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
-            // Ensure the calling thread is registered; retry registration if missing
+            // Best effort: make sure the calling thread is registered, but never fail slot acquisition on registration issues.
             auto& registry = ThreadRegistry::instance();
-            if (!registry.registered() && !registry.register_id()) {
-                return std::nullopt;
-            }// end if (!registry.registered() && !registry.register_id())
+            static_cast<void>(registry.register_id());
             //--------------------------
-            return m_hazard_pointers.acquire_iterator();
+            auto it = m_hazard_pointers.acquire_iterator();
+            if (!it && m_hazard_pointers.size() == 0) {
+                // Defensive: if the table reports empty yet no slot is acquired, reinitialize.
+                m_hazard_pointers.clear();
+                m_registry.clear();
+                it = m_hazard_pointers.acquire_iterator();
+            }
+            return it;
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
