@@ -74,6 +74,10 @@ jobs:
     - name: Build
       run: cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
 
+    - name: Probe hazard protect path first
+      working-directory: build
+      run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure -C ${{ env.BUILD_TYPE }}
+
     - name: List build and lib directory contents
       run: |
         ls -R build/

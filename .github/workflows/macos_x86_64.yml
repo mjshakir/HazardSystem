@@ -15,6 +15,12 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        brew update
+        brew install git googletest google-benchmark
+        echo "CMAKE_PREFIX_PATH=$(brew --prefix)/opt/googletest;$(brew --prefix)/opt/benchmark" >> $GITHUB_ENV
 
     - name: Setup CMake and Ninja
       uses: lukka/get-cmake@v4.2.0
@@ -26,10 +32,14 @@ jobs:
       run: mkdir build
 
     - name: Configure CMake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}"
 
     - name: Build
       run: cmake --build build --config Release
+
+    - name: Probe hazard protect path first
+      working-directory: build
+      run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure
 
     - name: Test
       working-directory: build

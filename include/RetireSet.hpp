@@ -62,9 +62,7 @@ namespace HazardSystem {
                 }// end if (!ptr)
                 //--------------------------
                 if (m_retired.size() >= m_threshold) {
-                    if (!scan_and_reclaim()) {
-                        return false;
-                    }
+                    static_cast<void>(scan_and_reclaim());
                 }// end if (m_retired.size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
@@ -82,7 +80,13 @@ namespace HazardSystem {
                 //--------------------------
                 const size_t _before = m_retired.size();
                 //--------------------------
-                std::erase_if(m_retired, [this](const std::shared_ptr<T>& ptr) {return !m_hazard(ptr);});
+                for (auto it = m_retired.begin(); it != m_retired.end();) {
+                    if (!m_hazard(*it)) {
+                        it = m_retired.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }// end for (auto it = m_retired.begin(); it != m_retired.end();)
                 //--------------------------
                 const size_t _removed = _before -  m_retired.size();
                 return _removed ? std::optional<size_t>(_removed) : std::nullopt;

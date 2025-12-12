@@ -5,13 +5,25 @@
 #include <set>
 #include <random>
 #include <atomic>
+#include <memory>
+#include <unordered_map>
 
 using namespace HazardSystem;
+
+namespace {
+template<typename T, typename... Args>
+T* emplace_value(std::vector<std::unique_ptr<T>>& store, Args&&... args) {
+    store.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+    return store.back().get();
+}
+} // namespace
 
 TEST(BitmaskTableTest, AcquireReleaseSingleThread) {
     constexpr size_t N = 64;
     BitmaskTable<int, N> table;
     std::set<uint8_t> acquired;
+    std::vector<std::unique_ptr<int>> values;
+    values.reserve(N);
 
     // Acquire all slots
     for (size_t i = 0; i < N; ++i) {
@@ -20,7 +32,7 @@ TEST(BitmaskTableTest, AcquireReleaseSingleThread) {
         ASSERT_FALSE(acquired.count(*idx));
         acquired.insert(*idx);
 
-        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42 + i)));
+        ASSERT_TRUE(table.set(*idx, emplace_value(values, 42 + i)));
         auto val = table.at(*idx);
         ASSERT_TRUE(val);
         ASSERT_EQ(*val, 42 + i);
@@ -41,10 +53,11 @@ TEST(BitmaskTableTest, AcquireReleaseSingleThread) {
 TEST(BitmaskTableTest, ReuseSlot) {
     constexpr size_t N = 8;
     BitmaskTable<int, N> table;
+    std::vector<std::unique_ptr<int>> values;
 
     auto idx = table.acquire();
     ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(42)));
+    ASSERT_TRUE(table.set(*idx, emplace_value(values, 42)));
     ASSERT_TRUE(table.release(*idx));
     auto idx2 = table.acquire();
     ASSERT_TRUE(idx2.has_value());
@@ -63,11 +76,13 @@ TEST(BitmaskTableTest, MultiThreadedAcquireRelease) {
         for (int i = 0; i < iters; ++i) {
             auto idx = table.acquire();
             if (idx) {
-                table.set(*idx, std::make_shared<int>(id));
+                auto* val = new int(id);
+                table.set(*idx, val);
                 ++success_acquire;
                 // Don't assert value, as races are possible
                 std::this_thread::yield();
                 table.release(*idx);
+                delete val;
                 ++success_release;
             } else {
                 std::this_thread::yield();
@@ -126,10 +141,11 @@ TEST(BitmaskTableTest, MultiThreadedAcquireRelease) {
 TEST(BitmaskTableTest, DoubleRelease) {
     constexpr size_t N = 8;
     BitmaskTable<int, N> table;
+    std::vector<std::unique_ptr<int>> values;
 
     auto idx = table.acquire();
     ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(123)));
+    ASSERT_TRUE(table.set(*idx, emplace_value(values, 123)));
     ASSERT_TRUE(table.release(*idx));
     ASSERT_FALSE(table.release(*idx));
 }
@@ -151,17 +167,18 @@ TEST(BitmaskTableTest, SetNullptr) {
 TEST(BitmaskTableTest, SingleSlot) {
     constexpr size_t N = 1;
     BitmaskTable<int, N> table;
+    std::vector<std::unique_ptr<int>> values;
 
     auto idx = table.acquire();
     ASSERT_TRUE(idx.has_value());
-    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(99)));
+    ASSERT_TRUE(table.set(*idx, emplace_value(values, 99)));
     ASSERT_TRUE(table.release(*idx));
     ASSERT_FALSE(table.active(*idx));
     ASSERT_FALSE(table.at(*idx));
     // Should be able to reuse the slot
     auto idx2 = table.acquire();
     ASSERT_TRUE(idx2.has_value());
-    ASSERT_TRUE(table.set(*idx2, std::make_shared<int>(123)));
+    ASSERT_TRUE(table.set(*idx2, emplace_value(values, 123)));
     ASSERT_TRUE(table.release(*idx2));
 }
 
@@ -172,11 +189,13 @@ TEST(BitmaskTableTest, MaxSlots) {
     BitmaskTable<int, N> table;
     std::vector<size_t> idxs;
     idxs.reserve(N);
+    std::vector<std::unique_ptr<int>> values;
+    values.reserve(N);
     // Fill all slots
     for (size_t i = 0; i < N; ++i) {
         auto idx = table.acquire();
         ASSERT_TRUE(idx.has_value());
-        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(int(i))));
+        ASSERT_TRUE(table.set(*idx, emplace_value(values, static_cast<int>(i))));
         idxs.push_back(*idx);
     }
     // No more slots should be available
@@ -197,11 +216,13 @@ TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
 
     std::vector<size_t> idxs;
     idxs.reserve(capacity);
+    std::vector<std::unique_ptr<int>> values;
+    values.reserve(capacity);
     // Acquire all slots and set a value
     for (size_t i = 0; i < capacity; ++i) {
         auto idx = table.acquire();
         ASSERT_TRUE(idx);
-        ASSERT_TRUE(table.set(*idx, std::make_shared<int>(int(i * 2))));
+        ASSERT_TRUE(table.set(*idx, emplace_value(values, int(i * 2))));
         idxs.push_back(*idx);
     }
     ASSERT_EQ(table.size(), capacity);
@@ -232,6 +253,7 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
     const size_t threads = std::thread::hardware_concurrency();
     const int ops_per_thread = capacity / threads + 1;
     std::vector<std::vector<size_t>> all_idxs(threads);
+    std::vector<std::unique_ptr<int>> values(capacity);
 
     auto worker = [&](int tid) {
         std::vector<size_t>& my_idxs = all_idxs[tid];
@@ -239,7 +261,8 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
         for (int i = 0; i < ops_per_thread; ++i) {
             auto idx = table.acquire();
             if (idx) {
-                ASSERT_TRUE(table.set(*idx, std::make_shared<int>(tid * 1000 + i)));
+                values[*idx] = std::make_unique<int>(tid * 1000 + i);
+                ASSERT_TRUE(table.set(*idx, values[*idx].get()));
                 my_idxs.push_back(*idx);
             }
         }
@@ -280,6 +303,7 @@ TEST(BitmaskTableTest, CapacityAndSizeMultiThreaded) {
 TEST(BitmaskTableTest, SizeAccountingNoDoubleCount) {
     constexpr size_t N = 8;
     BitmaskTable<int, N> table;
+    std::vector<std::unique_ptr<int>> values(N);
 
     std::vector<size_t> idxs;
     for (size_t i = 0; i < N / 2; ++i) {
@@ -292,19 +316,22 @@ TEST(BitmaskTableTest, SizeAccountingNoDoubleCount) {
 
     // Setting non-null should not bump size again
     for (size_t i = 0; i < idxs.size(); ++i) {
-        ASSERT_TRUE(table.set(idxs[i], std::make_shared<int>(int(i))));
+        values[idxs[i]] = std::make_unique<int>(int(i));
+        ASSERT_TRUE(table.set(idxs[i], values[idxs[i]].get()));
         ASSERT_EQ(table.size(), idxs.size());
     }
 
     // Overwrite with new values; size stays constant
     for (size_t i = 0; i < idxs.size(); ++i) {
-        ASSERT_TRUE(table.set(idxs[i], std::make_shared<int>(int(i + 100))));
+        values[idxs[i]] = std::make_unique<int>(int(i + 100));
+        ASSERT_TRUE(table.set(idxs[i], values[idxs[i]].get()));
         ASSERT_EQ(table.size(), idxs.size());
     }
 
     // Clearing with nullptr decrements
     for (auto idx : idxs) {
         ASSERT_TRUE(table.set(idx, nullptr));
+        values[idx].reset();
     }
     ASSERT_EQ(table.size(), 0u);
 }
@@ -315,11 +342,13 @@ TEST(BitmaskTableTest, ForEachActive) {
     BitmaskTable<int, N> table;
     std::vector<typename BitmaskTable<int, N>::IndexType> idxs;
     idxs.reserve(N);
+    std::vector<std::unique_ptr<int>> values;
     for (size_t i = 0; i < N; i += 2) {
         auto idx = table.acquire();
         ASSERT_TRUE(idx.has_value());
         idxs.push_back(*idx);
-        table.set(*idx, std::make_shared<int>(i));
+        values.emplace_back(std::make_unique<int>(static_cast<int>(i)));
+        table.set(*idx, values.back().get());
     }
     int count = 0;
     table.for_each([&](auto idx, auto ptr) {
@@ -337,15 +366,17 @@ TEST(BitmaskTableTest, ForEachActiveFastSingleThread) {
     constexpr size_t N = 16;
     BitmaskTable<int, N> table;
     std::set<size_t> expected;
+    std::vector<std::unique_ptr<int>> values(N);
 
     // Set odd indices
     for (size_t i = 1; i < N; i += 2) {
-        table.set(i, std::make_shared<int>(i * 10));
+        values[i] = std::make_unique<int>(static_cast<int>(i * 10));
+        table.set(i, values[i].get());
         expected.insert(i);
     }
 
     std::set<size_t> visited;
-    table.for_each_fast([&](size_t idx, std::shared_ptr<int> ptr) {
+    table.for_each_fast([&](size_t idx, int* ptr) {
         visited.insert(idx);
         ASSERT_EQ(*ptr, idx * 10);
     });
@@ -358,17 +389,20 @@ TEST(BitmaskTableTest, ForEachActiveFastMultiThread) {
     constexpr size_t N = 64;
     BitmaskTable<int, N> table;
     constexpr int threads = 8;
+    std::vector<std::unique_ptr<int>> values(N);
 
     // Randomly fill about half the slots
     for (size_t i = 0; i < N; ++i) {
-        if (i % 3 == 0)
-            table.set(i, std::make_shared<int>(i + 100));
+        if (i % 3 == 0) {
+            values[i] = std::make_unique<int>(static_cast<int>(i + 100));
+            table.set(i, values[i].get());
+        }
     }
 
     std::atomic<size_t> visited_count{0};
 
     auto worker = [&]() {
-        table.for_each_fast([&](size_t idx, std::shared_ptr<int> ptr) {
+        table.for_each_fast([&](size_t idx, int* ptr) {
             ASSERT_EQ(*ptr, idx + 100);
             ++visited_count;
         });
@@ -379,6 +413,7 @@ TEST(BitmaskTableTest, ForEachActiveFastMultiThread) {
         pool.emplace_back(worker);
     for (auto& t : pool) t.join();
 
+    table.clear();
     // Since each thread visits all, divide by thread count for per-table coverage
     ASSERT_EQ(visited_count / threads, N / 3 + (N % 3 ? 1 : 0));
 }
@@ -389,9 +424,11 @@ TEST(BitmaskTableTest, SetEmplaceNonArraySingleThread) {
     BitmaskTable<int, N> table;
     std::vector<typename BitmaskTable<int, N>::IndexType> indices;
     indices.reserve(N);
+    std::vector<std::unique_ptr<int>> values;
 
     for (size_t i = 0; i < N; ++i) {
-        auto idx = table.set(std::make_shared<int>(int(i * 2)));
+        values.emplace_back(std::make_unique<int>(int(i * 2)));
+        auto idx = table.set(values.back().get());
         ASSERT_TRUE(idx.has_value());
         indices.push_back(*idx);
         auto val = table.at(*idx);
@@ -400,7 +437,8 @@ TEST(BitmaskTableTest, SetEmplaceNonArraySingleThread) {
         ASSERT_TRUE(table.active(*idx));
     }
     // All slots filled; next should fail
-    ASSERT_FALSE(table.set(std::make_shared<int>(999)).has_value());
+    auto extra = std::make_unique<int>(999);
+    ASSERT_FALSE(table.set(extra.get()).has_value());
     for (auto idx : indices) {
         ASSERT_TRUE(table.release(idx));
     }
@@ -412,9 +450,11 @@ TEST(BitmaskTableTest, SetEmplaceArraySingleThread) {
     BitmaskTable<int, N> table;
     std::vector<typename BitmaskTable<int, N>::IndexType> indices;
     indices.reserve(N);
+    std::vector<std::unique_ptr<int>> values;
 
     for (size_t i = 0; i < N; ++i) {
-        auto idx = table.set(std::make_shared<int>(1000 + int(i)));
+        values.emplace_back(std::make_unique<int>(1000 + int(i)));
+        auto idx = table.set(values.back().get());
         ASSERT_TRUE(idx.has_value());
         indices.push_back(*idx);
         auto val = table.at(*idx);
@@ -423,7 +463,8 @@ TEST(BitmaskTableTest, SetEmplaceArraySingleThread) {
         ASSERT_TRUE(table.active(*idx));
     }
     // All slots filled; next should fail
-    ASSERT_FALSE(table.set(std::make_shared<int>(999)).has_value());
+    auto extra = std::make_unique<int>(999);
+    ASSERT_FALSE(table.set(extra.get()).has_value());
     for (auto idx : indices) {
         ASSERT_TRUE(table.release(idx));
     }
@@ -440,7 +481,14 @@ TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
         for (int i = 0; i < ops_per_thread; ++i) {
             std::optional<size_t> idx;
             // Keep trying until you get a slot (in case of high contention)
-            while (!(idx = table.set(std::make_shared<int>(id * 100 + i)))) {
+            int* value = nullptr;
+            while (true) {
+                value = new int(id * 100 + i);
+                idx = table.set(value);
+                if (idx) {
+                    break;
+                }// end if (idx)
+                delete value;
                 std::this_thread::yield();
             }
             // Check slot is active and non-null *immediately after set*
@@ -450,6 +498,7 @@ TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
             // (Optionally) check the value, but be aware that a race could rarely occur before release
             // ASSERT_EQ(*v, id * 100 + i); // Uncomment at your own risk
             table.release(*idx); // Now the slot is free for other threads to use
+            delete value;
             ++success;
         }
     };
@@ -481,14 +530,18 @@ TEST(BitmaskTableTest, SetEmplaceArrayMultiThread) {
 
     auto worker = [&](int id) {
         for (int i = 0; i < ops_per_thread; ++i) {
-            auto idx = table.set(std::make_shared<int>(id * 10000 + i));
+            auto* value = new int(id * 10000 + i);
+            auto idx = table.set(value);
             if (idx) {
                 // Only check that it's active and non-null, not value
                 ASSERT_TRUE(table.active(*idx));
                 auto v = table.at(*idx);
                 ASSERT_TRUE(v);
                 table.release(*idx);
+                delete value;
                 ++success;
+            } else {
+                delete value;
             }
         }
     };
@@ -582,6 +635,7 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
         thread_local std::mt19937 gen(std::random_device{}());
         std::uniform_int_distribution<int> op_dist(0, 2);
         std::vector<int> my_slots;
+        std::unordered_map<int, int*> owned_local;
 
         for (int i = 0; i < ops_per_thread; ++i) {
             int op = op_dist(gen);
@@ -591,7 +645,9 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
                 auto idx = table.acquire();
                 if (idx) {
                     ASSERT_FALSE(table.at(*idx)); // Should be empty before use
-                    ASSERT_TRUE(table.set(*idx, std::make_shared<int>(tid * 1000 + i)));
+                    auto* value = new int(tid * 1000 + i);
+                    ASSERT_TRUE(table.set(*idx, value));
+                    owned_local[*idx] = value;
                     my_slots.push_back(*idx);
                 }
             } else {
@@ -603,6 +659,11 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
                 auto v = table.at(idx_val);
                 ASSERT_TRUE(v);
                 table.release(idx_val);
+                auto it = owned_local.find(idx_val);
+                if (it != owned_local.end()) {
+                    delete it->second;
+                    owned_local.erase(it);
+                }
                 std::swap(my_slots[idx_pos], my_slots.back());
                 my_slots.pop_back();
             }
@@ -611,7 +672,12 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
         for (int idx : my_slots) {
             // ASSERT_TRUE(idx);
             table.release(idx);
+            auto it = owned_local.find(idx);
+            if (it != owned_local.end()) {
+                delete it->second;
+            }
         }
+        owned_local.clear();
     };
 
     std::vector<std::thread> pool;

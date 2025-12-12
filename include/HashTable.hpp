@@ -18,18 +18,17 @@ template<typename Key, typename T, size_t N>
             //--------------------------------------------------------------
             struct Node {
                 //--------------------------
-                Node(void) : data(nullptr), next(nullptr), prev() {
+                Node(void) : data(nullptr), next(nullptr) {
                     //--------------------------
                 }// end Node(void)
                 //--------------------------
-                Node(const Key& key_, std::shared_ptr<T> data_) : key(key_), data(data_), next(nullptr), prev() {
+                Node(const Key& key_, std::shared_ptr<T> data_) : key(key_), data(data_), next(nullptr) {
                     //--------------------------
                 }// end Node(const Key& key_, std::shared_ptr<T> data_)
                 //--------------------------
                 Key key;
                 std::atomic<std::shared_ptr<T>> data;
                 std::atomic<std::shared_ptr<Node>> next;
-                std::atomic<std::weak_ptr<Node>> prev;
                 //--------------------------
             }; // end struct Node
             //--------------------------------------------------------------
@@ -82,40 +81,57 @@ template<typename Key, typename T, size_t N>
                     return false;
                 }// end if (!data)
                 //--------------------------
-                const size_t index          = hasher(key);
-                auto new_node               = std::make_shared<Node>(key, std::move(data));
-                std::shared_ptr<Node> current  = m_table.at(index).load(std::memory_order_acquire);
+                const size_t index = hasher(key);
                 //--------------------------
-                while (current) {
-                    if (current->key == key) {
-                        return update_data(current, new_node->data);
-                    }// end if (current->key == key)
-                    current = current->next.load(std::memory_order_acquire);
-                }// end while (current)
-                //--------------------------
-                do {
-                    new_node->next.store(current, std::memory_order_release);
-                    if (current) {
-                        new_node->prev.store(current, std::memory_order_release);
-                    }
-                } while (!m_table.at(index).compare_exchange_weak(current, new_node, std::memory_order_acq_rel));
-                //--------------------------
-                // std::atomic_thread_fence(std::memory_order_release);  // Ensure visibility before deletion
-                m_size.fetch_add(1, std::memory_order_acq_rel);
-                //--------------------------
-                return true;
+                while (true) {
+                    //--------------------------
+                    std::shared_ptr<Node> head = m_table.at(index).load(std::memory_order_acquire);
+                    std::shared_ptr<Node> current = head;
+                    //--------------------------
+                    while (current) {
+                        if (current->key == key) {
+                            std::shared_ptr<T> old = current->data.exchange(data, std::memory_order_acq_rel);
+                            if (!old) {
+                                m_size.fetch_add(1UL, std::memory_order_relaxed);
+                            }// end if (!old)
+                            return true;
+                        }// end if (current->key == key)
+                        current = current->next.load(std::memory_order_acquire);
+                    }// end while (current)
+                    //--------------------------
+                    auto new_node = std::make_shared<Node>(key, data);
+                    new_node->next.store(head, std::memory_order_release);
+                    //--------------------------
+                    if (m_table.at(index).compare_exchange_weak(head, new_node,
+                                std::memory_order_acq_rel, std::memory_order_acquire)) {
+                        m_size.fetch_add(1UL, std::memory_order_relaxed);
+                        return true;
+                    }// end if (m_table.at(index).compare_exchange_weak
+                    //--------------------------
+                    // Head changed; restart and re-check for an existing key.
+                }// end while (true)
                 //--------------------------
             }// end bool insert_data(const Key& key, std::shared_ptr<T> data)
             //--------------------------
             bool update_data(const Key& key, std::shared_ptr<T> data) {
+                //--------------------------
+                if (!data) {
+                    return false;
+                }// end if (!data)
                 //--------------------------
                 const size_t index          = hasher(key);
                 std::shared_ptr<Node> head  = m_table.at(index).load(std::memory_order_acquire);
                 //--------------------------
                 while (head) {
                     if (head->key == key) {
-                        head->data.store(data, std::memory_order_release);
-                        return true;
+                        std::shared_ptr<T> expected = head->data.load(std::memory_order_acquire);
+                        while (expected) {
+                            if (head->data.compare_exchange_weak(expected, data,
+                                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+                                return true;
+                            }// end if (head->data.compare_exchange_weak
+                        }// end while (expected)
+                        return false;
                     }// end if (head->key == key)
                     head = head->next.load(std::memory_order_acquire);
                 }// end while (head)
@@ -152,30 +168,12 @@ template<typename Key, typename T, size_t N>
                 //--------------------------
                 while (current) {
                     if (current->key == key) {
-                        //--------------------------
-                        std::shared_ptr<Node> next  = current->next.load(std::memory_order_acquire);
-                        std::weak_ptr<Node> prev    = current->prev.load(std::memory_order_acquire);
-                        //--------------------------
-                        current->data.store(nullptr, std::memory_order_release);
-                        //--------------------------
-                        if (prev.expired()) {
-                            do {
-                                // Retry until successful
-                            } while (!m_table.at(index).compare_exchange_weak(current, next, std::memory_order_acq_rel));
-                        } else {
-                            std::shared_ptr<Node> prev_node = prev.lock();
-                            if (prev_node) {
-                                static_cast<void>(prev_node->next.compare_exchange_weak(current, next, std::memory_order_acq_rel));
-                            }// end if (prev_node)
-                        }// end if (prev.expired())
-                        //--------------------------
-                        if (next) {
-                            next->prev.store(prev, std::memory_order_release);
-                        }// end if (next)
-                        //--------------------------
-                        safe_decrement_size();
-                        return true;
-                        //--------------------------
+                        std::shared_ptr<T> old = current->data.exchange(nullptr, std::memory_order_acq_rel);
+                        if (old) {
+                            safe_decrement_size();
+                            return true;
+                        }// end if (old)
+                        return false;
                     }// end if (current->key == key)
                     current = current->next.load(std::memory_order_acquire);
                 }// end while (current)
@@ -201,7 +199,8 @@ template<typename Key, typename T, size_t N>
                         //--------------------------
                         std::shared_ptr<Node> next = head->next.load(std::memory_order_acquire);
                         //--------------------------
-                        if (is_hazard(head->data.load(std::memory_order_acquire))) {
+                        std::shared_ptr<T> data = head->data.load(std::memory_order_acquire);
+                        if (data and is_hazard(data)) {
                             static_cast<void>(remove_data(head->key));
                         }// end if (!is_hazard(head->data.load(std::memory_order_acquire)))
                         //--------------------------

@@ -2,8 +2,8 @@
 //--------------------------------------------------------------
 // Standard C++ library
 //--------------------------------------------------------------
-#include <memory>
 #include <functional>
+#include <memory>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -16,25 +16,58 @@ namespace HazardSystem {
         //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
-            ProtectedPointer(void) = default;
-            //--------------------------
-            ProtectedPointer(   std::shared_ptr<T>&& protected_pointer,
-                                std::function<bool(void)>&& release) :  m_protected_pointer(std::move(protected_pointer)),
-                                                                        m_release(std::move(release)) {
+            ProtectedPointer(void) :    m_protected_pointer(nullptr),
+                                        m_release(nullptr),
+                                        m_owner(nullptr) {
                 //--------------------------
-            }// end ProtectedPointer
-            //--------------------------
-            ProtectedPointer(ProtectedPointer&& other) noexcept             = default;
-            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept  = default;
-            ProtectedPointer(const ProtectedPointer&)                       = delete;
-            ProtectedPointer& operator=(const ProtectedPointer&)            = delete;
+            }// end ProtectedPointer(void)
             //--------------------------
             ~ProtectedPointer(void) noexcept {
                 static_cast<void>(release_data());
             }// end ~ProtectedPointer(void)
             //--------------------------
+            ProtectedPointer(   T* protected_pointer,
+                                std::function<bool(void)>&& release,
+                                std::shared_ptr<T> owner = nullptr) :   m_protected_pointer(protected_pointer),
+                                                                        m_release(std::move(release)),
+                                                                        m_owner(std::move(owner)) {
+                //--------------------------
+            }// end ProtectedPointer
+            //--------------------------
+            ProtectedPointer(ProtectedPointer&& other) noexcept :   m_protected_pointer(other.m_protected_pointer),
+                                                                    m_release(std::move(other.m_release)),
+                                                                    m_owner(std::move(other.m_owner)){
+                //--------------------------
+                other.m_protected_pointer = nullptr;
+                other.m_release = nullptr;
+                other.m_owner.reset();
+                //--------------------------
+            }// end ProtectedPointer(ProtectedPointer&& other) noexcept
+            //--------------------------
+            ProtectedPointer& operator=(ProtectedPointer&& other) noexcept {
+                //--------------------------
+                if (this == &other) {
+                    return *this;
+                }// end if (this == &other)
+                //--------------------------
+                static_cast<void>(release_data());
+                //--------------------------
+                m_protected_pointer   = other.m_protected_pointer;
+                m_release             = std::move(other.m_release);
+                m_owner               = std::move(other.m_owner);
+                //--------------------------
+                other.m_protected_pointer = nullptr;
+                other.m_release = nullptr;
+                other.m_owner.reset();
+                //--------------------------
+                return *this;
+            }// end ProtectedPointer& operator=(ProtectedPointer&& other) noexcept
+            //--------------------------
+            ProtectedPointer(const ProtectedPointer&)                       = delete;
+            ProtectedPointer& operator=(const ProtectedPointer&)            = delete;
+            //--------------------------
             T* operator->(void) const noexcept {
-                return m_protected_pointer.get();
+                return m_protected_pointer;
             }// end T* operator->(void) const noexcept
             //--------------------------
             T& operator*(void) const noexcept {
@@ -42,15 +75,21 @@ namespace HazardSystem {
             }// end T& operator*(void) const noexcept
             //--------------------------
             T* get(void) const noexcept {
-                return m_protected_pointer.get();
+                return m_protected_pointer;
             }// end T* get(void) const noexcept
             //--------------------------
             explicit operator bool(void) const noexcept {
-                return !!m_protected_pointer;
+                return m_protected_pointer != nullptr;
             }// end explicit operator bool(void) const noexcept
             //--------------------------
             std::shared_ptr<T> shared_ptr(void) const {
-                return m_protected_pointer;
+                //--------------------------
+                if (m_owner) {
+                    return m_owner;
+                }// end if (m_owner)
+                //--------------------------
+                return m_protected_pointer ? std::shared_ptr<T>(m_protected_pointer, [](T*){}) : nullptr;
+                //--------------------------
             }// end std::shared_ptr<T> shared_ptr(void) const
             //--------------------------
             bool reset(void) noexcept {
@@ -65,20 +104,19 @@ namespace HazardSystem {
                     return false;
                 }// end if(!m_protected_pointer or !m_release)
                 //--------------------------
-                if (m_release) {
-                    m_release();
-                }// end if (m_release)
+                const bool released = m_release();
+                m_protected_pointer = nullptr;
+                m_owner.reset();
                 //--------------------------
-                m_protected_pointer.reset();
-                //--------------------------
-                return true;
+                return released;
                 //--------------------------
             }// end void release_data(void)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            std::shared_ptr<T> m_protected_pointer;
+            T* m_protected_pointer;
             std::function<bool(void)> m_release;
+            std::shared_ptr<T> m_owner;
         //--------------------------------------------------------------
     };// end class ProtectedPointer
     //--------------------------------------------------------------

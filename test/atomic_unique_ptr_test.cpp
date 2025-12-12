@@ -53,13 +53,14 @@ TEST_F(AtomicUniquePtrTest, SingleThread_CompareExchangeTest) {
 
     // Expected value is the current pointer value
     int* expected = atomic_ptr.load();
+    int* old_ptr  = expected;
     int* new_value = new int(100);
 
     // Use compare_exchange_strong to swap the pointer
     bool success = atomic_ptr.compare_exchange_strong(expected, new_value);
     ASSERT_TRUE(success);
     ASSERT_EQ(*atomic_ptr, 100);
-    ASSERT_EQ(expected, new_value);  // Expected is now the old pointer
+    ASSERT_EQ(expected, old_ptr);  // Expected now holds the old pointer
 
     delete expected;  // Clean up old value
 
@@ -100,7 +101,11 @@ TEST_F(AtomicUniquePtrTest, MultiThread_ResetAndReleaseTest) {
     t1.join();
     t2.join();
 
-    // Ensure the pointer is null at the end
+    // Ensure the pointer is null at the end (drain any remaining value)
+    int* remaining = atomic_ptr.release();
+    if (remaining) {
+        delete remaining;
+    }
     ASSERT_EQ(atomic_ptr.load(), nullptr);
 }
 
@@ -158,15 +163,75 @@ TEST_F(AtomicUniquePtrTest, MultiThread_CompareExchangeStrongTest) {
     ASSERT_NE(atomic_ptr.load(), nullptr);
 }
 
+// Test case 14: Protect returns nullptr when empty and valid when set
+TEST_F(AtomicUniquePtrTest, ProtectBehavior) {
+    atomic_unique_ptr<int> atomic_ptr;
+    {
+        auto protected_null = atomic_ptr.protect();
+        ASSERT_FALSE(protected_null);
+    }
+
+    atomic_ptr.reset(new int(7));
+    {
+        auto protected_ptr = atomic_ptr.protect();
+        ASSERT_TRUE(protected_ptr);
+        ASSERT_EQ(*protected_ptr, 7);
+    }
+    int* remaining = atomic_ptr.release();
+    delete remaining;
+}
+
+// Test case 15: CompareExchangeWeak updates expected on failure
+TEST_F(AtomicUniquePtrTest, CompareExchangeWeakUpdatesExpectedOnFailure) {
+    atomic_unique_ptr<int> atomic_ptr(new int(1));
+    int* wrong = new int(999); // wrong expected
+    int* expected = wrong;
+    int* desired = new int(2);
+
+    bool success = atomic_ptr.compare_exchange_weak(expected, desired);
+    ASSERT_FALSE(success);
+    ASSERT_EQ(*atomic_ptr, 1);
+    ASSERT_EQ(*expected, 1); // expected updated to current
+
+    delete desired;
+    delete wrong;
+    int* remaining = atomic_ptr.release();
+    delete remaining;
+}
+
+// Test case 16: Swap with nullptr destination
+TEST_F(AtomicUniquePtrTest, SwapWithNullptr) {
+    atomic_unique_ptr<int> atomic_ptr(new int(5));
+    atomic_unique_ptr<int> empty_ptr;
+
+    atomic_ptr.swap(empty_ptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+    ASSERT_NE(empty_ptr.load(), nullptr);
+    ASSERT_EQ(*empty_ptr, 5);
+
+    int* remaining = empty_ptr.release();
+    delete remaining;
+}
+
+// Test case 17: Release on empty is idempotent
+TEST_F(AtomicUniquePtrTest, ReleaseOnEmptyIsIdempotent) {
+    atomic_unique_ptr<int> atomic_ptr;
+    ASSERT_EQ(atomic_ptr.release(), nullptr);
+    ASSERT_EQ(atomic_ptr.release(), nullptr);
+}
+
 // Test case 6: Multithreaded transfer test
 TEST_F(AtomicUniquePtrTest, MultiThread_TransferTest) {
     atomic_unique_ptr<int> atomic_ptr(new int(42));
-    std::shared_ptr<int> shared_ptr;
+    std::atomic<bool> transferred{false};
 
     auto thread_func = [&]() {
-        // Try to transfer ownership to shared_ptr
-        if (atomic_ptr.transfer(shared_ptr)) {
-            ASSERT_EQ(*shared_ptr, 42);
+        // Each thread uses its own destination to avoid races on shared_ptr.
+        std::shared_ptr<int> local;
+        if (atomic_ptr.transfer(local)) {
+            ASSERT_NE(local, nullptr);
+            ASSERT_EQ(*local, 42);
+            transferred.store(true, std::memory_order_release);
         }
     };
 
@@ -177,8 +242,7 @@ TEST_F(AtomicUniquePtrTest, MultiThread_TransferTest) {
     t1.join();
     t2.join();
 
-    ASSERT_NE(shared_ptr, nullptr);  // Ensure the shared_ptr is not null
-    ASSERT_EQ(*shared_ptr, 42);      // Ensure the value transferred correctly
+    ASSERT_TRUE(transferred.load(std::memory_order_acquire));
 }
 
 // Test case 7: Stress test with concurrent operations
@@ -216,7 +280,11 @@ TEST_F(AtomicUniquePtrTest, MultiThread_StressTest) {
     t2.join();
     t3.join();
 
-    // Ensure no crashes and the final pointer state is valid
+    // Ensure no crashes and clean up any remaining pointer state
+    int* remaining = atomic_ptr.release();
+    if (remaining) {
+        delete remaining;
+    }
     ASSERT_EQ(atomic_ptr.load(), nullptr);
 }
 
@@ -239,7 +307,8 @@ TEST_F(AtomicUniquePtrTest, DoubleReleaseTest) {
 
     // First release should return the pointer
     int* released_value = atomic_ptr.release();
-    ASSERT_EQ(released_value, new int(42));
+    ASSERT_NE(released_value, nullptr);
+    ASSERT_EQ(*released_value, 42);
     ASSERT_EQ(atomic_ptr.load(), nullptr);
 
     // Second release should return nullptr since it was already released
@@ -252,7 +321,8 @@ TEST_F(AtomicUniquePtrTest, DoubleReleaseTest) {
 TEST_F(AtomicUniquePtrTest, CompareExchangeFailureTest) {
     atomic_unique_ptr<int> atomic_ptr(new int(42));
 
-    int* expected = new int(100);  // Incorrect expected value
+    int* wrong_expected = new int(100);  // Incorrect expected value
+    int* expected = wrong_expected;
     int* new_value = new int(200);
 
     // Compare exchange should fail because expected is incorrect
@@ -262,7 +332,7 @@ TEST_F(AtomicUniquePtrTest, CompareExchangeFailureTest) {
     // Ensure the original pointer value remains the same
     ASSERT_EQ(*atomic_ptr, 42);
 
-    delete expected;
+    delete wrong_expected;
     delete new_value;
 }
 
@@ -323,14 +393,38 @@ TEST_F(AtomicUniquePtrTest, ConcurrentCompareExchangeWeakTest) {
 }
 
 // Test case 13: Shared ownership transfer failure test
-TEST_F(AtomicUniquePtrTest, TransferOwnershipFailureTest) {
+TEST_F(AtomicUniquePtrTest, TransferOwnershipToEmptySharedPtr) {
     atomic_unique_ptr<int> atomic_ptr(new int(42));
     std::shared_ptr<int> null_shared_ptr;
 
-    // Attempt to transfer ownership to a null shared_ptr
+    // Attempt to transfer ownership to an empty shared_ptr
     bool result = atomic_ptr.transfer(null_shared_ptr);
 
-    // Ensure transfer failed and atomic_ptr still owns the object
+    ASSERT_TRUE(result);
+    ASSERT_NE(null_shared_ptr, nullptr);
+    ASSERT_EQ(*null_shared_ptr, 42);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
+}
+
+TEST_F(AtomicUniquePtrTest, TransferOwnershipFailsWhenDestinationHasValue) {
+    atomic_unique_ptr<int> atomic_ptr(new int(42));
+    std::shared_ptr<int> target = std::make_shared<int>(99);
+
+    bool result = atomic_ptr.transfer(target);
+
     ASSERT_FALSE(result);
-    ASSERT_EQ(*atomic_ptr, 42);
+    ASSERT_NE(target, nullptr);
+    ASSERT_EQ(*target, 99);
+    ASSERT_NE(atomic_ptr.load(), nullptr);
+}
+
+TEST_F(AtomicUniquePtrTest, TransferOwnershipFailsWhenAtomicEmpty) {
+    atomic_unique_ptr<int> atomic_ptr(nullptr);
+    std::shared_ptr<int> target;
+
+    bool result = atomic_ptr.transfer(target);
+
+    ASSERT_FALSE(result);
+    ASSERT_EQ(target, nullptr);
+    ASSERT_EQ(atomic_ptr.load(), nullptr);
 }

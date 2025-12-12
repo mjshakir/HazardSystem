@@ -48,7 +48,7 @@ public:
 // Acquire + set + release cycle to probe bitmask allocation cost
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state) {
     const size_t batch = static_cast<size_t>(state.range(0));
-    auto payload = std::make_shared<BenchmarkTestData>(42);
+    auto payload = std::make_unique<BenchmarkTestData>(42);
     std::vector<FixedTable::IndexType> held;
     held.reserve(table.capacity());
 
@@ -56,7 +56,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state)
         auto idx = table.acquire();
         benchmark::DoNotOptimize(idx);
         if (idx) {
-            table.set(idx.value(), payload);
+            table.set(idx.value(), payload.get());
             held.push_back(idx.value());
         }
 
@@ -79,20 +79,23 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state)
 // Iterate over active hazards and touch payloads to simulate reads
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, IterateActive)(benchmark::State& state) {
     const size_t to_fill = static_cast<size_t>(std::min<int64_t>(state.range(0), table.capacity()));
+    std::vector<std::unique_ptr<BenchmarkTestData>> owned;
+    owned.reserve(table.capacity());
 
     for (auto _ : state) {
         state.PauseTiming();
         table.clear();
+        owned.clear();
         for (size_t i = 0; i < to_fill; ++i) {
-            auto idx = table.emplace(static_cast<int>(i));
-            if (!idx) {
-                break;
-            }
+            auto idx = table.acquire();
+            if (!idx) break;
+            owned.emplace_back(std::make_unique<BenchmarkTestData>(static_cast<int>(i)));
+            table.set(idx.value(), owned.back().get());
         }
         state.ResumeTiming();
 
         size_t visited = 0;
-        table.for_each_fast([&](FixedTable::IndexType, std::shared_ptr<BenchmarkTestData>& ptr) {
+        table.for_each_fast([&](FixedTable::IndexType, BenchmarkTestData* ptr) {
             benchmark::DoNotOptimize(ptr);
             ptr->work();
             ++visited;
@@ -106,7 +109,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, IterateActive)(benchmark::State& state) 
 
 // Clear all hazard slots and bitmask state
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
-    auto payload = std::make_shared<BenchmarkTestData>(7);
+    auto payload = std::make_unique<BenchmarkTestData>(7);
 
     for (auto _ : state) {
         state.PauseTiming();
@@ -116,7 +119,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
             if (!idx) {
                 break;
             }
-            table.set(idx.value(), payload);
+            table.set(idx.value(), payload.get());
         }
         state.ResumeTiming();
 
@@ -130,7 +133,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
 
 // Exercise acquire_iterator + set(iterator) path
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& state) {
-    auto payload = std::make_shared<BenchmarkTestData>(3);
+    auto payload = std::make_unique<BenchmarkTestData>(3);
 
     for (auto _ : state) {
         auto it = table.acquire_iterator();
@@ -138,7 +141,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& st
         if (!it) {
             continue;
         }
-        table.set(it.value(), payload);
+        table.set(it.value(), payload.get());
         const auto index = static_cast<FixedTable::IndexType>(it.value() - table.begin());
         table.release(index);
     }
@@ -150,14 +153,17 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& st
 // Active/at checks on a prefilled table
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
     const size_t fill_count = static_cast<size_t>(std::min<int64_t>(state.range(0), table.capacity()));
+    std::vector<std::unique_ptr<BenchmarkTestData>> owned;
+    owned.reserve(table.capacity());
     for (auto _ : state) {
         state.PauseTiming();
         table.clear();
+        owned.clear();
         for (size_t i = 0; i < fill_count; ++i) {
-            auto idx = table.emplace(static_cast<int>(i));
-            if (!idx) {
-                break;
-            }
+            auto idx = table.acquire();
+            if (!idx) break;
+            owned.emplace_back(std::make_unique<BenchmarkTestData>(static_cast<int>(i)));
+            table.set(idx.value(), owned.back().get());
         }
         state.ResumeTiming();
 
@@ -165,8 +171,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
         for (size_t i = 0; i < table.capacity(); ++i) {
             const bool active = table.active(static_cast<FixedTable::IndexType>(i));
             if (active) {
-                auto sp = table.at(static_cast<FixedTable::IndexType>(i));
-                benchmark::DoNotOptimize(sp);
+                auto ptr = table.at(static_cast<FixedTable::IndexType>(i));
+                benchmark::DoNotOptimize(ptr);
                 ++hits;
             }
         }
@@ -180,20 +186,24 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
 // Find with predicate scanning through active slots
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, FindPredicate)(benchmark::State& state) {
     constexpr int target_seed = 777;
+    std::vector<std::unique_ptr<BenchmarkTestData>> owned;
+    owned.reserve(table.capacity());
 
     for (auto _ : state) {
         state.PauseTiming();
         table.clear();
+        owned.clear();
         // Fill all slots; place a unique seed in the last slot to force scanning
         for (size_t i = 0; i < table.capacity(); ++i) {
-            auto idx = table.emplace(static_cast<int>(i == table.capacity() - 1 ? target_seed : static_cast<int>(i)));
-            if (!idx) {
-                break;
-            }
+            auto idx = table.acquire();
+            if (!idx) break;
+            const int seed = static_cast<int>(i == table.capacity() - 1 ? target_seed : static_cast<int>(i));
+            owned.emplace_back(std::make_unique<BenchmarkTestData>(seed));
+            table.set(idx.value(), owned.back().get());
         }
         state.ResumeTiming();
 
-        const bool found = table.find([&](const std::shared_ptr<BenchmarkTestData>& ptr) {
+        const bool found = table.find([&](const BenchmarkTestData* ptr) {
             return ptr && ptr->data.front() == target_seed;
         });
         benchmark::DoNotOptimize(found);
@@ -205,11 +215,13 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, FindPredicate)(benchmark::State& state) 
 
 // Emplace with return pair then release to keep table available
 BENCHMARK_DEFINE_F(BitmaskFixedFixture, EmplaceReturn)(benchmark::State& state) {
+    BenchmarkTestData payload(9);
     for (auto _ : state) {
-        auto res = table.emplace_return(9);
-        benchmark::DoNotOptimize(res);
-        if (res) {
-            table.release(res->first);
+        auto idx = table.acquire();
+        benchmark::DoNotOptimize(idx);
+        if (idx) {
+            table.set(idx.value(), &payload);
+            table.release(idx.value());
         }
     }
 

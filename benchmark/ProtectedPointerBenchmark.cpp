@@ -20,12 +20,14 @@ static void BM_ProtectedPointerLifecycle(benchmark::State& state) {
 
     for (auto _ : state) {
         for (size_t i = 0; i < ops; ++i) {
+            auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
             ProtectedPointer<BenchmarkTestData> guard(
-                std::make_shared<BenchmarkTestData>(static_cast<int>(i)),
+                data.get(),
                 [&]() noexcept {
                     releases.fetch_add(1, std::memory_order_relaxed);
                     return true;
-                });
+                },
+                data);
             benchmark::DoNotOptimize(guard);
             guard.reset();
         }
@@ -43,12 +45,14 @@ static void BM_ProtectedPointerMove(benchmark::State& state) {
 
     for (auto _ : state) {
         for (size_t i = 0; i < ops; ++i) {
+            auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
             ProtectedPointer<BenchmarkTestData> src(
-                std::make_shared<BenchmarkTestData>(static_cast<int>(i)),
+                data.get(),
                 [&]() noexcept {
                     releases.fetch_add(1, std::memory_order_relaxed);
                     return true;
-                });
+                },
+                data);
             ProtectedPointer<BenchmarkTestData> dst(std::move(src));
             benchmark::DoNotOptimize(dst);
         }
@@ -66,9 +70,11 @@ static void BM_ProtectedPointerAccess(benchmark::State& state) {
 
     for (auto _ : state) {
         for (size_t i = 0; i < ops; ++i) {
+            auto data = std::make_shared<BenchmarkTestData>(static_cast<int>(i));
             ProtectedPointer<BenchmarkTestData> guard(
-                std::make_shared<BenchmarkTestData>(static_cast<int>(i)),
-                [&]() noexcept { return true; });
+                data.get(),
+                [&]() noexcept { return true; },
+                data);
 
             if (guard) {
                 guard->touch();
