@@ -1,5 +1,10 @@
 # Ignore the build directory
 build/
+build*/
 
 # Ignore macOS system files
 .DS_Store
+
+# Ignore logs:
+logs/
+

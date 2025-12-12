@@ -16,6 +16,8 @@
 #include <utility>
 #include <cmath>
 #include <functional>
+#include <sstream>
+#include <cstdio>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -307,6 +309,25 @@ namespace HazardSystem {
                     }// end while (mask != ~0ULL)
                 }// end for (uint16_t part = 0; part < get_mask_count(); ++part) 
                 //--------------------------
+                if (m_debug_once.test_and_set(std::memory_order_relaxed) == false) {
+                    // One-shot diagnostic when acquisition fails.
+                    // Do NOT attempt to reset shared state here; other threads may hold slots.
+                    const auto current_size = m_size.load(std::memory_order_acquire);
+                    std::ostringstream oss;
+                    oss << "[bitmask] acquire_data failed "
+                        << "cap=" << _capacity
+                        << " masks=" << _mask_count
+                        << " hint=" << start_part
+                        << " size=" << current_size
+                        << " bits=[";
+                    for (IndexType p = 0; p < _mask_count; ++p) {
+                        oss << std::hex << m_bitmask.at(p).load(std::memory_order_acquire) << std::dec;
+                        if (p + 1 < _mask_count) oss << ",";
+                    }
+                    oss << "]";
+                    std::fprintf(stderr, "%s\n", oss.str().c_str());
+                    std::fflush(stderr);
+                }
                 return std::nullopt;
                 //--------------------------
             }// end std::enable_if_t<(M == 0) or (M > 64), std::optional<IndexType>> acquire_data(void)
@@ -802,6 +823,8 @@ namespace HazardSystem {
             BitmaskType m_bitmask;
             //--------------------------      
             std::optional<bool> m_initialized;
+            //--------------------------
+            mutable std::atomic_flag m_debug_once = ATOMIC_FLAG_INIT;
         //--------------------------------------------------------------
     };// end class BitmaskTable
     //--------------------------------------------------------------

@@ -49,13 +49,15 @@ TEST(HazardRegistryTest, SnapshotIgnoresTombstones) {
 }
 
 TEST(HazardRegistryTest, CapacityOverflowFails) {
-    // Requested 1 => internal capacity bit-ceil((1*2)) = 2 slots
+    // Requested 1 => internal capacity bit-ceil((1*4)) = 4 slots
     HazardRegistry<int> registry(1);
-    int a = 1, b = 2, c = 3;
+    int a = 1, b = 2, c = 3, d = 4, e = 5;
 
     ASSERT_TRUE(registry.add(&a));
     ASSERT_TRUE(registry.add(&b));
-    EXPECT_FALSE(registry.add(&c)); // no space left
+    ASSERT_TRUE(registry.add(&c));
+    ASSERT_TRUE(registry.add(&d));
+    EXPECT_FALSE(registry.add(&e)); // no space left
 }
 
 TEST(HazardRegistryTest, HeavyLoadProbeChains) {

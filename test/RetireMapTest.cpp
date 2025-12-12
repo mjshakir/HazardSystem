@@ -123,15 +123,24 @@ TEST(RetireMapTest, ResizeIncreasesThreshold) {
     EXPECT_TRUE(s.resize(128));
     EXPECT_GE(s.size(), 0u);
     for (int i = 0; i < 120; ++i) {
-        EXPECT_TRUE(s.retire(new Dummy(i)));
+        auto* ptr = new Dummy(i);
+        const bool ok = s.retire(ptr);
+        if (!ok) {
+            delete ptr;
+        }
+        EXPECT_TRUE(ok);
     }
     EXPECT_GE(s.size(), 120u);
 }
 
 TEST(RetireMapTest, ResizeFailsOnShrink) {
     RetireMap<Dummy> s(8, always_hazard);
-    for (int i = 0; i < 16; ++i)
-        s.retire(new Dummy(i));
+    for (int i = 0; i < 16; ++i) {
+        auto* ptr = new Dummy(i);
+        if (!s.retire(ptr)) {
+            delete ptr;
+        }
+    }
     EXPECT_FALSE(s.resize(4)); // too small
     EXPECT_LE(s.size(), 16u);
 }

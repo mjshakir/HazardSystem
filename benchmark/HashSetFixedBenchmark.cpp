@@ -7,29 +7,30 @@
 
 using namespace HazardSystem;
 
-class HashSetFixture : public benchmark::Fixture {
+class HashSetFixedFixture : public benchmark::Fixture {
 public:
-    void SetUp(const ::benchmark::State& state) override {
-        capacity = static_cast<size_t>(state.range(0));
-        set = std::make_unique<HashSet<int>>(capacity);
+    static constexpr size_t kFixedCapacity = 8192;
+
+    void SetUp(const ::benchmark::State&) override {
+        set = std::make_unique<HashSet<int, kFixedCapacity>>();
     }
 
     void TearDown(const ::benchmark::State&) override {
         set.reset();
     }
 
-    size_t capacity{};
-    std::unique_ptr<HashSet<int>> set;
+    std::unique_ptr<HashSet<int, kFixedCapacity>> set;
 };
 
 // Insert a batch of unique keys
-BENCHMARK_DEFINE_F(HashSetFixture, Insert)(benchmark::State& state) {
-    const size_t baseline = capacity / 2;
+BENCHMARK_DEFINE_F(HashSetFixedFixture, Insert)(benchmark::State& state) {
+    const size_t workload = static_cast<size_t>(state.range(0));
+    const size_t baseline = workload / 2;
     set->clear();
     for (size_t i = 0; i < baseline; ++i) {
         set->insert(static_cast<int>(i));
     }
-    int next_key = static_cast<int>(capacity);
+    int next_key = static_cast<int>(workload);
 
     for (auto _ : state) {
         const bool ok = set->insert(next_key);
@@ -41,27 +42,28 @@ BENCHMARK_DEFINE_F(HashSetFixture, Insert)(benchmark::State& state) {
         state.PauseTiming();
         set->remove(next_key);
         ++next_key;
-        if (static_cast<size_t>(next_key) >= capacity * 4) {
-            next_key = static_cast<int>(capacity);
+        if (static_cast<size_t>(next_key) >= workload * 4) {
+            next_key = static_cast<int>(workload);
         }
         state.ResumeTiming();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(workload);
     state.SetItemsProcessed(state.iterations());
 }
 
 // Lookup all keys after a full insert
-BENCHMARK_DEFINE_F(HashSetFixture, Contains)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(HashSetFixedFixture, Contains)(benchmark::State& state) {
+    const size_t workload = static_cast<size_t>(state.range(0));
     set->clear();
     std::vector<int> queries;
-    queries.reserve(capacity * 2);
-    for (size_t i = 0; i < capacity; ++i) {
+    queries.reserve(workload * 2);
+    for (size_t i = 0; i < workload; ++i) {
         set->insert(static_cast<int>(i));
         queries.push_back(static_cast<int>(i)); // present
     }
-    for (size_t i = 0; i < capacity; ++i) {
-        queries.push_back(static_cast<int>(capacity * 2 + i)); // miss
+    for (size_t i = 0; i < workload; ++i) {
+        queries.push_back(static_cast<int>(workload * 2 + i)); // miss
     }
     size_t idx = 0;
 
@@ -70,15 +72,16 @@ BENCHMARK_DEFINE_F(HashSetFixture, Contains)(benchmark::State& state) {
         idx = (idx + 1) % queries.size();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(workload);
     state.SetItemsProcessed(state.iterations());
 }
 
 // Remove all keys after a full insert
-BENCHMARK_DEFINE_F(HashSetFixture, Remove)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(HashSetFixedFixture, Remove)(benchmark::State& state) {
+    const size_t workload = static_cast<size_t>(state.range(0));
     set->clear();
-    std::vector<int> keys(capacity);
-    for (size_t i = 0; i < capacity; ++i) {
+    std::vector<int> keys(workload);
+    for (size_t i = 0; i < workload; ++i) {
         keys[i] = static_cast<int>(i);
         set->insert(keys[i]);
     }
@@ -93,16 +96,17 @@ BENCHMARK_DEFINE_F(HashSetFixture, Remove)(benchmark::State& state) {
         idx = (idx + 1) % keys.size();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(workload);
     state.SetItemsProcessed(state.iterations());
 }
 
 // Traverse active buckets via for_each_fast
-BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(HashSetFixedFixture, Iterate)(benchmark::State& state) {
+    const size_t workload = static_cast<size_t>(state.range(0));
     for (auto _ : state) {
         state.PauseTiming();
         set->clear();
-        for (size_t i = 0; i < capacity; ++i) {
+        for (size_t i = 0; i < workload; ++i) {
             set->insert(static_cast<int>(i));
         }
         state.ResumeTiming();
@@ -115,18 +119,19 @@ BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(capacity);
-    state.SetItemsProcessed(state.iterations() * capacity);
+    state.SetComplexityN(workload);
+    state.SetItemsProcessed(state.iterations() * workload);
 }
 
 // Reclaim removes non-hazard values based on predicate
-BENCHMARK_DEFINE_F(HashSetFixture, Reclaim)(benchmark::State& state) {
-    const size_t hazard_stride = std::max<size_t>(1, capacity / 8);
+BENCHMARK_DEFINE_F(HashSetFixedFixture, Reclaim)(benchmark::State& state) {
+    const size_t workload = static_cast<size_t>(state.range(0));
+    const size_t hazard_stride = std::max<size_t>(1, workload / 8);
 
     for (auto _ : state) {
         state.PauseTiming();
         set->clear();
-        for (size_t i = 0; i < capacity; ++i) {
+        for (size_t i = 0; i < workload; ++i) {
             set->insert(static_cast<int>(i));
         }
         state.ResumeTiming();
@@ -138,31 +143,31 @@ BENCHMARK_DEFINE_F(HashSetFixture, Reclaim)(benchmark::State& state) {
         benchmark::DoNotOptimize(set->size());
     }
 
-    state.SetComplexityN(capacity);
-    state.SetItemsProcessed(state.iterations() * capacity);
+    state.SetComplexityN(workload);
+    state.SetItemsProcessed(state.iterations() * workload);
 }
 
-BENCHMARK_REGISTER_F(HashSetFixture, Insert)
+BENCHMARK_REGISTER_F(HashSetFixedFixture, Insert)
     ->RangeMultiplier(2)
     ->Range(128, 4096)
     ->Complexity(benchmark::o1);
 
-BENCHMARK_REGISTER_F(HashSetFixture, Contains)
+BENCHMARK_REGISTER_F(HashSetFixedFixture, Contains)
     ->RangeMultiplier(2)
     ->Range(128, 4096)
     ->Complexity(benchmark::o1);
 
-BENCHMARK_REGISTER_F(HashSetFixture, Remove)
+BENCHMARK_REGISTER_F(HashSetFixedFixture, Remove)
     ->RangeMultiplier(2)
     ->Range(128, 4096)
     ->Complexity(benchmark::o1);
 
-BENCHMARK_REGISTER_F(HashSetFixture, Iterate)
+BENCHMARK_REGISTER_F(HashSetFixedFixture, Iterate)
     ->RangeMultiplier(2)
     ->Range(128, 4096)
     ->Complexity(benchmark::oN);
 
-BENCHMARK_REGISTER_F(HashSetFixture, Reclaim)
+BENCHMARK_REGISTER_F(HashSetFixedFixture, Reclaim)
     ->RangeMultiplier(2)
     ->Range(128, 4096)
     ->Complexity(benchmark::oN);
@@ -173,8 +178,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "=== HashSet Benchmark ===\n";
-    std::cout << "Exercises insert/lookup/remove/traversal/reclaim across capacities.\n\n";
+    std::cout << "=== HashSet Fixed Benchmark ===\n";
+    std::cout << "Exercises insert/lookup/remove/traversal/reclaim on fixed-capacity table.\n\n";
 
     ::benchmark::RunSpecifiedBenchmarks();
     ::benchmark::Shutdown();

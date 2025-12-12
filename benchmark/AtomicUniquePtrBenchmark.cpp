@@ -106,12 +106,15 @@ static void BM_CAS_Fail(benchmark::State& state) {
             int* wrong_expected = new int(999);
             int* desired = new int(1);
             int* expected = wrong_expected;
-            if (!ptr.compare_exchange_weak(expected, desired, std::memory_order_relaxed)) {
-                delete desired;
+            const bool exchanged = ptr.compare_exchange_weak(expected, desired, std::memory_order_relaxed);
+            if (exchanged) {
+                delete expected; // delete the old value that was replaced
             } else {
-                delete expected;
+                delete desired; // CAS failed; desired was not used
             }
-            delete wrong_expected;
+            if (!exchanged || expected != wrong_expected) {
+                delete wrong_expected; // ensure we don't double-delete if expected was wrong_expected
+            }
         }
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
@@ -160,8 +163,7 @@ static void BM_MultiThreaded_ResetRelease(benchmark::State& state) {
         });
         std::thread t2([&] {
             for (size_t i = 0; i < ops; ++i) {
-                auto old = ptr.release(std::memory_order_relaxed);
-                delete old;
+                ptr.reset(nullptr, std::memory_order_relaxed);
             }
         });
         t1.join();

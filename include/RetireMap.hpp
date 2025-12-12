@@ -171,7 +171,10 @@ namespace HazardSystem {
                 if (!owner) {
                     return false;
                 }
-                return retire_data(owner.get(), Deleter(std::move(owner)));
+                // Argument evaluation order is unspecified, so capture the raw pointer
+                // before moving the shared_ptr into the deleter.
+                T* ptr = owner.get();
+                return retire_data(ptr, Deleter(std::move(owner)));
             }// end bool retire_shared(std::shared_ptr<T>&& owner)
             //--------------------------
             std::optional<size_t> scan_and_reclaim(void) {
