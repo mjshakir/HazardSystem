@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86]
+        variant: [release, asan-ubsan, tsan]
 
     runs-on: ubuntu-latest
 
@@ -16,54 +16,88 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install -y libgtest-dev libgmock-dev libbenchmark-dev cmake
+      run: sudo apt-get update && sudo apt-get install -y libgtest-dev libgmock-dev libbenchmark-dev cmake clang
 
     - name: Setup CMake and Ninja
       uses: lukka/get-cmake@v4.2.0
 
-    - name: Check GCC Version
-      run: g++ --version
+    - name: Check compiler versions
+      run: |
+        g++ --version
+        clang++ --version
 
     - name: Create build directory
       run: mkdir build
 
-    - name: Configure CMake
+    - name: Configure CMake (Release)
+      if: matrix.variant == 'release'
       run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
+    - name: Configure CMake (ASAN/UBSAN)
+      if: matrix.variant == 'asan-ubsan'
+      run: >
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
+        -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+        -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+
+    - name: Configure CMake (TSAN)
+      if: matrix.variant == 'tsan'
+      run: >
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
+        -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer'
+        -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread'
+
     - name: Build
-      run: cmake --build build --config Release
+      run: cmake --build build
 
     - name: Probe hazard protect path first
       working-directory: build
       run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure
 
-    - name: Test
+    - name: Test (no benchmarks)
       working-directory: build
       run: ctest -LE benchmark --output-on-failure
 
+    - name: Stress tests (repeat suite)
+      if: matrix.variant == 'release'
+      working-directory: build
+      run: ctest -LE benchmark --output-on-failure --repeat until-fail:20
+
     - name: Run HashTable Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_HashTable_Benchmark
 
     - name: Run Static HazardSystem Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_Fixed_Benchmark
   
     - name: Run Dynamic HazardSystem Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_Dynamic_Benchmark
     
     - name: Run Static Bitmask Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_BitmaskTable_Fixed_Benchmark
 
     - name: Run Dynamic Bitmask Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_BitmaskTable_Dynamic_Benchmark
 
     - name: Run HashSet Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_HashSet_Benchmark
 
     - name: Run Protected Pointer Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_ProtectedPointer_Benchmark
 
     - name: Run Hazard Registry Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_HazardRegistry_Benchmark
 
     - name: Run Atomic Unique Ptr Benchmarks
+      if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_AtomicUniquePtr_Benchmark

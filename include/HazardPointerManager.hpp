@@ -136,7 +136,8 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
         HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
-                                                          m_registry(hazard_limiter(HAZARD_POINTERS)) {
+                                                          m_hazard_pointers(),
+                                                          m_registry(hazard_limiter(m_hazard_pointers.capacity())) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -144,7 +145,7 @@ class HazardPointerManager {
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
                                                                 m_hazard_pointers(hazard_limiter(hazards_size)),
-                                                                m_registry(hazard_limiter(hazards_size)){
+                                                                m_registry(hazard_limiter(m_hazard_pointers.capacity())){
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -167,7 +168,10 @@ class HazardPointerManager {
             }// end if (!it_opt)
             //--------------------------
             it_opt.value()->store(data, std::memory_order_release);
-            m_registry.add(data);
+            if (!m_registry.add(data)) {
+                release_data_iterator(it_opt.value());
+                return ProtectedPointer<T>();
+            }
             //--------------------------
             return create_protected_pointer(it_opt.value(), data);
             //--------------------------
@@ -196,8 +200,11 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!protected_obj) 
             //--------------------------
+            if (!m_registry.add(protected_obj)) {
+                release_data_iterator(it_opt.value());
+                return ProtectedPointer<T>();
+            }
             it_opt.value()->store_safe(protected_obj);
-            m_registry.add(protected_obj);
             //--------------------------
             if (a_data.load(std::memory_order_acquire) == protected_obj) {
                 return create_protected_pointer(it_opt.value(), protected_obj);
@@ -221,8 +228,11 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!protected_obj) 
             //--------------------------
+            if (!m_registry.add(protected_obj.get())) {
+                release_data_iterator(it_opt.value());
+                return ProtectedPointer<T>();
+            }
             it_opt.value()->store_safe(protected_obj.get());
-            m_registry.add(protected_obj.get());
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                 return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
@@ -249,13 +259,19 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
+                if (!m_registry.add(protected_obj)) {
+                    release_data_iterator(it_opt.value());
+                    return ProtectedPointer<T>();
+                }
                 it_opt.value()->store(protected_obj, std::memory_order_release);
-                m_registry.add(protected_obj);
                 //--------------------------
                 if (a_data.load(std::memory_order_acquire) == protected_obj) {
                     return create_protected_pointer(it_opt.value(), protected_obj);
                 }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
                 //--------------------------
+                // Drop our hazard before retrying
+                it_opt.value()->store(nullptr, std::memory_order_release);
+                m_registry.remove(protected_obj);
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
             //--------------------------
             release_data_iterator(it_opt.value());
@@ -279,13 +295,19 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
+                if (!m_registry.add(protected_obj.get())) {
+                    release_data_iterator(it_opt.value());
+                    return ProtectedPointer<T>();
+                }
                 it_opt.value()->store(protected_obj.get(), std::memory_order_release);
-                m_registry.add(protected_obj.get());
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                     return create_protected_pointer(it_opt.value(), protected_obj.get(), std::move(protected_obj));
                 }// end if (a_sp_data.load(std::memory_order_acquire) == protected_obj)
                 //--------------------------
+                // Drop our hazard before retrying
+                it_opt.value()->store(nullptr, std::memory_order_release);
+                m_registry.remove(protected_obj.get());
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
             //--------------------------
             release_data_iterator(it_opt.value());
@@ -311,7 +333,10 @@ class HazardPointerManager {
             }// end if (!it_opt)
             //--------------------------
             it_opt.value()->store(ptr, std::memory_order_release);
-            m_registry.add(ptr);
+            if (!m_registry.add(ptr)) {
+                release_data_iterator(it_opt.value());
+                return ProtectedPointer<T>();
+            }
             //--------------------------
             return create_protected_pointer(it_opt.value(), ptr, std::move(owner));
             //--------------------------
@@ -325,14 +350,7 @@ class HazardPointerManager {
             auto& registry = ThreadRegistry::instance();
             static_cast<void>(registry.register_id());
             //--------------------------
-            auto it = m_hazard_pointers.acquire_iterator();
-            if (!it && m_hazard_pointers.size() == 0) {
-                // Defensive: if the table reports empty yet no slot is acquired, reinitialize.
-                m_hazard_pointers.clear();
-                m_registry.clear();
-                it = m_hazard_pointers.acquire_iterator();
-            }
-            return it;
+            return m_hazard_pointers.acquire_iterator();
             //--------------------------
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
