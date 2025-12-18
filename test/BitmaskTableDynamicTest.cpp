@@ -192,6 +192,59 @@ TEST(BitmaskTableDynamic, ReuseSlot) {
     ASSERT_EQ(*idx, *idx2);
 }
 
+TEST(BitmaskTableDynamic, ReleaseReservedSlotWithoutSet) {
+    BitmaskTable<int, 0> table(DYNAMIC_SMALL);
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.active(*idx));
+
+    // Slot has no pointer assigned yet; release should still succeed.
+    ASSERT_TRUE(table.release(*idx));
+    ASSERT_FALSE(table.active(*idx));
+    ASSERT_FALSE(table.at(*idx));
+
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_EQ(*idx, *idx2);
+    ASSERT_TRUE(table.release(*idx2));
+}
+
+TEST(BitmaskTableDynamic, AcquireWorstCaseNearFullDynamic) {
+    BitmaskTable<int, 0> table(DYNAMIC_SIZE);
+    const size_t cap = table.capacity();
+    ASSERT_EQ(cap, std::bit_ceil(DYNAMIC_SIZE));
+
+    std::vector<std::unique_ptr<int>> values(cap);
+    for (size_t i = 0; i < cap; ++i) {
+        values[i] = std::make_unique<int>(static_cast<int>(i));
+        ASSERT_TRUE(table.set(i, values[i].get()));
+    }
+    ASSERT_EQ(table.size(), cap);
+
+    const size_t last = cap - 1;
+
+    // Create exactly one free slot at the end (in the last mask word).
+    ASSERT_TRUE(table.set(last, nullptr));
+
+    // Force the scan to start from part 0 by toggling an entry in part 0.
+    ASSERT_TRUE(table.set(static_cast<size_t>(0), nullptr));
+    ASSERT_TRUE(table.set(static_cast<size_t>(0), values[0].get()));
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_EQ(*idx, last);
+
+    // Worst-case path: acquired slot still has nullptr stored; release must still work.
+    ASSERT_TRUE(table.release(*idx));
+
+    // Slot should be reusable.
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_EQ(*idx2, last);
+    ASSERT_TRUE(table.release(*idx2));
+}
+
 
 TEST(BitmaskTableDynamic, MultiThreadedAcquireRelease) {
     BitmaskTable<int, 0> table(DYNAMIC_MEDIUM);
