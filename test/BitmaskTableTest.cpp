@@ -64,6 +64,25 @@ TEST(BitmaskTableTest, ReuseSlot) {
     ASSERT_EQ(*idx, *idx2);
 }
 
+TEST(BitmaskTableTest, ReleaseReservedSlotWithoutSet) {
+    constexpr size_t N = 64;
+    BitmaskTable<int, N> table;
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_TRUE(table.active(*idx));
+
+    // Slot has no pointer assigned yet; release should still succeed.
+    ASSERT_TRUE(table.release(*idx));
+    ASSERT_FALSE(table.active(*idx));
+    ASSERT_FALSE(table.at(*idx));
+
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_EQ(*idx, *idx2);
+    ASSERT_TRUE(table.release(*idx2));
+}
+
 
 TEST(BitmaskTableTest, MultiThreadedAcquireRelease) {
     constexpr size_t N = 128;
@@ -207,6 +226,41 @@ TEST(BitmaskTableTest, MaxSlots) {
         ASSERT_FALSE(table.at(idx));
     }
     ASSERT_EQ(table.capacity(), N);
+}
+
+TEST(BitmaskTableTest, AcquireWorstCaseNearFullFixed) {
+    constexpr size_t N = 1024;
+    BitmaskTable<int, N> table;
+    using IndexType = typename BitmaskTable<int, N>::IndexType;
+
+    std::vector<std::unique_ptr<int>> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        values[i] = std::make_unique<int>(static_cast<int>(i));
+        ASSERT_TRUE(table.set(static_cast<IndexType>(i), values[i].get()));
+    }
+    ASSERT_EQ(table.size(), static_cast<IndexType>(N));
+
+    const IndexType last = static_cast<IndexType>(N - 1);
+
+    // Create exactly one free slot at the end (in the last mask word).
+    ASSERT_TRUE(table.set(last, nullptr));
+
+    // Force the scan to start from part 0 by toggling an entry in part 0.
+    ASSERT_TRUE(table.set(static_cast<IndexType>(0), nullptr));
+    ASSERT_TRUE(table.set(static_cast<IndexType>(0), values[0].get()));
+
+    auto idx = table.acquire();
+    ASSERT_TRUE(idx.has_value());
+    ASSERT_EQ(*idx, last);
+
+    // Worst-case path: acquired slot still has nullptr stored; release must still work.
+    ASSERT_TRUE(table.release(*idx));
+
+    // Slot should be reusable.
+    auto idx2 = table.acquire();
+    ASSERT_TRUE(idx2.has_value());
+    ASSERT_EQ(*idx2, last);
+    ASSERT_TRUE(table.release(*idx2));
 }
 
 TEST(BitmaskTableTest, CapacityAndSizeSingleThreaded) {
