@@ -64,6 +64,61 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireRelease)(benchmark::State& stat
     state.SetItemsProcessed(state.iterations());
 }
 
+// Worst-case: fill the table completely; acquire should scan and fail.
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireFailWhenFull)(benchmark::State& state) {
+    auto payload = std::make_unique<BenchmarkTestData>(19);
+    const size_t cap = table->capacity();
+
+    table->clear();
+    for (size_t i = 0; i < cap; ++i) {
+        table->set(i, payload.get());
+    }
+
+    for (auto _ : state) {
+        constexpr size_t kBatch = 64;
+        for (size_t i = 0; i < kBatch; ++i) {
+            auto idx = table->acquire();
+            benchmark::DoNotOptimize(idx);
+        }
+    }
+
+    state.SetComplexityN(cap);
+    state.SetItemsProcessed(state.iterations() * 64);
+}
+
+// Worst-case: only one free slot in the last mask word; acquire scans all previous words.
+BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireWorstCaseNearFull)(benchmark::State& state) {
+    auto payload = std::make_unique<BenchmarkTestData>(23);
+    const size_t cap = table->capacity();
+
+    table->clear();
+    for (size_t i = 0; i < cap; ++i) {
+        table->set(i, payload.get());
+    }
+
+    const size_t last = cap - 1;
+    table->set(last, nullptr);
+    table->set(static_cast<size_t>(0), nullptr);
+    table->set(static_cast<size_t>(0), payload.get());
+
+    for (auto _ : state) {
+        constexpr size_t kBatch = 64;
+        for (size_t i = 0; i < kBatch; ++i) {
+            auto idx = table->acquire();
+            benchmark::DoNotOptimize(idx);
+            if (idx) {
+                table->release(idx.value());
+                // Reset hint to part 0 without changing the single free-slot location.
+                table->set(static_cast<size_t>(0), nullptr);
+                table->set(static_cast<size_t>(0), payload.get());
+            }
+        }
+    }
+
+    state.SetComplexityN(cap);
+    state.SetItemsProcessed(state.iterations() * 64);
+}
+
 // Iterate across active entries to exercise bitmask scanning logic
 BENCHMARK_DEFINE_F(BitmaskDynamicFixture, IterateActive)(benchmark::State& state) {
     const size_t fill_target = std::min<size_t>(capacity, 512);
@@ -221,37 +276,47 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, EmplaceReturn)(benchmark::State& state
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireRelease)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireFailWhenFull)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oAuto);
+
+BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireWorstCaseNearFull)
+    ->RangeMultiplier(2)
+    ->Range(64, 4096)
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, IterateActive)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, Clear)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireIteratorSet)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, ActiveChecks)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, FindPredicate)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, EmplaceReturn)
     ->RangeMultiplier(2)
     ->Range(64, 4096)
-    ->Complexity(benchmark::oN);
+    ->Complexity(benchmark::oAuto);
 
 int main(int argc, char** argv) {
     ::benchmark::Initialize(&argc, argv);
@@ -260,7 +325,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "=== BitmaskTable Dynamic Benchmark ===\n";
-    std::cout << "Capacity varies per run; expect O(n) scan characteristics.\n\n";
+    std::cout << "Capacity varies per run; includes worst-case near-full and full-table scan benchmarks.\n\n";
 
     ::benchmark::RunSpecifiedBenchmarks();
     ::benchmark::Shutdown();
