@@ -14,399 +14,480 @@ namespace HazardSystem::detail {
 AvailabilityBitmapTree::AvailabilityBitmapTree(void) noexcept : m_mode(Mode::Empty),
                                                                 m_leaf_bits(0),
                                                                 m_planes(0),
-                                                                m_single0(0ULL),
-                                                                m_single1(0ULL),
                                                                 m_levels(0),
                                                                 m_words_per_plane(0),
+                                                                m_single{0ULL, 0ULL},
                                                                 m_level_words(),
                                                                 m_level_offsets() {
     //--------------------------
-}
-
+}// end AvailabilityBitmapTree::AvailabilityBitmapTree(void)
 //--------------------------------------------------------------
-AvailabilityBitmapTree::AvailabilityBitmapTree(AvailabilityBitmapTree&& other) noexcept {
-    move_from(other);
-}
+AvailabilityBitmapTree::AvailabilityBitmapTree(AvailabilityBitmapTree&& other) noexcept 
+    :   m_mode(std::move(other.m_mode)),
+        m_leaf_bits(std::move(other.m_leaf_bits)),
+        m_planes(std::move(other.m_planes)), 
+        m_levels(std::move(other.m_levels)),
+        m_words_per_plane(std::move(other.m_words_per_plane)),
+        m_single{0ULL, 0ULL},
+        m_level_words(std::move(other.m_level_words)),
+        m_level_offsets(std::move(other.m_level_offsets)),
+        m_tree_words(std::move(other.m_tree_words)) {
+    //--------------------------
+    for (size_t plane = 0; plane < C_MAX_PLANES; ++plane) {
+        m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
+    //--------------------------
+}// end AvailabilityBitmapTree::AvailabilityBitmapTree(void)
 //--------------------------------------------------------------
 AvailabilityBitmapTree& AvailabilityBitmapTree::operator=(AvailabilityBitmapTree&& other) noexcept {
-    if (this != &other) {
-        reset();
-        move_from(other);
-    }
+    //--------------------------
+    if(this == &other) {
+        return *this;
+    }//if(this == &other)
+    //--------------------------
+    m_mode              = std::move(other.m_mode);
+    m_leaf_bits         = std::move(other.m_leaf_bits);
+    m_planes            = std::move(other.m_planes);
+    m_levels            = std::move(other.m_levels);
+    m_words_per_plane   = std::move(other.m_words_per_plane);
+    m_level_words       = std::move(other.m_level_words);
+    m_level_offsets     = std::move(other.m_level_offsets);
+    m_tree_words        = std::move(other.m_tree_words);
+    //--------------------------
+    for (size_t plane = 0; plane < C_MAX_PLANES; ++plane) {
+        m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
+    //--------------------------
     return *this;
-}
+}// end AvailabilityBitmapTree& AvailabilityBitmapTree::operator=(AvailabilityBitmapTree&& other)
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::init(size_t leaf_bits) {
-    init(leaf_bits, 1);
-    reset_all_set(0);
-}
+bool AvailabilityBitmapTree::init(size_t leaf_bits) {
+    //--------------------------
+    if (!init(leaf_bits, 1)) {
+        return false;
+    }// end if (!init(leaf_bits, 1))
+    //--------------------------
+    return reset_all_set(0);
+}// end bool AvailabilityBitmapTree::init(size_t leaf_bits)
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::init(size_t leaf_bits, size_t planes) {
+bool AvailabilityBitmapTree::init(size_t leaf_bits, size_t planes) {
+    //--------------------------
     reset();
+    //--------------------------
     if (!leaf_bits or !planes) {
-        m_mode = Mode::Empty;
-        return;
-    }
+        return false;
+    }// end if (!leaf_bits or !planes)
+    //--------------------------
     m_leaf_bits = leaf_bits;
-    m_planes = std::min(planes, C_MAX_PLANES);
+    m_planes    = std::min(planes, C_MAX_PLANES);
+    //--------------------------
     if (!m_planes) {
-        m_mode = Mode::Empty;
-        m_leaf_bits = 0;
-        return;
-    }
+        reset();
+        return false;
+    }// end if (!m_planes)
+    //--------------------------
     if (m_leaf_bits <= C_WORD_BITS) {
         m_mode = Mode::SingleWord;
-        for (size_t plane = 0; plane < m_planes; ++plane) {
-            reset_all_clear(plane);
-        }
-        return;
-    }
+        return true;
+    }// end if (m_leaf_bits <= C_WORD_BITS)
+    //--------------------------
     m_mode = Mode::Tree;
-    build_layout();
-    for (size_t plane = 0; plane < m_planes; ++plane) {
-        reset_all_clear(plane);
-    }
-}
+    try {
+        build_layout();
+    } catch (...) {
+        reset();
+        return false;
+    }// end catch (...)
+    //--------------------------
+    return true;
+}// end bool AvailabilityBitmapTree::init(size_t leaf_bits, size_t planes)
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::reset_all_set() noexcept {
-    reset_all_set(0);
-}
-//--------------------------------------------------------------
-void AvailabilityBitmapTree::reset_all_set(size_t plane) noexcept {
+bool AvailabilityBitmapTree::reset_all_set(size_t plane) noexcept {
+    //--------------------------
     if (m_mode == Mode::Empty or (plane >= m_planes)) {
-        return;
-    }
+        return false;
+    }// end if (m_mode == Mode::Empty or (plane >= m_planes))
+    //--------------------------
     if (m_mode == Mode::SingleWord) {
         const uint64_t mask = (m_leaf_bits == C_WORD_BITS) ? ~0ULL : ((1ULL << m_leaf_bits) - 1ULL);
-        (plane == 0 ? m_single0 : m_single1).store(mask, std::memory_order_relaxed);
-        return;
-    }
-
+        m_single[plane].store(mask, std::memory_order_relaxed);
+        return true;
+    }// end if (m_mode == Mode::SingleWord)
+    //--------------------------
+    if (!m_tree_words) {
+        return false;
+    }// end if (!m_tree_words)
+    //--------------------------
     const size_t levels = m_levels;
     for (size_t level = 0; level < levels; ++level) {
-        const size_t bits = (level == 0) ? m_leaf_bits : m_level_words[level - 1];
-        const size_t words = m_level_words[level];
-        const size_t full_words = bits / C_WORD_BITS;
-        const size_t rem_bits = bits % C_WORD_BITS;
-        for (size_t i = 0; i < words; ++i) {
-            uint64_t value = 0ULL;
-            if (i < full_words) {
-                value = ~0ULL;
-            } else if ((i == full_words) and rem_bits) {
-                value = (1ULL << rem_bits) - 1ULL;
-            }
-            word(plane, level, i).store(value, std::memory_order_relaxed);
-        }
-    }
-}
+        //--------------------------
+        const size_t bits                   = (level == 0) ? m_leaf_bits : m_level_words[level - 1];
+        const size_t words                  = m_level_words[level];
+        const size_t full_words             = bits / C_WORD_BITS;
+        const size_t rem_bits               = bits % C_WORD_BITS;
+        std::atomic<uint64_t>* level_words  = m_tree_words.get() + (plane * m_words_per_plane) + m_level_offsets[level];
+        //--------------------------
+        for (size_t i = 0; i < full_words; ++i) {
+            level_words[i].store(~0ULL, std::memory_order_relaxed);
+        }// end for (size_t i = 0; i < full_words; ++i)
+        //--------------------------
+        if (rem_bits) {
+            level_words[full_words].store((1ULL << rem_bits) - 1ULL, std::memory_order_relaxed);
+        }// end if (rem_bits)
+        else if (full_words < words) {
+            level_words[full_words].store(~0ULL, std::memory_order_relaxed);
+        }// end else if (full_words < words)
+        //--------------------------
+    }// end for (size_t i = 0; i < full_words; ++i)
+    //--------------------------
+    return true;
+}// end bool AvailabilityBitmapTree::reset_all_set(size_t plane) noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::reset_all_clear() noexcept {
-    reset_all_clear(0);
-}
-//--------------------------------------------------------------
-void AvailabilityBitmapTree::reset_all_clear(size_t plane) noexcept {
+bool AvailabilityBitmapTree::reset_all_clear(size_t plane) noexcept {
+    //--------------------------
     if (m_mode == Mode::Empty or (plane >= m_planes)) {
-        return;
-    }
+        return false;
+    }// end if (m_mode == Mode::Empty or (plane >= m_planes))
+    //--------------------------
     if (m_mode == Mode::SingleWord) {
-        (plane == 0 ? m_single0 : m_single1).store(0ULL, std::memory_order_relaxed);
-        return;
-    }
-
-    const size_t levels = m_levels;
-    for (size_t level = 0; level < levels; ++level) {
-        const size_t words = m_level_words[level];
-        for (size_t i = 0; i < words; ++i) {
-            word(plane, level, i).store(0ULL, std::memory_order_relaxed);
-        }
-    }
-}
+        m_single[plane].store(0ULL, std::memory_order_relaxed);
+        return true;
+    }// end if (m_mode == Mode::SingleWord)
+    //--------------------------
+    if (!m_tree_words) {
+        return false;
+    }// end if (!m_tree_words)
+    //--------------------------
+    const size_t base = plane * m_words_per_plane;
+    for (size_t i = 0; i < m_words_per_plane; ++i) {
+        m_tree_words[base + i].store(0ULL, std::memory_order_relaxed);
+    }// end for (size_t i = 0; i < m_words_per_plane; ++i)
+    //--------------------------
+    return true;
+}// end bool AvailabilityBitmapTree::reset_all_clear(size_t plane) noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::set(size_t bit_index) noexcept {
-    set(bit_index, 0);
-}
-//--------------------------------------------------------------
-void AvailabilityBitmapTree::set(size_t bit_index, size_t plane) noexcept {
+bool AvailabilityBitmapTree::set(size_t bit_index, size_t plane) noexcept {
+    //--------------------------
     if (!m_leaf_bits or (bit_index >= m_leaf_bits) or (plane >= m_planes)) {
-        return;
-    }
-    if (m_mode == Mode::Tree) {
-        set_bit(plane, 0, bit_index);
-        return;
-    }
-    if (m_mode == Mode::SingleWord) {
-        (plane == 0 ? m_single0 : m_single1).fetch_or(1ULL << bit_index, std::memory_order_relaxed);
-    }
-}
+        return false;
+    }// end if (!m_leaf_bits or (bit_index >= m_leaf_bits) or (plane >= m_planes))
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Tree:
+            return set_bit(plane, 0, bit_index);
+        case Mode::SingleWord:
+            {
+                const uint64_t flag = 1ULL << bit_index;
+                const uint64_t old = m_single[plane].fetch_or(flag, std::memory_order_relaxed);
+                return ((old & flag) == 0);
+            }
+        case Mode::Empty:
+        default:
+            return false;
+    }// end switch (m_mode)
+}// end bool AvailabilityBitmapTree::set(size_t bit_index, size_t plane) noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::clear(size_t bit_index) noexcept {
-    clear(bit_index, 0);
-}
-//--------------------------------------------------------------
-void AvailabilityBitmapTree::clear(size_t bit_index, size_t plane) noexcept {
+bool AvailabilityBitmapTree::clear(size_t bit_index, size_t plane) noexcept {
+    //--------------------------
     if (!m_leaf_bits or (bit_index >= m_leaf_bits) or (plane >= m_planes)) {
-        return;
-    }
-    if (m_mode == Mode::Tree) {
-        clear_bit(plane, 0, bit_index);
-        return;
-    }
-    if (m_mode == Mode::SingleWord) {
-        (plane == 0 ? m_single0 : m_single1).fetch_and(~(1ULL << bit_index), std::memory_order_relaxed);
-    }
-}
+        return false;
+    }// end if (!m_leaf_bits or (bit_index >= m_leaf_bits) or (plane >= m_planes))
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Tree:
+            return clear_bit(plane, 0, bit_index);
+        case Mode::SingleWord:
+            {
+                const uint64_t flag = 1ULL << bit_index;
+                const uint64_t old = m_single[plane].fetch_and(~flag, std::memory_order_relaxed);
+                return ((old & flag) != 0);
+            }
+        case Mode::Empty:
+        default:
+            return false;
+    }// end switch (m_mode)
+}// end bool AvailabilityBitmapTree::clear(size_t bit_index, size_t plane) noexcept
 //--------------------------------------------------------------
 std::optional<size_t> AvailabilityBitmapTree::find_any(size_t hint) const noexcept {
     return find_any(hint, 0);
-}
+}// end std::optional<size_t> AvailabilityBitmapTree::find_any(size_t hint) const noexcept
 //--------------------------------------------------------------
 std::optional<size_t> AvailabilityBitmapTree::find_any(size_t hint, size_t plane) const noexcept {
+    //--------------------------
     if (m_mode == Mode::Empty or (plane >= m_planes)) {
         return std::nullopt;
-    }
+    }// end if (m_mode == Mode::Empty or (plane >= m_planes))
+    //--------------------------
     if (m_mode == Mode::SingleWord) {
-        const size_t bits = m_leaf_bits;
-        const uint64_t word0 = (plane == 0 ? m_single0 : m_single1).load(std::memory_order_acquire);
+        const size_t bits       = m_leaf_bits;
+        const uint64_t word0    = m_single[plane].load(std::memory_order_acquire);
         if (!word0 or !bits) {
             return std::nullopt;
-        }
-        const size_t start = hint % bits;
-        uint64_t masked = word0 & (~0ULL << start);
+        }// end if (!word0 or !bits)
+        const size_t start  = hint % bits;
+        uint64_t masked     = word0 & (~0ULL << start);
         if (!masked) {
             masked = word0;
-        }
+        }// end if (!masked)
         return static_cast<size_t>(std::countr_zero(masked));
-    }
-
+    }// end if (m_mode == Mode::SingleWord)
+    //--------------------------
     const size_t start_leaf = (m_leaf_bits ? (hint % m_leaf_bits) : 0);
     if (auto r = find_from_leaf(plane, start_leaf)) {
         return r;
-    }
+    }// end if (auto r = find_from_leaf(plane, start_leaf))
+    //--------------------------
     if (start_leaf) {
         return find_from_leaf(plane, 0);
-    }
+    }// end if (start_leaf)
+    //--------------------------
     return std::nullopt;
-}
+}// end std::optional<size_t> AvailabilityBitmapTree::find_any(size_t hint, size_t plane)
 //--------------------------------------------------------------
 std::optional<size_t> AvailabilityBitmapTree::find_next(size_t start, size_t plane) const noexcept {
+    //--------------------------
     if (m_mode == Mode::Empty or (plane >= m_planes) or !m_leaf_bits) {
         return std::nullopt;
-    }
+    }// end if (m_mode == Mode::Empty or (plane >= m_planes) or !m_leaf_bits)
+    //--------------------------
     if (start >= m_leaf_bits) {
         return std::nullopt;
-    }
+    }// end if (start >= m_leaf_bits)
+    //--------------------------
     if (m_mode == Mode::SingleWord) {
-        const uint64_t word0 = (plane == 0 ? m_single0 : m_single1).load(std::memory_order_acquire);
+        //--------------------------
+        const uint64_t word0 = m_single[plane].load(std::memory_order_acquire);
         if (!word0) {
             return std::nullopt;
-        }
+        }// end if (!word0)
+        //--------------------------
         uint64_t masked = word0 & (~0ULL << start);
         if (!masked) {
             return std::nullopt;
-        }
+        }// end if (!masked)
+        //--------------------------
         return static_cast<size_t>(std::countr_zero(masked));
-    }
-
+    }// end if (m_mode == Mode::SingleWord)
+    //--------------------------
     return find_from_leaf(plane, start);
-}
+}// end std::optional<size_t> AvailabilityBitmapTree::find_next(size_t start, size_t plane) const noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::reset() noexcept {
-    m_mode = Mode::Empty;
-    m_leaf_bits = 0;
-    m_planes = 0;
-    m_single0.store(0ULL, std::memory_order_relaxed);
-    m_single1.store(0ULL, std::memory_order_relaxed);
-    m_levels = 0;
-    m_words_per_plane = 0;
+size_t AvailabilityBitmapTree::leaf_bits(void) const noexcept {
+    return m_leaf_bits;
+}// end size_t AvailabilityBitmapTree::leaf_bits(void) const noexcept
+//----------------------------------------------------------
+size_t AvailabilityBitmapTree::planes(void) const noexcept {
+    return m_planes;
+}// endsize_t AvailabilityBitmapTree::planes(void) const noexcept
+//----------------------------------------------------------
+void AvailabilityBitmapTree::reset(void) noexcept {
+    //--------------------------
+    m_mode              = Mode::Empty;
+    m_leaf_bits         = 0;
+    m_planes            = 0;
+    m_levels            = 0;
+    m_words_per_plane   = 0;
+    //--------------------------
+    for (auto& w : m_single) {
+        w.store(0ULL, std::memory_order_relaxed);
+    }// for (auto& w : m_single)
+    //--------------------------
     m_level_words.fill(0);
     m_level_offsets.fill(0);
-    m_words.reset();
-}
+    m_tree_words.reset();
+    //--------------------------
+}// end void AvailabilityBitmapTree::reset(void) noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::move_from(AvailabilityBitmapTree& other) noexcept {
-    m_mode = other.m_mode;
-    m_leaf_bits = other.m_leaf_bits;
-    m_planes = other.m_planes;
-    m_single0.store(other.m_single0.load(std::memory_order_relaxed), std::memory_order_relaxed);
-    m_single1.store(other.m_single1.load(std::memory_order_relaxed), std::memory_order_relaxed);
-    m_levels = other.m_levels;
-    m_words_per_plane = other.m_words_per_plane;
-    m_level_words = other.m_level_words;
-    m_level_offsets = other.m_level_offsets;
-    m_words = std::move(other.m_words);
-
-    other.reset();
-}
-//--------------------------------------------------------------
-void AvailabilityBitmapTree::build_layout() {
-    size_t level_bits = m_leaf_bits;
-    size_t levels = 0;
-
+void AvailabilityBitmapTree::build_layout(void) {
+    //--------------------------
+    size_t level_bits   = m_leaf_bits;
+    size_t levels       = 0;
+    //--------------------------
     while (levels < C_MAX_LEVELS) {
         const size_t word_count = (level_bits + C_WORD_BITS - 1) / C_WORD_BITS;
         m_level_words[levels] = word_count;
         ++levels;
         if (word_count == 1) {
             break;
-        }
+        }// end if (word_count == 1)
         level_bits = word_count;
-    }
-
+    }// end while (levels < C_MAX_LEVELS)
+    //--------------------------
     m_levels = levels;
-
+    //--------------------------
     size_t offset = 0;
     for (size_t level = 0; level < m_levels; ++level) {
         m_level_offsets[level] = offset;
         offset += m_level_words[level];
-    }
-    m_words_per_plane = offset;
-    const size_t total_words = m_words_per_plane * m_planes;
-    m_words = std::make_unique<std::atomic<uint64_t>[]>(total_words);
+    }// end for (size_t level = 0; level < m_levels; ++level)
+    //--------------------------
+    m_words_per_plane           = offset;
+    const size_t total_words    = m_words_per_plane * m_planes;
+    m_tree_words                = std::make_unique<std::atomic<uint64_t>[]>(total_words);
+    //--------------------------
     for (size_t i = 0; i < total_words; ++i) {
-        m_words[i].store(0ULL, std::memory_order_relaxed);
-    }
-}
+        m_tree_words[i].store(0ULL, std::memory_order_relaxed);
+    }// end for (size_t i = 0; i < total_words; ++i)
+}// end void AvailabilityBitmapTree::build_layout(void)
 //--------------------------------------------------------------
 std::atomic<uint64_t>& AvailabilityBitmapTree::word(size_t plane, size_t level, size_t word_index) noexcept {
-    return m_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
-}
+    return m_tree_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
+}// end std::atomic<uint64_t>& AvailabilityBitmapTree::word(size_t plane, size_t level, size_t word_index) noexcept 
+//--------------------------------------------------------------
 const std::atomic<uint64_t>& AvailabilityBitmapTree::word(size_t plane, size_t level, size_t word_index) const noexcept {
-    return m_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
-}
+    return m_tree_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
+}// end const std::atomic<uint64_t>& AvailabilityBitmapTree::word(size_t plane, size_t level, size_t word_index) const noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::set_bit(size_t plane, size_t level, size_t bit_index) noexcept {
+bool AvailabilityBitmapTree::set_bit(size_t plane, size_t level, size_t bit_index) noexcept {
+    //--------------------------
     const size_t word_index = bit_index / C_WORD_BITS;
-    const uint64_t flag = 1ULL << (bit_index % C_WORD_BITS);
-    const uint64_t old = word(plane, level, word_index).fetch_or(flag, std::memory_order_relaxed);
-    if (old & flag) {
-        return;
-    }
-    if (old != 0) {
-        return;
-    }
-    if (level + 1 < m_levels) {
-        set_bit(plane, level + 1, word_index);
-    }
-}
+    const uint64_t flag     = 1ULL << (bit_index % C_WORD_BITS);
+    const uint64_t old      = word(plane, level, word_index).fetch_or(flag, std::memory_order_relaxed);
+    //--------------------------
+	if (old & flag) {
+	    return false;
+	}// end if (old & flag)
+	//--------------------------
+	if (!old and (level + 1 < m_levels)) {
+	    static_cast<void>(set_bit(plane, level + 1, word_index));
+	}// if (!old and (level + 1 < m_levels))
+    //--------------------------
+	return true;
+}// end bool AvailabilityBitmapTree::set_bit(size_t plane, size_t level, size_t bit_index) noexcept
 //--------------------------------------------------------------
-void AvailabilityBitmapTree::clear_bit(size_t plane, size_t level, size_t bit_index) noexcept {
+bool AvailabilityBitmapTree::clear_bit(size_t plane, size_t level, size_t bit_index) noexcept {
+    //--------------------------
     const size_t word_index = bit_index / C_WORD_BITS;
-    const uint64_t flag = 1ULL << (bit_index % C_WORD_BITS);
-    const uint64_t old = word(plane, level, word_index).fetch_and(~flag, std::memory_order_relaxed);
-    if ((old & flag) == 0) {
-        return;
-    }
-    if ((old & ~flag) != 0) {
-        return;
-    }
-    if (level + 1 < m_levels) {
-        clear_bit(plane, level + 1, word_index);
-    }
-}
+    const uint64_t flag     = 1ULL << (bit_index % C_WORD_BITS);
+    const uint64_t old      = word(plane, level, word_index).fetch_and(~flag, std::memory_order_relaxed);
+    //--------------------------
+    if (!(old & flag)) {
+	    return false;
+	}// end if (!(old & flag))
+    //--------------------------
+	if (((old & ~flag) == 0) and (level + 1 < m_levels)) {
+	    static_cast<void>(clear_bit(plane, level + 1, word_index));
+	}// end if (((old & ~flag) == 0) and (level + 1 < m_levels))
+    //--------------------------
+	return true;
+}// bool AvailabilityBitmapTree::clear_bit(size_t plane, size_t level, size_t bit_index) noexcept
 //--------------------------------------------------------------
 std::optional<size_t> AvailabilityBitmapTree::find_next_set_bit(size_t plane, size_t level, size_t start_bit) const noexcept {
+    //--------------------------
     const size_t bits = (level == 0) ? m_leaf_bits : m_level_words[level - 1];
     if (start_bit >= bits) {
         return std::nullopt;
-    }
-    const size_t words = m_level_words[level];
+    }// end if (start_bit >= bits)
+    //--------------------------
+    if (!m_tree_words) {
+        return std::nullopt;
+    }// end if (!m_tree_words)
+    //--------------------------
+    const size_t words      = m_level_words[level];
     const size_t start_word = start_bit / C_WORD_BITS;
-    const size_t start_in_word = start_bit % C_WORD_BITS;
     if (start_word >= words) {
         return std::nullopt;
-    }
-
-    size_t word_index = start_word;
-    size_t in_word = start_in_word;
-    for (;;) {
-        uint64_t w = word(plane, level, word_index).load(std::memory_order_acquire);
-        if (in_word) {
-            w &= (~0ULL << in_word);
-            in_word = 0;
-        }
-        while (w) {
+    }// end if (start_word >= words)
+    //--------------------------
+    const std::atomic<uint64_t>* level_words    = m_tree_words.get() + (plane * m_words_per_plane) + m_level_offsets[level];
+    size_t word_index                           = start_word;
+    uint64_t word_mask                          = (~0ULL << (start_bit % C_WORD_BITS));
+    //--------------------------
+    while (word_index < words) {
+        //--------------------------
+        uint64_t w  = level_words[word_index].load(std::memory_order_acquire) & word_mask;
+        word_mask   = ~0ULL;
+        //--------------------------
+        if (w) {
             const size_t bit = static_cast<size_t>(std::countr_zero(w));
             const size_t idx = (word_index * C_WORD_BITS) + bit;
-            if (idx >= bits) {
-                return std::nullopt;
-            }
-            return idx;
-        }
-
-        if (word_index + 1 >= words) {
-            return std::nullopt;
-        }
+            return (idx < bits) ? std::make_optional(idx) : std::nullopt;
+        }// end if (w)
+        //--------------------------
         if (level + 1 >= m_levels) {
             ++word_index;
             continue;
-        }
-
+        }// end if (level + 1 >= m_levels)
+        //--------------------------
         size_t search = word_index + 1;
-        for (;;) {
+        while (search < words) {
             const auto next_word_opt = find_next_set_bit(plane, level + 1, search);
             if (!next_word_opt) {
                 return std::nullopt;
-            }
+            }// end if (!next_word_opt)
+            //--------------------------
             const size_t next_word = next_word_opt.value();
             if (next_word >= words) {
                 return std::nullopt;
-            }
-            if (word(plane, level, next_word).load(std::memory_order_acquire) != 0) {
+            }// end if (next_word >= words)
+            //--------------------------
+            if (level_words[next_word].load(std::memory_order_acquire) != 0) {
                 word_index = next_word;
                 break;
-            }
+            }// end if (level_words[next_word].load(std::memory_order_acquire) != 0)
+            //--------------------------
             search = next_word + 1;
-            if (search >= words) {
-                return std::nullopt;
-            }
-        }
-    }
-}
+        }// end while (search < words)
+        //--------------------------
+        if (search >= words) {
+            return std::nullopt;
+        }// end if (search >= words)
+    }// end while (word_index < words)
+    //--------------------------
+    return std::nullopt;
+}//end std::optional<size_t> AvailabilityBitmapTree::find_next_set_bit(size_t plane, size_t level, size_t start_bit) const noexcept
 //--------------------------------------------------------------
 std::optional<size_t> AvailabilityBitmapTree::find_from_leaf(size_t plane, size_t start_leaf_bit) const noexcept {
+    //--------------------------
     if (!m_leaf_bits) {
         return std::nullopt;
-    }
-
-    const size_t leaf_word = start_leaf_bit / C_WORD_BITS;
-    const size_t leaf_bit_in_word = start_leaf_bit % C_WORD_BITS;
-    const size_t leaf_words = m_level_words[0];
+    }// end if (!m_leaf_bits) 
+    //--------------------------
+    const size_t leaf_word          = start_leaf_bit / C_WORD_BITS;
+    const size_t leaf_bit_in_word   = start_leaf_bit % C_WORD_BITS;
+    const size_t leaf_words         = m_level_words[0];
+    //--------------------------
     if (leaf_word >= leaf_words) {
         return std::nullopt;
-    }
-
+    }//end if (leaf_word >= leaf_words)
+    //--------------------------
     uint64_t w0 = word(plane, 0, leaf_word).load(std::memory_order_acquire);
     w0 &= (~0ULL << leaf_bit_in_word);
+    //--------------------------
     if (w0) {
         const size_t bit = static_cast<size_t>(std::countr_zero(w0));
         const size_t idx = (leaf_word * C_WORD_BITS) + bit;
         return (idx < m_leaf_bits) ? std::optional<size_t>(idx) : std::nullopt;
-    }
-
+    }// end if (w0)
+    //--------------------------
     if (leaf_word + 1 >= leaf_words) {
         return std::nullopt;
-    }
-
+    }// end if (leaf_word + 1 >= leaf_words)
+    //--------------------------
     size_t search = leaf_word + 1;
     while (search < leaf_words) {
+        //--------------------------
         const auto next_leaf_word_opt = find_next_set_bit(plane, 1, search);
         if (!next_leaf_word_opt) {
             return std::nullopt;
-        }
+        }// end if (!next_leaf_word_opt)
+        //--------------------------
         const size_t next_leaf_word = next_leaf_word_opt.value();
         if (next_leaf_word >= leaf_words) {
             return std::nullopt;
-        }
+        }// end if (next_leaf_word >= leaf_words)
+        //--------------------------
         const uint64_t w1 = word(plane, 0, next_leaf_word).load(std::memory_order_acquire);
         if (w1) {
             const size_t bit = static_cast<size_t>(std::countr_zero(w1));
             const size_t idx = (next_leaf_word * C_WORD_BITS) + bit;
             return (idx < m_leaf_bits) ? std::optional<size_t>(idx) : std::nullopt;
-        }
+        }// end if (w1)
+        //--------------------------
         search = next_leaf_word + 1;
-    }
+    }// end while (search < leaf_words)
     return std::nullopt;
-}
+}// end std::optional<size_t> AvailabilityBitmapTree::find_from_leaf(size_t plane, size_t start_leaf_bit) const noexcept
 //--------------------------------------------------------------
 } // namespace HazardSystem::detail
 //--------------------------------------------------------------
