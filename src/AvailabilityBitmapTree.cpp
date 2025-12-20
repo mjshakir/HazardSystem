@@ -37,6 +37,8 @@ AvailabilityBitmapTree::AvailabilityBitmapTree(AvailabilityBitmapTree&& other) n
         m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
     }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
     //--------------------------
+    other.reset();
+    //--------------------------
 }// end AvailabilityBitmapTree::AvailabilityBitmapTree(void)
 //--------------------------------------------------------------
 AvailabilityBitmapTree& AvailabilityBitmapTree::operator=(AvailabilityBitmapTree&& other) noexcept {
@@ -57,6 +59,8 @@ AvailabilityBitmapTree& AvailabilityBitmapTree::operator=(AvailabilityBitmapTree
     for (size_t plane = 0; plane < C_MAX_PLANES; ++plane) {
         m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
     }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
+    //--------------------------
+    other.reset();
     //--------------------------
     return *this;
 }// end AvailabilityBitmapTree& AvailabilityBitmapTree::operator=(AvailabilityBitmapTree&& other)
