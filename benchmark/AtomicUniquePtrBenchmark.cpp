@@ -28,7 +28,7 @@ static void BM_LoadOnly(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -46,7 +46,7 @@ static void BM_LoadStore(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -61,7 +61,7 @@ static void BM_StoreOnly(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -75,7 +75,7 @@ static void BM_Reset(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -95,7 +95,7 @@ static void BM_CAS_Success(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -120,7 +120,7 @@ static void BM_CAS_Fail(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -134,7 +134,7 @@ static void BM_Transfer(benchmark::State& state) {
             benchmark::DoNotOptimize(out);
         }
     }
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -149,7 +149,7 @@ static void BM_Protect(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
@@ -172,7 +172,7 @@ static void BM_MultiThreaded_ResetRelease(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetComplexityN(static_cast<int64_t>(ops));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 

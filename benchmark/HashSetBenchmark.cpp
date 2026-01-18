@@ -47,7 +47,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Insert)(benchmark::State& state) {
         state.ResumeTiming();
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetComplexityN(static_cast<int64_t>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -70,7 +70,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Contains)(benchmark::State& state) {
         idx = (idx + 1) % queries.size();
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetComplexityN(static_cast<int64_t>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -93,7 +93,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Remove)(benchmark::State& state) {
         idx = (idx + 1) % keys.size();
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetComplexityN(static_cast<int64_t>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -115,7 +115,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetComplexityN(static_cast<int64_t>(capacity));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(capacity));
 }
 
@@ -138,7 +138,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Reclaim)(benchmark::State& state) {
         benchmark::DoNotOptimize(set->size());
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetComplexityN(static_cast<int64_t>(capacity));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(capacity));
 }
 

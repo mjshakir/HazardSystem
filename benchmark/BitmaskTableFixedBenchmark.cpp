@@ -86,7 +86,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state)
         table.release(id);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(batch));
+    state.SetComplexityN(static_cast<int64_t>(batch));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -117,7 +117,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, IterateActive)(benchmark::State& state) 
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(to_fill));
+    state.SetComplexityN(static_cast<int64_t>(to_fill));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(to_fill));
 }
 
@@ -141,7 +141,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
         benchmark::DoNotOptimize(table.size());
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(table.capacity()));
 }
 
@@ -160,7 +160,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& st
         table.release(index);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -193,7 +193,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
         benchmark::DoNotOptimize(hits);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(fill_count));
+    state.SetComplexityN(static_cast<int64_t>(fill_count));
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(fill_count));
 }
 
@@ -224,7 +224,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, FindPredicate)(benchmark::State& state) 
         benchmark::DoNotOptimize(found);
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -240,7 +240,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, EmplaceReturn)(benchmark::State& state) 
         }
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -259,7 +259,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireFailWhenFull)(benchmark::Sta
         }
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
@@ -290,7 +290,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireWorstCaseNearFull)(benchmark
         }
     }
 
-    state.SetComplexityN(static_cast<benchmark::ComplexityN>(cap));
+    state.SetComplexityN(static_cast<int64_t>(cap));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
