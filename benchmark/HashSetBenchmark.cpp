@@ -32,7 +32,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Insert)(benchmark::State& state) {
     int next_key = static_cast<int>(capacity);
 
     for (auto _ : state) {
-        const bool ok = set->insert(next_key);
+        bool ok = set->insert(next_key);
         benchmark::DoNotOptimize(ok);
         if (!ok) {
             state.SkipWithError("insert failed (load cap reached)");
@@ -47,7 +47,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Insert)(benchmark::State& state) {
         state.ResumeTiming();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -70,7 +70,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Contains)(benchmark::State& state) {
         idx = (idx + 1) % queries.size();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -93,7 +93,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Remove)(benchmark::State& state) {
         idx = (idx + 1) % keys.size();
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -108,15 +108,15 @@ BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
         state.ResumeTiming();
 
         size_t visited = 0;
-        set->for_each_fast([&](const int value) {
+        set->for_each_fast([&](int value) {
             benchmark::DoNotOptimize(value);
             ++visited;
         });
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(capacity);
-    state.SetItemsProcessed(state.iterations() * capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(capacity));
 }
 
 // Reclaim removes non-hazard values based on predicate
@@ -138,8 +138,8 @@ BENCHMARK_DEFINE_F(HashSetFixture, Reclaim)(benchmark::State& state) {
         benchmark::DoNotOptimize(set->size());
     }
 
-    state.SetComplexityN(capacity);
-    state.SetItemsProcessed(state.iterations() * capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(capacity));
 }
 
 BENCHMARK_REGISTER_F(HashSetFixture, Insert)

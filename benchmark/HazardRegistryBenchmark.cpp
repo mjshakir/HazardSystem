@@ -23,8 +23,8 @@ static void BM_HazardRegistry_AddRemove(benchmark::State& state) {
         }
     }
 
-    state.SetItemsProcessed(state.iterations() * hazards * 2);
-    state.SetComplexityN(hazards);
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(hazards) * 2);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(hazards));
 }
 
 static void BM_HazardRegistry_Contains(benchmark::State& state) {
@@ -44,8 +44,8 @@ static void BM_HazardRegistry_Contains(benchmark::State& state) {
         }
     }
 
-    state.SetItemsProcessed(state.iterations() * hazards);
-    state.SetComplexityN(hazards);
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(hazards));
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(hazards));
 }
 
 static void BM_HazardRegistry_Contains_Contended(benchmark::State& state) {
@@ -70,8 +70,8 @@ static void BM_HazardRegistry_Contains_Contended(benchmark::State& state) {
         }
     }
 
-    state.SetItemsProcessed(state.iterations() * hazards);
-    state.SetComplexityN(hazards);
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(hazards));
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(hazards));
 }
 
 BENCHMARK(BM_HazardRegistry_AddRemove)

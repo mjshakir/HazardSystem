@@ -38,11 +38,11 @@ static void BM_HazardThreadManagerThreadLifecycle(benchmark::State& state) {
         }
     }
 
-    state.SetItemsProcessed(state.iterations() * threads_per_iter);
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(threads_per_iter));
 }
 
 BENCHMARK(BM_HazardThreadManagerAccess)
-    ->ThreadRange(1, std::max(2u, std::thread::hardware_concurrency()));
+    ->ThreadRange(1, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())));
 BENCHMARK(BM_HazardThreadManagerThreadLifecycle)
     ->RangeMultiplier(2)
     ->Range(1, 64);

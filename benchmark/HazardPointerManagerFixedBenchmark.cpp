@@ -42,7 +42,7 @@ public:
 // Benchmark fixture for setup/teardown
 class FixedHazardPointerBenchmark : public benchmark::Fixture {
 public:
-    void SetUp(const ::benchmark::State& state) override {
+    void SetUp(const ::benchmark::State&) override {
         // Register thread for hazard pointer operations
         ThreadRegistry::instance().register_id();
         
@@ -51,7 +51,7 @@ public:
         manager.clear();
     }
     
-    void TearDown(const ::benchmark::State& state) override {
+    void TearDown(const ::benchmark::State&) override {
         // Clean up manager
         auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
         manager.clear();
@@ -212,7 +212,9 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, TryProtect)(benchmark::State& st
     std::atomic<std::shared_ptr<BenchmarkTestData>> atomic_data;
     atomic_data.store(std::make_shared<BenchmarkTestData>(42));
     
-    const size_t max_retries = state.range(0);
+    const auto max_retries_range = state.range(0);
+    const size_t max_retries =
+        max_retries_range > 0 ? static_cast<size_t>(max_retries_range) : 0U;
     
     for (auto _ : state) {
         auto protected_ptr = manager.try_protect(atomic_data, max_retries);
@@ -222,7 +224,7 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, TryProtect)(benchmark::State& st
         }
     }
     
-    state.SetComplexityN(max_retries);
+    state.SetComplexityN(max_retries_range);
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -251,7 +253,9 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Retire)(benchmark::State& state)
 // Time Complexity: O(n*h) where n = retired objects, h = hazard pointers (64)
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Reclaim)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    const size_t retire_count = state.range(0);
+    const auto retire_count_range = state.range(0);
+    const size_t retire_count =
+        retire_count_range > 0 ? static_cast<size_t>(retire_count_range) : 0U;
     
     for (auto _ : state) {
         state.PauseTiming();
@@ -272,8 +276,8 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Reclaim)(benchmark::State& state
         benchmark::DoNotOptimize(manager.retire_size());
     }
     
-    state.SetComplexityN(retire_count);
-    state.SetItemsProcessed(state.iterations() * retire_count);
+    state.SetComplexityN(retire_count_range);
+    state.SetItemsProcessed(state.iterations() * retire_count_range);
 }
 
 // Time Complexity: O(1) - Constant time clear operation
@@ -366,7 +370,9 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, Clear)(benchmark::State& state) 
 
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RapidProtectResetCycle)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    const size_t cycle_count = state.range(0);
+    const auto cycle_count_range = state.range(0);
+    const size_t cycle_count =
+        cycle_count_range > 0 ? static_cast<size_t>(cycle_count_range) : 0U;
 
     for (auto _ : state) {
         for (size_t i = 0; i < cycle_count; ++i) {
@@ -379,14 +385,16 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RapidProtectResetCycle)(benchmar
         }
     }
 
-    state.SetComplexityN(cycle_count);
-    state.SetItemsProcessed(state.iterations() * cycle_count);
+    state.SetComplexityN(cycle_count_range);
+    state.SetItemsProcessed(state.iterations() * cycle_count_range);
 }
 
 // Test protection pattern with varying data sizes
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, ProtectionPattern)(benchmark::State& state) {
     auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance();
-    const size_t data_count = state.range(0);
+    const auto data_count_range = state.range(0);
+    const size_t data_count =
+        data_count_range > 0 ? static_cast<size_t>(data_count_range) : 0U;
     
     // Create test data
     std::vector<std::shared_ptr<BenchmarkTestData>> test_data;
@@ -405,14 +413,20 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, ProtectionPattern)(benchmark::St
         }
     }
     
-    state.SetComplexityN(data_count);
-    state.SetItemsProcessed(state.iterations() * data_count);
+    state.SetComplexityN(data_count_range);
+    state.SetItemsProcessed(state.iterations() * data_count_range);
 }
 
 // Test retire/reclaim pattern
 BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireReclaimPattern)(benchmark::State& state) {
-    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance(state.range(0)); // Custom retire threshold
-    const size_t operations = state.range(1);
+    const auto retire_threshold_range = state.range(0);
+    const size_t retire_threshold =
+        retire_threshold_range > 0 ? static_cast<size_t>(retire_threshold_range) : 0U;
+    auto& manager = HazardPointerManager<BenchmarkTestData, 64>::instance(retire_threshold); // Custom retire threshold
+
+    const auto operations_range = state.range(1);
+    const size_t operations =
+        operations_range > 0 ? static_cast<size_t>(operations_range) : 0U;
     
     for (auto _ : state) {
         // Create and retire objects
@@ -426,8 +440,8 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireReclaimPattern)(benchmark:
         benchmark::DoNotOptimize(manager.retire_size());
     }
     
-    state.SetComplexityN(operations);
-    state.SetItemsProcessed(state.iterations() * operations);
+    state.SetComplexityN(operations_range);
+    state.SetItemsProcessed(state.iterations() * operations_range);
 }
 
 // Contended protect on a stable shared_ptr; benchmark threads control contention level
@@ -485,7 +499,8 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireWithHazards)(benchmark::St
         if (p) guards.push_back(std::move(p));
     }
 
-    const size_t batch = static_cast<size_t>(state.range(0));
+    const auto batch_range = state.range(0);
+    const size_t batch = batch_range > 0 ? static_cast<size_t>(batch_range) : 0U;
     for (auto _ : state) {
         state.PauseTiming();
         std::vector<std::shared_ptr<BenchmarkTestData>> retired;
@@ -500,8 +515,8 @@ BENCHMARK_DEFINE_F(FixedHazardPointerBenchmark, RetireWithHazards)(benchmark::St
         benchmark::DoNotOptimize(manager.retire_size());
     }
 
-    state.SetComplexityN(batch);
-    state.SetItemsProcessed(state.iterations() * batch);
+    state.SetComplexityN(batch_range);
+    state.SetItemsProcessed(state.iterations() * batch_range);
 }
 
 // ============================================================================
@@ -567,11 +582,11 @@ BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RetireReclaimPattern)
 
 // Contention/throughput focused benchmarks
 BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, ContendedProtectShared)
-    ->ThreadRange(1, std::max(1u, std::thread::hardware_concurrency()))
+    ->ThreadRange(1, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())))
     ->Complexity(benchmark::o1);
 
 BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, ContendedProtectAtomic)
-    ->ThreadRange(1, std::max(1u, std::thread::hardware_concurrency()))
+    ->ThreadRange(1, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())))
     ->Complexity(benchmark::o1);
 
 BENCHMARK_REGISTER_F(FixedHazardPointerBenchmark, RetireWithHazards)

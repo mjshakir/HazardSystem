@@ -34,8 +34,8 @@ static void BM_ProtectedPointerLifecycle(benchmark::State& state) {
     }
 
     state.counters["releases"] = static_cast<double>(releases.load(std::memory_order_relaxed));
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 // Move construction to cover move semantics and ownership transfer
@@ -59,8 +59,8 @@ static void BM_ProtectedPointerMove(benchmark::State& state) {
     }
 
     state.counters["releases"] = static_cast<double>(releases.load(std::memory_order_relaxed));
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 // Access overhead for operator->, operator*, get(), and bool conversion
@@ -86,8 +86,8 @@ static void BM_ProtectedPointerAccess(benchmark::State& state) {
     }
 
     state.counters["touched"] = static_cast<double>(touched.load(std::memory_order_relaxed));
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 BENCHMARK(BM_ProtectedPointerLifecycle)
