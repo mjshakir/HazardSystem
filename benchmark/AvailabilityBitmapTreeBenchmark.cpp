@@ -1,6 +1,6 @@
 #include <benchmark/benchmark.h>
 
-#include "AvailabilityBitmapTree.hpp"
+#include "BitmapTree.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -10,7 +10,7 @@
 #include <iostream>
 #include <vector>
 
-using HazardSystem::detail::AvailabilityBitmapTree;
+using HazardSystem::BitmapTree;
 
 namespace {
 
@@ -36,15 +36,15 @@ std::vector<size_t> make_indices(size_t count, size_t mod, uint64_t seed) {
 
 static void BM_AvTree_SetClear_SingleWord(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     const auto indices = make_indices(4096, bits, 0x123456789ABCDEF0ULL);
     size_t pos = 0;
 
     for (auto _ : state) {
-        const size_t bit = indices[pos++ & (indices.size() - 1)];
+        size_t bit = indices[pos++ & (indices.size() - 1)];
         tree.set(bit);
         tree.clear(bit);
         benchmark::DoNotOptimize(bit);
@@ -60,15 +60,15 @@ BENCHMARK(BM_AvTree_SetClear_SingleWord)
 
 static void BM_AvTree_SetClear_Tree_Propagate(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     const auto indices = make_indices(4096, bits, 0xC0FFEEULL);
     size_t pos = 0;
 
     for (auto _ : state) {
-        const size_t bit = indices[pos++ & (indices.size() - 1)];
+        size_t bit = indices[pos++ & (indices.size() - 1)];
         tree.set(bit);
         tree.clear(bit);
         benchmark::DoNotOptimize(bit);
@@ -84,9 +84,9 @@ BENCHMARK(BM_AvTree_SetClear_Tree_Propagate)
 
 static void BM_AvTree_SetClear_Tree_NoPropagate(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     // Keep one bit set so toggles in the same leaf word avoid summary propagation.
     tree.set(0);
@@ -95,7 +95,7 @@ static void BM_AvTree_SetClear_Tree_NoPropagate(benchmark::State& state) {
     size_t pos = 0;
 
     for (auto _ : state) {
-        const size_t bit = 1 + (indices[pos++ & (indices.size() - 1)] % 63);
+        size_t bit = 1 + (indices[pos++ & (indices.size() - 1)] % 63);
         tree.set(bit);
         tree.clear(bit);
         benchmark::DoNotOptimize(bit);
@@ -112,9 +112,9 @@ BENCHMARK(BM_AvTree_SetClear_Tree_NoPropagate)
 
 static void BM_AvTree_FindAny_SingleWord(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     for (size_t i = 0; i < bits; i += 8) {
         tree.set(i);
@@ -124,7 +124,7 @@ static void BM_AvTree_FindAny_SingleWord(benchmark::State& state) {
     for (auto _ : state) {
         rng = lcg_next(rng);
         const size_t hint = static_cast<size_t>(rng & (bits - 1));
-        const auto found = tree.find_any(hint);
+        auto found = tree.find(hint);
         benchmark::DoNotOptimize(found);
     }
 
@@ -138,9 +138,9 @@ BENCHMARK(BM_AvTree_FindAny_SingleWord)
 
 static void BM_AvTree_FindAny_Tree_Sparse(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     // Sparse: 1 set bit per 128.
     for (size_t i = 0; i < bits; i += 128) {
@@ -152,7 +152,7 @@ static void BM_AvTree_FindAny_Tree_Sparse(benchmark::State& state) {
     for (auto _ : state) {
         rng = lcg_next(rng);
         const size_t hint = static_cast<size_t>(rng % bits);
-        const auto found = tree.find_any(hint);
+        auto found = tree.find(hint);
         benchmark::DoNotOptimize(found);
     }
 
@@ -166,9 +166,9 @@ BENCHMARK(BM_AvTree_FindAny_Tree_Sparse)
 
 static void BM_AvTree_FindNext_Tree_Sparse(benchmark::State& state) {
     const size_t bits = static_cast<size_t>(state.range(0));
-    AvailabilityBitmapTree tree;
-    tree.init(bits, 1);
-    tree.reset_all_clear(0);
+    BitmapTree tree;
+    tree.initialization(bits, 1);
+    tree.reset_clear(0);
 
     for (size_t i = 0; i < bits; i += 128) {
         tree.set(i);
@@ -179,7 +179,7 @@ static void BM_AvTree_FindNext_Tree_Sparse(benchmark::State& state) {
     for (auto _ : state) {
         rng = lcg_next(rng);
         const size_t start = static_cast<size_t>(rng % bits);
-        const auto found = tree.find_next(start);
+        auto found = tree.find_next(start);
         benchmark::DoNotOptimize(found);
     }
 
@@ -191,7 +191,7 @@ BENCHMARK(BM_AvTree_FindNext_Tree_Sparse)
     ->Range(128, 1 << 20)
     ->Complexity(benchmark::oAuto);
 
-// "Real-world" mixed workload modeled after BitmaskTable's use of AvailabilityBitmapTree as a
+// "Real-world" mixed workload modeled after BitmaskTable's use of BitmapTree as a
 // per-part hint structure (available parts vs non-empty parts).
 struct MixedOwned {
     size_t part{0};
@@ -203,10 +203,10 @@ static void BM_AvTree_MixedWorkload(benchmark::State& state) {
     constexpr size_t plane_available = 0;
     constexpr size_t plane_non_empty = 1;
 
-    AvailabilityBitmapTree tree;
-    tree.init(parts, 2);
-    tree.reset_all_set(plane_available);
-    tree.reset_all_clear(plane_non_empty);
+    BitmapTree tree;
+    tree.initialization(parts, 2);
+    tree.reset_set(plane_available);
+    tree.reset_clear(plane_non_empty);
 
     std::vector<std::atomic<uint64_t>> masks(parts);
     for (auto& mask : masks) {
@@ -223,7 +223,7 @@ static void BM_AvTree_MixedWorkload(benchmark::State& state) {
 
         // Allocate one slot (best-effort).
         if (!has_owned) {
-            const auto part_opt = tree.find_any(hint, plane_available);
+            const auto part_opt = tree.find(hint, plane_available);
             if (part_opt && *part_opt < parts) {
                 const size_t part = *part_opt;
                 uint64_t mask = masks[part].load(std::memory_order_relaxed);
@@ -255,7 +255,7 @@ static void BM_AvTree_MixedWorkload(benchmark::State& state) {
         // Free immediately (keeps occupancy low and stable across runs).
         if (has_owned) {
             const uint64_t flag = 1ULL << owned.bit;
-            const uint64_t old = masks[owned.part].fetch_and(~flag, std::memory_order_acq_rel);
+            uint64_t old = masks[owned.part].fetch_and(~flag, std::memory_order_acq_rel);
             benchmark::DoNotOptimize(old);
             has_owned = false;
         }
@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "=== AvailabilityBitmapTree Benchmark ===\n";
+    std::cout << "=== BitmapTree Benchmark ===\n";
     std::cout << "Single-threaded microbenchmarks for SingleWord vs Tree mode, read vs update paths,\n";
     std::cout << "and a BitmaskTable-like mixed workload.\n\n" << std::flush;
 
