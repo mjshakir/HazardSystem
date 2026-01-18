@@ -1093,12 +1093,12 @@ namespace HazardSystem {
                 return plane_index(PartPlane::Count);
             }// end constexpr size_t plane_count(void) const noexcept
             //--------------------------
-            consteval uint64_t initial_bitmask(void) const noexcept {
+            constexpr uint64_t initial_bitmask(void) const noexcept {
                 if constexpr ((N > 0) and (N < C_BITS_PER_MASK)) {
                     return ~((1ULL << N) - 1ULL);
                 }// end if constexpr ((N > 0) and (N < C_BITS_PER_MASK))
                 return 0ULL;
-            }// consteval uint64_t initial_bitmask(void) const noexcept
+            }// end constexpr uint64_t initial_bitmask(void) const noexcept
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
