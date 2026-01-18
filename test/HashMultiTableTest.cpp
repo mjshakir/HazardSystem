@@ -175,7 +175,7 @@ TEST_F(HashMultiTableTest, HashCollisions) {
     
     constexpr int count = 100;
     std::vector<std::shared_ptr<TestNode>> nodes;
-    nodes.reserve(count);
+    nodes.reserve(static_cast<size_t>(count));
     
     // Insert values that will definitely collide
     for (int i = 0; i < count; ++i) {
@@ -194,7 +194,7 @@ TEST_F(HashMultiTableTest, HashCollisions) {
     
     // Test removal with collisions
     for (int i = 0; i < count; ++i) {
-        EXPECT_TRUE(small_table.remove(i, nodes[i]));
+        EXPECT_TRUE(small_table.remove(i, nodes[static_cast<size_t>(i)]));
     }
     
     EXPECT_EQ(small_table.size(), 0);
@@ -394,12 +394,13 @@ TEST_F(HashMultiTableTest, UpdateAllMultipleValues) {
 TEST_F(HashMultiTableTest, ConcurrentInsertion) {
     HashMultiTable<int, TestNode, TABLE_SIZE> table;
     
-    const int num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     constexpr int keys_per_thread = 1000;
     const int total_keys = num_threads * keys_per_thread;
     
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
     std::atomic<int> success_count(0);
     
     // Launch threads to insert keys
@@ -449,9 +450,10 @@ TEST_F(HashMultiTableTest, ConcurrentFind) {
         EXPECT_TRUE(table.insert(i, node));
     }
     
-    const int num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
     std::atomic<int> found_count(0);
     
     // Launch threads to find keys concurrently
@@ -490,9 +492,10 @@ TEST_F(HashMultiTableTest, ConcurrentRemoval) {
     
     EXPECT_EQ(table.size(), count);
     
-    const int num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
     std::atomic<int> remove_count(0);
     
     // Launch threads to remove keys concurrently
@@ -500,7 +503,7 @@ TEST_F(HashMultiTableTest, ConcurrentRemoval) {
         threads.emplace_back([&, t]() {
             // Each thread removes a distinct subset of keys
             for (int i = t; i < count; i += num_threads) {
-                if (table.remove(i, nodes[i])) {
+                if (table.remove(i, nodes[static_cast<size_t>(i)])) {
                     remove_count.fetch_add(1, std::memory_order_relaxed);
                 }
             }
@@ -524,9 +527,10 @@ TEST_F(HashMultiTableTest, ConcurrentMixedOperations) {
     constexpr int key_range = 1000;
     constexpr int ops_per_thread = 10000;
     
-    const int num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
     std::atomic<int> insert_count(0);
     std::atomic<int> find_count(0);
@@ -542,7 +546,7 @@ TEST_F(HashMultiTableTest, ConcurrentMixedOperations) {
     
     // Launch threads to perform mixed operations
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&]() {
             std::random_device rd;
             std::mt19937 gen(rd());
             std::uniform_int_distribution<int> key_dist(0, key_range - 1);
@@ -602,9 +606,10 @@ TEST_F(HashMultiTableTest, ConcurrentSwapKeys) {
         EXPECT_TRUE(table.insert(i, nodes.back()));
     }
     
-    const int num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
     std::atomic<int> swap_count(0);
     
@@ -613,7 +618,7 @@ TEST_F(HashMultiTableTest, ConcurrentSwapKeys) {
         threads.emplace_back([&, t]() {
             for (int i = t; i < count; i += num_threads) {
                 int new_key = i + count;  // Swap to a new key range
-                if (table.swap(i, new_key, nodes[i])) {
+                if (table.swap(i, new_key, nodes[static_cast<size_t>(i)])) {
                     swap_count.fetch_add(1, std::memory_order_relaxed);
                 }
             }
@@ -659,9 +664,10 @@ TEST_F(HashMultiTableTest, LockFreePerformance) {
     
     // Measure time for concurrent operations
     double concurrent_time = measure_execution_time([&]() {
-        const int num_threads = std::thread::hardware_concurrency();
+        const unsigned int hardware_threads = std::thread::hardware_concurrency();
+        const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
         std::vector<std::thread> threads;
-        threads.reserve(num_threads);
+        threads.reserve(static_cast<size_t>(num_threads));
         
         for (int t = 0; t < num_threads; ++t) {
             threads.emplace_back([&, t]() {
@@ -738,7 +744,7 @@ TEST_F(HashMultiTableTest, EmptyTableOperations) {
     EXPECT_FALSE(table.swap(42, node, new_node));
     
     // Reclaim from empty table
-    table.reclaim([](std::shared_ptr<TestNode> node) -> bool {
+    table.reclaim([](std::shared_ptr<TestNode>) -> bool {
         return false; // Reclaim all (though there are none)
     });
     
@@ -756,7 +762,7 @@ TEST_F(HashMultiTableTest, HighContention) {
     
     // const int num_threads = std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
     std::atomic<int> total_success(0);
     
     // Launch threads all accessing the same small set of keys
@@ -817,11 +823,12 @@ TEST_F(HashMultiTableTest, ConcurrentRemoveByDataSingleInstance) {
     auto shared_node = std::make_shared<TestNode>(999);
     table.insert(42, shared_node);  // Insert only ONCE
 
-    const size_t num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
 
     std::atomic<int> success_count{0};
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
     for (int t = 0; t < num_threads; ++t) {
         threads.emplace_back([&]() {
@@ -841,7 +848,8 @@ TEST_F(HashMultiTableTest, ConcurrentRemoveByDataMultipleInstances) {
 
     auto shared_node = std::make_shared<TestNode>(999);
     constexpr int count = 200;
-    const size_t num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
 
     for (int i = 0; i < count; ++i) {
         table.insert(i, shared_node);
@@ -849,7 +857,7 @@ TEST_F(HashMultiTableTest, ConcurrentRemoveByDataMultipleInstances) {
 
     std::atomic<int> success_count{0};
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
     // Each thread will keep removing until none left
     for (int t = 0; t < num_threads; ++t) {
@@ -913,14 +921,15 @@ TEST_F(HashMultiTableTest, ConcurrentMixedInsertRemoveByData) {
         table.insert(i, node);
     }
 
-    const size_t num_threads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int num_threads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
     std::atomic<int> insert_count(0), remove_count(0), remove_all_count(0);
 
     for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&]() {
             std::random_device rd;
             std::mt19937 gen(rd());
             std::uniform_int_distribution<int> key_dist(0, keys - 1);
@@ -978,15 +987,15 @@ TEST_F(HashMultiTableTest, RealWorldMixedConcurrentOps) {
 
     // Threaded operations
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    threads.reserve(static_cast<size_t>(num_threads));
 
-    for (int t = 0; t < num_threads; ++t) {
-        threads.emplace_back([&, t]() {
-            // Thread-local RNGs for reproducibility
-            thread_local std::mt19937 gen(12345 + t);
-            std::uniform_int_distribution<int> op_dist(0, 7);         // 8 operations
-            std::uniform_int_distribution<int> key_dist(0, TABLE_SIZE - 1);
-            std::uniform_int_distribution<int> alt_key_dist(0, TABLE_SIZE - 1);
+	    for (int t = 0; t < num_threads; ++t) {
+	        threads.emplace_back([&, t]() {
+	            // Thread-local RNGs for reproducibility
+	            thread_local std::mt19937 gen(12345U + static_cast<unsigned int>(t));
+	            std::uniform_int_distribution<int> op_dist(0, 7);         // 8 operations
+	            std::uniform_int_distribution<int> key_dist(0, TABLE_SIZE - 1);
+	            std::uniform_int_distribution<int> alt_key_dist(0, TABLE_SIZE - 1);
 
             for (int i = 0; i < ops_per_thread; ++i) {
                 int op = op_dist(gen);
@@ -1010,13 +1019,13 @@ TEST_F(HashMultiTableTest, RealWorldMixedConcurrentOps) {
                     }
                     case 2: // Remove by data
                     {
-                        // Occasionally try a known shared node
-                        std::shared_ptr<TestNode> node;
-                        if (key < static_cast<int>(shared_nodes.size())) node = shared_nodes[key];
-                        else node = std::make_shared<TestNode>(key);
-                        if (table.remove(node)) remove_data_count.fetch_add(1, std::memory_order_relaxed);
-                        break;
-                    }
+	                        // Occasionally try a known shared node
+	                        std::shared_ptr<TestNode> node;
+	                        if (key < static_cast<int>(shared_nodes.size())) node = shared_nodes[static_cast<size_t>(key)];
+	                        else node = std::make_shared<TestNode>(key);
+	                        if (table.remove(node)) remove_data_count.fetch_add(1, std::memory_order_relaxed);
+	                        break;
+	                    }
                     case 3: // Remove first
                     {
                         if (table.remove(key)) remove_first_count.fetch_add(1, std::memory_order_relaxed);
@@ -1083,11 +1092,12 @@ TEST_F(HashMultiTableTest, RealWorldMixedConcurrentOps) {
 
 TEST_F(HashMultiTableTest, ConcurrentUpdate) {
     HashMultiTable<int, TestNode, TABLE_SIZE> table;
+    const int table_size = static_cast<int>(TABLE_SIZE);
 
     // Insert a node for each key
     std::vector<std::shared_ptr<TestNode>> nodes;
     nodes.reserve(TABLE_SIZE);
-    for (int i = 0; i < TABLE_SIZE; ++i) {
+    for (int i = 0; i < table_size; ++i) {
         nodes.push_back(std::make_shared<TestNode>(i));
         table.insert(i, nodes.back());
     }
@@ -1095,7 +1105,7 @@ TEST_F(HashMultiTableTest, ConcurrentUpdate) {
     // Prepare new nodes
     std::vector<std::shared_ptr<TestNode>> new_nodes;
     new_nodes.reserve(TABLE_SIZE);
-    for (int i = 0; i < TABLE_SIZE; ++i) {
+    for (int i = 0; i < table_size; ++i) {
         new_nodes.push_back(std::make_shared<TestNode>(i * 100));
     }
 
@@ -1107,14 +1117,14 @@ TEST_F(HashMultiTableTest, ConcurrentUpdate) {
         threads.emplace_back([&, t]() {
             // Each thread works on a strided set of keys
             for (size_t i = t; i < TABLE_SIZE; i += num_threads) {
-                EXPECT_TRUE(table.update(i, new_nodes[i]));
+                EXPECT_TRUE(table.update(static_cast<int>(i), new_nodes[i]));
             }
         });
     }
     for (auto& th : threads) th.join();
 
     // Check that all values have been updated
-    for (int i = 0; i < TABLE_SIZE; ++i) {
+    for (int i = 0; i < table_size; ++i) {
         auto result = table.find_first(i);
         ASSERT_NE(result, nullptr);
         EXPECT_EQ(result->data, i * 100);
@@ -1132,7 +1142,7 @@ TEST_F(HashMultiTableTest, ConcurrentUpdateAll) {
 
     // We'll try to update all values for the same key concurrently, using different new values
     std::vector<std::shared_ptr<TestNode>> updates;
-    updates.reserve(num_values);
+    updates.reserve(static_cast<size_t>(num_values));
     for (int i = 0; i < num_values; ++i) {
         updates.push_back(std::make_shared<TestNode>(1000 + i));
     }

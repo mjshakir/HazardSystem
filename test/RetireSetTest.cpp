@@ -32,10 +32,6 @@ auto hazard_even = [](const std::shared_ptr<Dummy>& ptr) {
     return ptr && (ptr->value % 2 == 0);
 };
 
-auto hazard_mod3 = [](const std::shared_ptr<Dummy>& ptr) {
-    return ptr && (ptr->value % 3 == 0);
-};
-
 TEST(RetireSetTest, ConstructAndBasicOps) {
     RetireSet<Dummy> s(8, always_hazard);
     EXPECT_EQ(s.size(), 0u);
@@ -206,8 +202,9 @@ TEST(RetireSetTest, RandomHazardFunction) {
 
     // Try to retire all survivors again (should not insert duplicates)
     for (const auto& ptr : ptrs) {
-        if (ptr->value % 3 == 0)
+        if (ptr->value % 3 == 0) {
             EXPECT_FALSE(s.retire(ptr)); // Already present!
+        }
     }
     EXPECT_EQ(s.size(), expected_survivors);
 }

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "AvailabilityBitmapTree.hpp"
+#include "BitmapTree.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -15,11 +15,11 @@
 #include <utility>
 #include <vector>
 
-using HazardSystem::detail::AvailabilityBitmapTree;
+using HazardSystem::BitmapTree;
 
 namespace {
 
-std::vector<size_t> collect_set_bits(const AvailabilityBitmapTree& tree, size_t plane = 0) {
+std::vector<size_t> collect_set_bits(const BitmapTree& tree, size_t plane = 0) {
     std::vector<size_t> bits;
     if (!tree.leaf_bits()) {
         return bits;
@@ -47,48 +47,48 @@ struct OwnedSlot {
 } // namespace
 
 TEST(AvailabilityBitmapTreeTest, DefaultIsEmptyAndNoOps) {
-    AvailabilityBitmapTree tree;
+    BitmapTree tree;
     EXPECT_EQ(tree.leaf_bits(), 0u);
     EXPECT_EQ(tree.planes(), 0u);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
     EXPECT_FALSE(tree.find_next(0).has_value());
 
-    tree.reset_all_set();
-    tree.reset_all_clear();
+    tree.reset_set();
+    tree.reset_clear();
     tree.set(0);
     tree.clear(0);
     EXPECT_EQ(tree.leaf_bits(), 0u);
     EXPECT_EQ(tree.planes(), 0u);
-    EXPECT_FALSE(tree.find_any(0, 0).has_value());
+    EXPECT_FALSE(tree.find(0, 0).has_value());
     EXPECT_FALSE(tree.find_next(0, 0).has_value());
 }
 
 TEST(AvailabilityBitmapTreeTest, InitWithZeroBitsOrPlanesIsEmpty) {
-    AvailabilityBitmapTree tree;
+    BitmapTree tree;
 
-    tree.init(0);
+    tree.initialization(0);
     EXPECT_EQ(tree.leaf_bits(), 0u);
     EXPECT_EQ(tree.planes(), 0u);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
 
-    tree.init(128, 0);
+    tree.initialization(128, 0);
     EXPECT_EQ(tree.leaf_bits(), 0u);
     EXPECT_EQ(tree.planes(), 0u);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
     tree.set(0);
-    tree.reset_all_set();
-    EXPECT_FALSE(tree.find_any().has_value());
+    tree.reset_set();
+    EXPECT_FALSE(tree.find().has_value());
 }
 
 TEST(AvailabilityBitmapTreeTest, PlanesClampedToTwoAndIndependent) {
-    AvailabilityBitmapTree tree;
-    tree.init(64, 10);
+    BitmapTree tree;
+    tree.initialization(64, 10);
     EXPECT_EQ(tree.leaf_bits(), 64u);
     EXPECT_EQ(tree.planes(), 2u);
 
-    EXPECT_FALSE(tree.find_any(0, 0).has_value());
-    EXPECT_FALSE(tree.find_any(0, 1).has_value());
-    EXPECT_FALSE(tree.find_any(0, 2).has_value());
+    EXPECT_FALSE(tree.find(0, 0).has_value());
+    EXPECT_FALSE(tree.find(0, 1).has_value());
+    EXPECT_FALSE(tree.find(0, 2).has_value());
 
     tree.set(3, 0);
     const auto p0_first = tree.find_next(0, 0);
@@ -105,19 +105,19 @@ TEST(AvailabilityBitmapTreeTest, PlanesClampedToTwoAndIndependent) {
     EXPECT_EQ(*p0_first_again, 3u);
 
     tree.clear(3, 0);
-    EXPECT_FALSE(tree.find_any(0, 0).has_value());
-    const auto p1_any = tree.find_any(0, 1);
+    EXPECT_FALSE(tree.find(0, 0).has_value());
+    const auto p1_any = tree.find(0, 1);
     ASSERT_TRUE(p1_any.has_value());
     EXPECT_EQ(*p1_any, 7u);
 }
 
 TEST(AvailabilityBitmapTreeTest, SingleWordSetClearFindNextAndFindAny) {
-    AvailabilityBitmapTree tree;
-    tree.init(10, 1);
+    BitmapTree tree;
+    tree.initialization(10, 1);
     EXPECT_EQ(tree.leaf_bits(), 10u);
     EXPECT_EQ(tree.planes(), 1u);
 
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
     EXPECT_FALSE(tree.find_next(0).has_value());
 
     tree.set(3);
@@ -130,21 +130,21 @@ TEST(AvailabilityBitmapTreeTest, SingleWordSetClearFindNextAndFindAny) {
     EXPECT_EQ(*next4, 7u);
     EXPECT_FALSE(tree.find_next(8).has_value());
 
-    const auto any0 = tree.find_any(0);
+    const auto any0 = tree.find(0);
     ASSERT_TRUE(any0.has_value());
     EXPECT_EQ(*any0, 3u);
-    const auto any4 = tree.find_any(4);
+    const auto any4 = tree.find(4);
     ASSERT_TRUE(any4.has_value());
     EXPECT_EQ(*any4, 7u);
-    const auto any8 = tree.find_any(8);
+    const auto any8 = tree.find(8);
     ASSERT_TRUE(any8.has_value());
     EXPECT_EQ(*any8, 3u); // wrap
-    const auto any18 = tree.find_any(18);
+    const auto any18 = tree.find(18);
     ASSERT_TRUE(any18.has_value());
     EXPECT_EQ(*any18, 3u); // hint wraps before search
 
     tree.clear(7);
-    const auto any4_after_clear = tree.find_any(4);
+    const auto any4_after_clear = tree.find(4);
     ASSERT_TRUE(any4_after_clear.has_value());
     EXPECT_EQ(*any4_after_clear, 3u);
     tree.clear(7); // idempotent
@@ -152,11 +152,11 @@ TEST(AvailabilityBitmapTreeTest, SingleWordSetClearFindNextAndFindAny) {
 
     tree.set(10);   // out-of-range
     tree.clear(100); // out-of-range
-    const auto any0_after_oob = tree.find_any(0);
+    const auto any0_after_oob = tree.find(0);
     ASSERT_TRUE(any0_after_oob.has_value());
     EXPECT_EQ(*any0_after_oob, 3u);
 
-    tree.reset_all_set();
+    tree.reset_set();
     for (size_t i = 0; i < tree.leaf_bits(); ++i) {
         const auto next = tree.find_next(i);
         ASSERT_TRUE(next.has_value()) << "i=" << i;
@@ -164,14 +164,14 @@ TEST(AvailabilityBitmapTreeTest, SingleWordSetClearFindNextAndFindAny) {
     }
     EXPECT_FALSE(tree.find_next(tree.leaf_bits()).has_value());
 
-    tree.reset_all_clear();
-    EXPECT_FALSE(tree.find_any().has_value());
+    tree.reset_clear();
+    EXPECT_FALSE(tree.find().has_value());
 }
 
 TEST(AvailabilityBitmapTreeTest, SingleWordLeafBits64MaskIsFullWidth) {
-    AvailabilityBitmapTree tree;
-    tree.init(64, 1);
-    tree.reset_all_set();
+    BitmapTree tree;
+    tree.initialization(64, 1);
+    tree.reset_set();
     EXPECT_EQ(tree.leaf_bits(), 64u);
     const auto next0 = tree.find_next(0);
     ASSERT_TRUE(next0.has_value());
@@ -181,23 +181,23 @@ TEST(AvailabilityBitmapTreeTest, SingleWordLeafBits64MaskIsFullWidth) {
     EXPECT_EQ(*next63, 63u);
     EXPECT_FALSE(tree.find_next(64).has_value());
 
-    tree.reset_all_clear();
-    EXPECT_FALSE(tree.find_any().has_value());
+    tree.reset_clear();
+    EXPECT_FALSE(tree.find().has_value());
     tree.set(63);
-    const auto any0 = tree.find_any(0);
+    const auto any0 = tree.find(0);
     ASSERT_TRUE(any0.has_value());
     EXPECT_EQ(*any0, 63u);
-    const auto any64 = tree.find_any(64);
+    const auto any64 = tree.find(64);
     ASSERT_TRUE(any64.has_value());
     EXPECT_EQ(*any64, 63u);
 }
 
 TEST(AvailabilityBitmapTreeTest, TreeModePartialLastWordResetAndSearch) {
-    AvailabilityBitmapTree tree;
-    tree.init(65, 1);
+    BitmapTree tree;
+    tree.initialization(65, 1);
     EXPECT_EQ(tree.leaf_bits(), 65u);
     EXPECT_EQ(tree.planes(), 1u);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
 
     tree.set(64);
     const auto next0 = tree.find_next(0);
@@ -211,10 +211,10 @@ TEST(AvailabilityBitmapTreeTest, TreeModePartialLastWordResetAndSearch) {
     const auto next1 = tree.find_next(1);
     ASSERT_TRUE(next1.has_value());
     EXPECT_EQ(*next1, 64u);
-    const auto any1 = tree.find_any(1);
+    const auto any1 = tree.find(1);
     ASSERT_TRUE(any1.has_value());
     EXPECT_EQ(*any1, 64u);
-    const auto any66 = tree.find_any(66);
+    const auto any66 = tree.find(66);
     ASSERT_TRUE(any66.has_value());
     EXPECT_EQ(*any66, 64u);
 
@@ -223,9 +223,9 @@ TEST(AvailabilityBitmapTreeTest, TreeModePartialLastWordResetAndSearch) {
     ASSERT_TRUE(next0_after_clear0.has_value());
     EXPECT_EQ(*next0_after_clear0, 64u);
     tree.clear(64);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
 
-    tree.reset_all_set();
+    tree.reset_set();
     for (size_t i = 0; i < tree.leaf_bits(); ++i) {
         const auto next = tree.find_next(i);
         ASSERT_TRUE(next.has_value()) << "i=" << i;
@@ -235,9 +235,9 @@ TEST(AvailabilityBitmapTreeTest, TreeModePartialLastWordResetAndSearch) {
 }
 
 TEST(AvailabilityBitmapTreeTest, TreeModeMultipleLevelsSetClearPropagation) {
-    AvailabilityBitmapTree tree;
+    BitmapTree tree;
     constexpr size_t bits = 4160; // 65 leaf words => 3-level tree
-    tree.init(bits, 1);
+    tree.initialization(bits, 1);
     EXPECT_EQ(tree.leaf_bits(), bits);
 
     tree.set(0);
@@ -275,18 +275,18 @@ TEST(AvailabilityBitmapTreeTest, TreeModeMultipleLevelsSetClearPropagation) {
     tree.clear(2000);
     tree.clear(4096);
     tree.clear(4159);
-    EXPECT_FALSE(tree.find_any().has_value());
+    EXPECT_FALSE(tree.find().has_value());
     EXPECT_FALSE(tree.find_next(0).has_value());
 }
 
 TEST(AvailabilityBitmapTreeTest, MoveTransfersStateAndResetsSource) {
-    AvailabilityBitmapTree src;
-    src.init(130, 2);
+    BitmapTree src;
+    src.initialization(130, 2);
     src.set(5, 0);
     src.set(127, 0);
     src.set(9, 1);
 
-    AvailabilityBitmapTree moved(std::move(src));
+    BitmapTree moved(std::move(src));
     EXPECT_EQ(moved.leaf_bits(), 130u);
     EXPECT_EQ(moved.planes(), 2u);
     const auto moved_p0_first = moved.find_next(0, 0);
@@ -301,11 +301,11 @@ TEST(AvailabilityBitmapTreeTest, MoveTransfersStateAndResetsSource) {
 
     EXPECT_EQ(src.leaf_bits(), 0u);
     EXPECT_EQ(src.planes(), 0u);
-    EXPECT_FALSE(src.find_any().has_value());
+    EXPECT_FALSE(src.find().has_value());
 
-    AvailabilityBitmapTree assigned;
-    assigned.init(64, 1);
-    assigned.reset_all_set();
+    BitmapTree assigned;
+    assigned.initialization(64, 1);
+    assigned.reset_set();
     assigned = std::move(moved);
     EXPECT_EQ(assigned.leaf_bits(), 130u);
     EXPECT_EQ(assigned.planes(), 2u);
@@ -321,9 +321,9 @@ TEST(AvailabilityBitmapTreeTest, MoveTransfersStateAndResetsSource) {
 }
 
 TEST(AvailabilityBitmapTreeTest, MultiThreadedReadersAndWriters) {
-    AvailabilityBitmapTree tree;
+    BitmapTree tree;
     constexpr size_t bits = 8192; // >4096 => exercises multi-level tree
-    tree.init(bits, 2);
+    tree.initialization(bits, 2);
 
     // Sentinel bit keeps each plane non-empty for deterministic assertions.
     tree.set(0, 0);
@@ -359,12 +359,12 @@ TEST(AvailabilityBitmapTreeTest, MultiThreadedReadersAndWriters) {
         constexpr int iters = 20000;
         for (int i = 0; i < iters; ++i) {
             const size_t hint = static_cast<size_t>(i);
-            const auto r0 = tree.find_any(hint, 0);
+            const auto r0 = tree.find(hint, 0);
             if (!r0 or (*r0 >= bits)) {
                 reader_errors.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
-            const auto r1 = tree.find_any(hint, 1);
+            const auto r1 = tree.find(hint, 1);
             if (!r1 or (*r1 != 0u)) {
                 reader_errors.fetch_add(1, std::memory_order_relaxed);
                 return;
@@ -402,10 +402,10 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperations) {
     constexpr size_t plane_non_empty = 1;
     constexpr size_t parts = 257; // >64 (tree mode) and non-multiple of 64
 
-    AvailabilityBitmapTree tree;
-    tree.init(parts, 2);
-    tree.reset_all_set(plane_available);
-    tree.reset_all_clear(plane_non_empty);
+    BitmapTree tree;
+    tree.initialization(parts, 2);
+    tree.reset_set(plane_available);
+    tree.reset_clear(plane_non_empty);
 
     std::vector<std::atomic<uint64_t>> masks(parts);
     for (auto& mask : masks) {
@@ -439,7 +439,7 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperations) {
         auto try_alloc = [&](size_t hint) -> bool {
             size_t local_hint = hint % parts;
             for (int attempt = 0; attempt < max_allocate_attempts; ++attempt) {
-                auto part_opt = tree.find_any(local_hint, plane_available);
+                auto part_opt = tree.find(local_hint, plane_available);
                 if (!part_opt) {
                     return false;
                 }
@@ -600,7 +600,7 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperations) {
         hint = part + 1;
     }
 
-    EXPECT_FALSE(tree.find_any(0, plane_non_empty).has_value());
+    EXPECT_FALSE(tree.find(0, plane_non_empty).has_value());
 
     std::vector<size_t> expected_available;
     expected_available.reserve(parts);
@@ -615,10 +615,10 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperationsStress) {
     constexpr size_t plane_non_empty = 1;
     constexpr size_t parts = 257;
 
-    AvailabilityBitmapTree tree;
-    tree.init(parts, 2);
-    tree.reset_all_set(plane_available);
-    tree.reset_all_clear(plane_non_empty);
+    BitmapTree tree;
+    tree.initialization(parts, 2);
+    tree.reset_set(plane_available);
+    tree.reset_clear(plane_non_empty);
 
     std::vector<std::atomic<uint64_t>> masks(parts);
     for (auto& mask : masks) {
@@ -653,7 +653,7 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperationsStress) {
         auto try_alloc = [&](size_t hint) -> bool {
             size_t local_hint = hint % parts;
             for (int attempt = 0; attempt < max_allocate_attempts; ++attempt) {
-                auto part_opt = tree.find_any(local_hint, plane_available);
+                auto part_opt = tree.find(local_hint, plane_available);
                 if (!part_opt) {
                     return false;
                 }
@@ -815,7 +815,7 @@ TEST(AvailabilityBitmapTreeTest, RealWorldMixedOperationsStress) {
         hint = part + 1;
     }
 
-    EXPECT_FALSE(tree.find_any(0, plane_non_empty).has_value());
+    EXPECT_FALSE(tree.find(0, plane_non_empty).has_value());
 
     std::vector<size_t> expected_available;
     expected_available.reserve(parts);

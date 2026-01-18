@@ -33,10 +33,6 @@ auto hazard_even = [](const Dummy* ptr) {
     return ptr && (ptr->value % 2 == 0);
 };
 
-auto hazard_mod3 = [](const Dummy* ptr) {
-    return ptr && (ptr->value % 3 == 0);
-};
-
 TEST(RetireMapTest, ConstructAndBasicOps) {
     RetireMap<Dummy> s(8, always_hazard);
     EXPECT_EQ(s.size(), 0u);

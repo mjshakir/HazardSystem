@@ -69,52 +69,52 @@ TEST_F(HashTableTest, RemoveNonExistingKey) {
 
 // Test multiple insertions and removals
 TEST_F(HashTableTest, InsertRemoveMultiple) {
-    constexpr size_t _size = 10UL;
+    constexpr int kSize = 10;
     std::vector<std::shared_ptr<TestNode>> nodes;
-    nodes.reserve(_size);
+    nodes.reserve(static_cast<size_t>(kSize));
 
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         nodes.emplace_back(std::make_shared<TestNode>(i * 10));
         ASSERT_TRUE(hashTable->insert(i, nodes.back()));
     }
 
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         auto found = hashTable->find(i);
         ASSERT_NE(found, nullptr);
-        EXPECT_EQ(found->value, i * _size);
+        EXPECT_EQ(found->value, i * kSize);
     }
 
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         ASSERT_TRUE(hashTable->remove(i));
     }
 
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         ASSERT_EQ(hashTable->find(i), nullptr);
     }
 }
 
 // Test pointer safety by inserting and clearing
 TEST_F(HashTableTest, PointerSafety) {
-    constexpr size_t _size = 5UL;
+    constexpr int kSize = 5;
     std::vector<std::shared_ptr<TestNode>> nodes;
-    nodes.reserve(_size);
-    for (int i = 0; i < _size; ++i) {
+    nodes.reserve(static_cast<size_t>(kSize));
+    for (int i = 0; i < kSize; ++i) {
         nodes.push_back(std::make_shared<TestNode>(i));
         ASSERT_TRUE(hashTable->insert(i, nodes.back()));
     }
 
     hashTable->clear(); // Should safely delete all nodes
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         ASSERT_EQ(hashTable->find(i), nullptr);
     }
 }
 
 // Test reclaiming non-hazardous pointers
 TEST_F(HashTableTest, ReclaimNonHazardPointers) {
-    constexpr size_t _size = 5UL;
+    constexpr int kSize = 5;
     std::vector<std::shared_ptr<TestNode>> nodes;
-    nodes.reserve(_size);
-    for (int i = 0; i < _size; ++i) {
+    nodes.reserve(static_cast<size_t>(kSize));
+    for (int i = 0; i < kSize; ++i) {
         nodes.push_back(std::make_shared<TestNode>(i)); // Now some values are odd, some are even
         ASSERT_TRUE(hashTable->insert(i, nodes.back()));
     }
@@ -124,7 +124,7 @@ TEST_F(HashTableTest, ReclaimNonHazardPointers) {
         return node->value % 2 == 0; // Remove even values
     });
 
-    for (int i = 0; i < _size; ++i) {
+    for (int i = 0; i < kSize; ++i) {
         auto found = hashTable->find(i);
         if (i % 2 == 0) {
             ASSERT_EQ(found, nullptr); // Nodes with even values should be removed
@@ -138,9 +138,10 @@ TEST_F(HashTableTest, ReclaimNonHazardPointers) {
 TEST_F(HashTableTest, ConcurrentInsertions) {
     constexpr int EntriesPerThread = 5;
 
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
         threads.emplace_back([&, t]() {
@@ -187,9 +188,10 @@ TEST_F(HashTableTest, UpdateNonExistentKey) {
 TEST_F(HashTableTest, ConcurrentInsertionsAndRemovals) {
     constexpr int EntriesPerThread = 5;
     
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
         threads.emplace_back([&, t]() {
@@ -244,9 +246,10 @@ TEST_F(HashTableTest, InsertAfterRemove) {
 TEST_F(HashTableTest, ConcurrentInsertFind) {
     constexpr int EntriesPerThread = 10;
 
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
         threads.emplace_back([&, t]() {
@@ -269,9 +272,10 @@ TEST_F(HashTableTest, ConcurrentInsertFind) {
 TEST_F(HashTableTest, ConcurrentInsertRemove) {
     constexpr int EntriesPerThread = 10;
 
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
         threads.emplace_back([&, t]() {
@@ -303,12 +307,13 @@ TEST_F(HashTableTest, ConcurrentInsertRemove) {
 TEST_F(HashTableTest, HighContentionTest) {
     constexpr int NumOperations = 1000;
     
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&]() {
             for (int i = 0; i < NumOperations; ++i) {
                 hashTable->insert(1, std::make_shared<TestNode>(i));
                 hashTable->remove(1);
@@ -325,9 +330,10 @@ TEST_F(HashTableTest, HighContentionTest) {
 TEST_F(HashTableTest, StressTestInsertRemove) {
     constexpr int NumElements = 50000;
     
-    const size_t thread_size = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int thread_size = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(thread_size);
+    threads.reserve(static_cast<size_t>(thread_size));
 
     for (int i = 0; i < thread_size; ++i) {
         threads.emplace_back([&, i]() {
@@ -381,12 +387,13 @@ TEST_F(HashTableTest, ReclaimUnderLoad) {
 TEST_F(HashTableTest, AtomicityTest) {
     constexpr int NumOperations = 1000;
 
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
-        threads.emplace_back([&, t]() {
+        threads.emplace_back([&]() {
             for (int i = 0; i < NumOperations; ++i) {
                 hashTable->insert(i, std::make_shared<TestNode>(i));
                 hashTable->remove(i);
@@ -410,9 +417,10 @@ TEST_F(HashTableTest, ConcurrentUpdates) {
     auto initial_value = std::make_shared<TestNode>(500);
     ASSERT_TRUE(hashTable->insert(Key, initial_value));  // Insert a key
 
-    const size_t NumThreads = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int NumThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     for (int t = 0; t < NumThreads; ++t) {
         threads.emplace_back([&, t]() {
@@ -564,16 +572,16 @@ TEST_F(HashTableTest, RealWorldMixedOperations) {
 
     std::atomic<bool> start{false};
     std::vector<std::thread> threads;
-    threads.reserve(NumThreads);
+    threads.reserve(static_cast<size_t>(NumThreads));
 
     auto now = [] { return std::chrono::steady_clock::now().time_since_epoch().count(); };
 
     // PHASE 1: Random concurrent mixed operations
-    for (int tid = 0; tid < NumThreads; ++tid) {
-        threads.emplace_back([&, tid]() {
-            std::mt19937 rng(static_cast<unsigned>(now()) ^ (tid << 16));
-            std::uniform_int_distribution<int> op_dist(0, 6);
-            std::uniform_int_distribution<int> key_dist(0, NumKeys - 1);
+	    for (int tid = 0; tid < NumThreads; ++tid) {
+	        threads.emplace_back([&, tid]() {
+	            std::mt19937 rng(static_cast<unsigned>(now()) ^ (static_cast<unsigned>(tid) << 16));
+	            std::uniform_int_distribution<int> op_dist(0, 6);
+	            std::uniform_int_distribution<int> key_dist(0, NumKeys - 1);
 
             while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
 
@@ -582,49 +590,52 @@ TEST_F(HashTableTest, RealWorldMixedOperations) {
                 int key = key_dist(rng);
 
                 switch (op) {
-                    case 0: { // insert
-                        auto val = std::make_shared<TestNode>(tid * 10000 + i);
-                        bool ok = hashTable->insert(key, val);
-                        // Only update ground_truth if insert succeeded
-                        if (ok)
-                            ground_truth[key].store(val->value, std::memory_order_relaxed);
-                        break;
-                    }
-                    case 1: { // remove
-                        bool ok = hashTable->remove(key);
-                        if (ok)
-                            ground_truth[key].store(-1, std::memory_order_relaxed);
-                        break;
-                    }
-                    case 2: { // update
-                        auto val = std::make_shared<TestNode>(tid * 10000 + i + 1);
-                        bool ok = hashTable->update(key, val);
-                        if (ok)
-                            ground_truth[key].store(val->value, std::memory_order_relaxed);
-                        break;
-                    }
+	                    case 0: { // insert
+	                        auto val = std::make_shared<TestNode>(tid * 10000 + i);
+	                        bool ok = hashTable->insert(key, val);
+	                        // Only update ground_truth if insert succeeded
+	                        if (ok) {
+	                            ground_truth[static_cast<size_t>(key)].store(val->value, std::memory_order_relaxed);
+	                        }
+	                        break;
+	                    }
+	                    case 1: { // remove
+	                        bool ok = hashTable->remove(key);
+	                        if (ok) {
+	                            ground_truth[static_cast<size_t>(key)].store(-1, std::memory_order_relaxed);
+	                        }
+	                        break;
+	                    }
+	                    case 2: { // update
+	                        auto val = std::make_shared<TestNode>(tid * 10000 + i + 1);
+	                        bool ok = hashTable->update(key, val);
+	                        if (ok) {
+	                            ground_truth[static_cast<size_t>(key)].store(val->value, std::memory_order_relaxed);
+	                        }
+	                        break;
+	                    }
                     case 3: { // find
                         auto found = hashTable->find(key);
                         // Not asserting here, just exercising reads
                         break;
                     }
-                    case 4: { // reclaim
-                        hashTable->reclaim([](std::shared_ptr<TestNode> node) {
-                            return node && node->value % 2 == 0;
-                        });
-                        // Update ground truth (soft: may be stale in race, so not strictly checked)
-                        for (int k = 0; k < NumKeys; ++k) {
-                            int v = ground_truth[k].load(std::memory_order_relaxed);
-                            if (v != -1 && v % 2 == 0)
-                                ground_truth[k].store(-1, std::memory_order_relaxed);
-                        }
-                        break;
-                    }
-                    case 5: { // size
-                        auto sz = hashTable->size();
-                        EXPECT_LE(sz, NumKeys + 1); // Table never grows too big
-                        break;
-                    }
+	                    case 4: { // reclaim
+	                        hashTable->reclaim([](std::shared_ptr<TestNode> node) {
+	                            return node && node->value % 2 == 0;
+	                        });
+	                        // Update ground truth (soft: may be stale in race, so not strictly checked)
+	                        for (int k = 0; k < NumKeys; ++k) {
+	                            int v = ground_truth[static_cast<size_t>(k)].load(std::memory_order_relaxed);
+	                            if (v != -1 && v % 2 == 0)
+	                                ground_truth[static_cast<size_t>(k)].store(-1, std::memory_order_relaxed);
+	                        }
+	                        break;
+	                    }
+	                    case 5: { // size
+	                        auto sz = hashTable->size();
+	                        EXPECT_LE(sz, static_cast<size_t>(NumKeys + 1)); // Table never grows too big
+	                        break;
+	                    }
                     case 6: { // clear (rare)
                         if (i % 1000 == 0) {
                             hashTable->clear();
@@ -641,10 +652,10 @@ TEST_F(HashTableTest, RealWorldMixedOperations) {
 
     for (auto& t : threads) t.join();
 
-    int mismatches = 0;
-    for (int k = 0; k < NumKeys; ++k) {
-        auto found = hashTable->find(k);
-        int expected = ground_truth[k].load(std::memory_order_relaxed);
+	    int mismatches = 0;
+	    for (int k = 0; k < NumKeys; ++k) {
+	        auto found = hashTable->find(k);
+	        int expected = ground_truth[static_cast<size_t>(k)].load(std::memory_order_relaxed);
         if (expected == -1 && found != nullptr) {
             mismatches++;
             // std::cout << "Key " << k << " unexpectedly present." << std::endl;

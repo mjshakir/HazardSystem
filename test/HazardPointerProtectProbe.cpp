@@ -41,7 +41,6 @@ bool probe_size(HazardPointerManager<T, 0>& mgr,
             dump_state("failure", mgr);
             return false;
         }
-        auto expected = std::min(hazard_size, i + 1); // we may reuse slots after reset
         auto hz = mgr.hazard_size();
         if (hz == 0) {
             std::cout << "[probe] hazard_size unexpectedly zero after successful protect, iter=" << i << std::endl;
@@ -85,4 +84,3 @@ int main() {
     std::cout << "[probe] completed all hazard sizes OK" << std::endl;
     return 0;
 }
-
