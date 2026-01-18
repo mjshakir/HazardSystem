@@ -36,6 +36,9 @@ function(create_test_target TARGET_NAME SOURCE_FILE)
     
     # Link the main project library and Google Test
     target_link_libraries(${TARGET_NAME} PRIVATE ${PROJECT_NAME})
+    if(TARGET common_options)
+        target_link_libraries(${TARGET_NAME} PRIVATE common_options)
+    endif()
     if(GTest_FOUND)
         target_link_libraries(${TARGET_NAME} PRIVATE GTest::gmock_main)
     else()

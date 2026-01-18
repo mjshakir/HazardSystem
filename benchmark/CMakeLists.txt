@@ -34,6 +34,9 @@ function(create_benchmark_target TARGET_NAME SOURCE_FILE)
     
     # Link the main project library and Google Benchmark
     target_link_libraries(${TARGET_NAME} PRIVATE ${PROJECT_NAME})
+    if(TARGET common_options)
+        target_link_libraries(${TARGET_NAME} PRIVATE common_options)
+    endif()
     if(benchmark_FOUND)
         if(HAS_TBB AND BUILD_CIRCULARBUFFER_MULTI_THREADING)
             target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark tbb)
