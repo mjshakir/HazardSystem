@@ -19,14 +19,59 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 #------------------------------------------------------------------------------------------
 if(HAZARDSYSTEM_STANDALONE_PROJECT)
+    add_library(common_options INTERFACE)
     if(MSVC)
-        # MSVC specific warning flags
-        add_library(common_options INTERFACE)
-        target_compile_options(common_options INTERFACE /W4)  # Equivalent to -Wall in GCC/Clang
+        target_compile_options(common_options INTERFACE /W4 /WX)
     else()
-        # GCC/Clang specific warning flags
-        add_library(common_options INTERFACE)
-        target_compile_options(common_options INTERFACE -Wall -Wextra -Wpedantic -pedantic-errors -Werror=format-security -fasynchronous-unwind-tables)
+        option(HAZARDSYSTEM_ENABLE_GCC_ANALYZER "Enable GCC static analyzer (-fanalyzer)." OFF)
+        option(HAZARDSYSTEM_ENABLE_CLANG_ANALYZER "Enable Clang static analyzer (--analyze). Not intended for normal builds." OFF)
+        set(HAZARDSYSTEM_MAX_ERRORS 5 CACHE STRING "Max errors per translation unit (GCC: -fmax-errors=, Clang: -ferror-limit=).")
+
+        set(HAZARDSYSTEM_SOURCE_PREFIX_MAP "${CMAKE_SOURCE_DIR}=.")
+        set(HAZARDSYSTEM_BUILD_PREFIX_MAP "${CMAKE_BINARY_DIR}=.")
+
+        target_compile_options(common_options INTERFACE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -pedantic-errors
+            -Wshadow
+            -Werror
+            -Wformat
+            -Werror=format-security
+            -Wconversion
+            -Wsign-conversion
+            -Wcast-qual
+            -Wcast-align
+            -Wnull-dereference
+            -Wdouble-promotion
+            -Wimplicit-fallthrough
+            -Woverloaded-virtual
+            -Werror=return-type
+            -Wundef
+            -fstack-protector-strong
+            -fvisibility=hidden
+            -fvisibility-inlines-hidden
+            "-ffile-prefix-map=${HAZARDSYSTEM_SOURCE_PREFIX_MAP}"
+            "-ffile-prefix-map=${HAZARDSYSTEM_BUILD_PREFIX_MAP}"
+            "-fmacro-prefix-map=${HAZARDSYSTEM_SOURCE_PREFIX_MAP}"
+            "-fmacro-prefix-map=${HAZARDSYSTEM_BUILD_PREFIX_MAP}"
+            -fasynchronous-unwind-tables
+        )
+
+        if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+            target_compile_options(common_options INTERFACE "-fmax-errors=${HAZARDSYSTEM_MAX_ERRORS}")
+        elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+            target_compile_options(common_options INTERFACE "-ferror-limit=${HAZARDSYSTEM_MAX_ERRORS}")
+        endif()
+
+        if(HAZARDSYSTEM_ENABLE_GCC_ANALYZER AND ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+            target_compile_options(common_options INTERFACE -fanalyzer)
+        endif()
+
+        if(HAZARDSYSTEM_ENABLE_CLANG_ANALYZER AND ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
+            target_compile_options(common_options INTERFACE --analyze)
+        endif()
     endif()
 endif()
 #------------------------------------------------------------------------------------------
@@ -54,6 +99,7 @@ option(BUILD_HAZARDSYSTEM_SHARED_LIBS "Build using shared libraries" ON)
 option(BUILD_HAZARDSYSTEM_EXAMPLE "Build HazardSystem example" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_TESTS "Build HazardSystem tests" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_BENCHMARK "Build HazardSystem benchmarks" ${HAZARDSYSTEM_STANDALONE_PROJECT})
+option(BUILD_HAZARDSYSTEM_DISABLE_BITMASK_ROTATION "Disable BitmaskTable rotation" OFF)
 set(HAS_TBB OFF CACHE BOOL "Set to TRUE if TBB is found, otherwise FALSE")
 #------------------------------------------------------------------------------------------
 # Force colored output
@@ -72,7 +118,7 @@ set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
 set(HAZARDSYSTEM_SOURCES
     # ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/AvailabilityBitmapTree.cpp
+	${HAZARDSYSTEM_SOURCE_DIR}/BitmapTree.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/Hasher.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashMultiTable.cpp
@@ -81,19 +127,25 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/RetireSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/ProtectedPointer.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
-    
+	${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
+	${HAZARDSYSTEM_SOURCE_DIR}/ProtectedPointer.cpp
+	${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
+	${HAZARDSYSTEM_SOURCE_DIR}/HazardSystemAPI.cpp
 )
 #------------------------------------------------------------------------------------------
 # Check if the library should be built as a shared library
 if(BUILD_HAZARDSYSTEM_SHARED_LIBS)
     add_library(${PROJECT_NAME} SHARED ${HAZARDSYSTEM_SOURCES})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAZARDSYSTEM_BUILDING_LIBRARY)
     # If needed, set properties specific to shared libraries here
 else()
     add_library(${PROJECT_NAME} STATIC ${HAZARDSYSTEM_SOURCES})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAZARDSYSTEM_STATIC)
     # If needed, set properties specific to static libraries here
+endif()
+#------------------------------------------------------------------------------------------
+if(HAZARDSYSTEM_STANDALONE_PROJECT)
+    target_link_libraries(${PROJECT_NAME} PRIVATE common_options)
 endif()
 #------------------------------------------------------------------------------------------
 target_include_directories(${PROJECT_NAME} PUBLIC 
@@ -117,6 +169,9 @@ if(BUILD_HAZARDSYSTEM_EXAMPLE)
     set(HAZARDSYSTEM_EXAMPLE_NAME "${PROJECT_NAME}_example")
     add_executable(${HAZARDSYSTEM_EXAMPLE_NAME} example/main.cpp)
     target_link_libraries(${HAZARDSYSTEM_EXAMPLE_NAME} PRIVATE ${PROJECT_NAME})
+    if(TARGET common_options)
+        target_link_libraries(${HAZARDSYSTEM_EXAMPLE_NAME} PRIVATE common_options)
+    endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Compiler-specific flags
