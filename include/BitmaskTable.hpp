@@ -1032,7 +1032,7 @@ namespace HazardSystem {
                 }// end if (!leaf_bits)
                 //--------------------------
                 if (!m_available) {
-                    m_available = std::move(BitmapTree());
+                    m_available = BitmapTree();
                 }// end if (!m_available)
                 //--------------------------
                 if (!m_available->initialization(leaf_bits, plane_count())) {
