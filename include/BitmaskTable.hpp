@@ -1085,13 +1085,13 @@ namespace HazardSystem {
                 return capacity > static_cast<size_t>(C_ARRAY_LIMIT);
             }// end constexpr bool use_tree(const size_t& capacity) const noexcept
             //--------------------------
-            consteval size_t plane_index(PartPlane plane) const noexcept {
+            constexpr size_t plane_index(PartPlane plane) const noexcept {
                 return static_cast<size_t>(plane);
-            }// end consteval size_t plane_index(PartPlane plane) const noexcept
+            }// end constexpr size_t plane_index(PartPlane plane) const noexcept
             //--------------------------
-            consteval size_t plane_count(void) const noexcept {
+            constexpr size_t plane_count(void) const noexcept {
                 return plane_index(PartPlane::Count);
-            }// end consteval size_t plane_count(void) const noexcept
+            }// end constexpr size_t plane_count(void) const noexcept
             //--------------------------
             consteval uint64_t initial_bitmask(void) const noexcept {
                 if constexpr ((N > 0) and (N < C_BITS_PER_MASK)) {
