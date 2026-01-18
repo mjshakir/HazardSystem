@@ -152,8 +152,10 @@ namespace HazardSystem {
                 }// end if (m_retired.size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
-                    constexpr float C_INCREASE_SIZE = 1.2f;
-                    if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) {
+                    const size_t current_size   = m_retired.size();
+                    const size_t increase       = current_size / 5UL;
+                    const size_t requested_size = current_size + (increase ? increase : 1UL);
+                    if (!resize_retired(requested_size)) {
                         return false;
                     }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
                 }// end if (should_resize)
@@ -203,8 +205,7 @@ namespace HazardSystem {
             }// end size_t size_data(void) const
             //--------------------------
             bool should_resize(void) const {
-                constexpr float C_LIMITER = 0.8f;
-                return m_retired.size() > static_cast<size_t>(m_threshold * C_LIMITER);
+                return m_retired.size() > (m_threshold - (m_threshold / 5UL));
             }// end bool should_resize(void)
             //--------------------------
             bool resize_retired(const size_t& requested_size) {
