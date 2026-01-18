@@ -2,6 +2,7 @@
 // Standard C++ library
 //--------------------------------------------------------------
 #include <atomic>
+#include <algorithm>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -27,8 +28,8 @@ static void BM_LoadOnly(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 // Store a fresh pointer, read it, then release.
@@ -45,8 +46,8 @@ static void BM_LoadStore(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 // Store-only path (overwrite with a fresh pointer each time).
@@ -60,8 +61,8 @@ static void BM_StoreOnly(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_Reset(benchmark::State& state) {
@@ -74,8 +75,8 @@ static void BM_Reset(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_CAS_Success(benchmark::State& state) {
@@ -94,8 +95,8 @@ static void BM_CAS_Success(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_CAS_Fail(benchmark::State& state) {
@@ -119,8 +120,8 @@ static void BM_CAS_Fail(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_Transfer(benchmark::State& state) {
@@ -133,8 +134,8 @@ static void BM_Transfer(benchmark::State& state) {
             benchmark::DoNotOptimize(out);
         }
     }
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_Protect(benchmark::State& state) {
@@ -148,8 +149,8 @@ static void BM_Protect(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 static void BM_MultiThreaded_ResetRelease(benchmark::State& state) {
@@ -158,7 +159,7 @@ static void BM_MultiThreaded_ResetRelease(benchmark::State& state) {
     for (auto _ : state) {
         std::thread t1([&] {
             for (size_t i = 0; i < ops; ++i) {
-                ptr.reset(new int(i), std::memory_order_relaxed);
+                ptr.reset(new int(static_cast<int>(i)), std::memory_order_relaxed);
             }
         });
         std::thread t2([&] {
@@ -171,8 +172,8 @@ static void BM_MultiThreaded_ResetRelease(benchmark::State& state) {
     }
     auto leftover = ptr.release(std::memory_order_relaxed);
     delete leftover;
-    state.SetComplexityN(ops);
-    state.SetItemsProcessed(state.iterations() * ops);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(ops));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(ops));
 }
 
 
@@ -182,7 +183,7 @@ BENCHMARK(BM_CAS_Success)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchm
 BENCHMARK(BM_CAS_Fail)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchmark::o1);
 BENCHMARK(BM_Transfer)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchmark::o1);
 BENCHMARK(BM_Protect)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchmark::o1);
-BENCHMARK(BM_MultiThreaded_ResetRelease)->RangeMultiplier(2)->Range(1, 1024)->ThreadRange(1, std::thread::hardware_concurrency())->Complexity(benchmark::o1);
+BENCHMARK(BM_MultiThreaded_ResetRelease)->RangeMultiplier(2)->Range(1, 1024)->ThreadRange(1, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())))->Complexity(benchmark::o1);
 BENCHMARK(BM_LoadOnly)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchmark::o1);
 BENCHMARK(BM_StoreOnly)->RangeMultiplier(2)->Range(1, 1024)->Complexity(benchmark::o1);
 
