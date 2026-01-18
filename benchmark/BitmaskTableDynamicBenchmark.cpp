@@ -60,7 +60,7 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireRelease)(benchmark::State& stat
         }
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -82,7 +82,7 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireFailWhenFull)(benchmark::State&
         }
     }
 
-    state.SetComplexityN(cap);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(cap));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
@@ -115,7 +115,7 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireWorstCaseNearFull)(benchmark::S
         }
     }
 
-    state.SetComplexityN(cap);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(cap));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
@@ -146,8 +146,8 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, IterateActive)(benchmark::State& state
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(fill_target);
-    state.SetItemsProcessed(state.iterations() * fill_target);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(fill_target));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(fill_target));
 }
 
 // Clear the dynamically sized table to capture cleanup overhead
@@ -170,8 +170,8 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, Clear)(benchmark::State& state) {
         benchmark::DoNotOptimize(table->size());
     }
 
-    state.SetComplexityN(capacity);
-    state.SetItemsProcessed(state.iterations() * capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(capacity));
 }
 
 // Iterator-based acquisition + set + release
@@ -189,7 +189,7 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, AcquireIteratorSet)(benchmark::State& 
         table->release(index);
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -223,8 +223,8 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, ActiveChecks)(benchmark::State& state)
         benchmark::DoNotOptimize(hits);
     }
 
-    state.SetComplexityN(fill_count);
-    state.SetItemsProcessed(state.iterations() * fill_count);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(fill_count));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(fill_count));
 }
 
 // Predicate-based find across dynamic masks
@@ -247,13 +247,13 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, FindPredicate)(benchmark::State& state
         }
         state.ResumeTiming();
 
-        const bool found = table->find([&](const BenchmarkTestData* ptr) {
+        bool found = table->find([&](const BenchmarkTestData* ptr) {
             return ptr && ptr->data.front() == target_seed;
         });
         benchmark::DoNotOptimize(found);
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -269,7 +269,7 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, EmplaceReturn)(benchmark::State& state
         }
     }
 
-    state.SetComplexityN(capacity);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(capacity));
     state.SetItemsProcessed(state.iterations());
 }
 

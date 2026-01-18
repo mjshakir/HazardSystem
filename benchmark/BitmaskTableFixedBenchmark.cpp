@@ -86,7 +86,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state)
         table.release(id);
     }
 
-    state.SetComplexityN(batch);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(batch));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -117,8 +117,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, IterateActive)(benchmark::State& state) 
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(to_fill);
-    state.SetItemsProcessed(state.iterations() * to_fill);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(to_fill));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(to_fill));
 }
 
 // Clear all hazard slots and bitmask state
@@ -141,8 +141,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
         benchmark::DoNotOptimize(table.size());
     }
 
-    state.SetComplexityN(table.capacity());
-    state.SetItemsProcessed(state.iterations() * table.capacity());
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(table.capacity()));
 }
 
 // Exercise acquire_iterator + set(iterator) path
@@ -160,7 +160,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& st
         table.release(index);
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -193,8 +193,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
         benchmark::DoNotOptimize(hits);
     }
 
-    state.SetComplexityN(fill_count);
-    state.SetItemsProcessed(state.iterations() * fill_count);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(fill_count));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(fill_count));
 }
 
 // Find with predicate scanning through active slots
@@ -208,22 +208,23 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, FindPredicate)(benchmark::State& state) 
         table.clear();
         owned.clear();
         // Fill all slots; place a unique seed in the last slot to force scanning
-        for (size_t i = 0; i < table.capacity(); ++i) {
+        const size_t capacity = static_cast<size_t>(table.capacity());
+        for (size_t i = 0; i < capacity; ++i) {
             auto idx = table.acquire();
             if (!idx) break;
-            const int seed = static_cast<int>(i == table.capacity() - 1 ? target_seed : static_cast<int>(i));
+            const int seed = static_cast<int>(i == capacity - 1 ? target_seed : static_cast<int>(i));
             owned.emplace_back(std::make_unique<BenchmarkTestData>(seed));
             table.set(idx.value(), owned.back().get());
         }
         state.ResumeTiming();
 
-        const bool found = table.find([&](const BenchmarkTestData* ptr) {
+        bool found = table.find([&](const BenchmarkTestData* ptr) {
             return ptr && ptr->data.front() == target_seed;
         });
         benchmark::DoNotOptimize(found);
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -239,7 +240,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, EmplaceReturn)(benchmark::State& state) 
         }
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -258,7 +259,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireFailWhenFull)(benchmark::Sta
         }
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(table.capacity()));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
@@ -289,7 +290,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireWorstCaseNearFull)(benchmark
         }
     }
 
-    state.SetComplexityN(cap);
+    state.SetComplexityN(static_cast<benchmark::ComplexityN>(cap));
     state.SetItemsProcessed(state.iterations() * 64);
 }
 
