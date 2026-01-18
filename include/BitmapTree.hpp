@@ -21,7 +21,7 @@ namespace HazardSystem {
     // - Internal levels summarize non-empty 64-bit words of the level below.
     // - Operations are atomic; lock-free if std::atomic<uint64_t> is lock-free.
     //--------------------------------------------------------------
-    class HazardSystemAPI BitmapTree {
+    class HAZARDSYSTEM_API BitmapTree {
         //----------------------------------------------------------
         private:
             static constexpr size_t C_WORD_BITS     = static_cast<size_t>(std::numeric_limits<uint64_t>::digits);
