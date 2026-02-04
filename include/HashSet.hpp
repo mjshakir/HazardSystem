@@ -54,7 +54,7 @@ namespace HazardSystem {
             // Capacity selection helpers
             static constexpr size_t C_ARRAY_LIMIT    = 1024UL;
             static constexpr size_t C_NPOS           = std::numeric_limits<size_t>::max();
-            static constexpr bool C_USE_ARRAY          = (N > 0) && (N <= C_ARRAY_LIMIT);
+            static constexpr bool C_USE_ARRAY        = (N > 0) && (N <= C_ARRAY_LIMIT);
             //--------------------------
             static constexpr size_t safe_double_const(size_t n) {
                 return (n > (std::numeric_limits<size_t>::max() >> 1)) ? std::numeric_limits<size_t>::max() : (n << 1);
