@@ -39,6 +39,16 @@ namespace HazardSystem {
             static constexpr uint8_t C_ROTATE_THRESHOLD = static_cast<uint8_t>(C_BITS_PER_MASK / 2);
             static constexpr uint16_t C_MASK_COUNT      = (N == 0 ? 0 : static_cast<uint16_t>((N + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK));
             //--------------------------
+            static constexpr bool C_TREE_POSSIBLE       = (N == 0) or (N > C_ARRAY_LIMIT);
+            static constexpr bool C_TREE_ALWAYS         = (N > C_ARRAY_LIMIT);
+            //--------------------------
+            struct NoTree {
+            };
+            //--------------------------
+            using TreeStorage                            = std::conditional_t<C_TREE_POSSIBLE,
+                                                            std::conditional_t<C_TREE_ALWAYS, BitmapTree, std::unique_ptr<BitmapTree>>,
+                                                            NoTree>;
+            //--------------------------
             using SlotType                              = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT),
                                                             std::vector<HazardPointer<T>>, std::array<HazardPointer<T>, N>>;
             //--------------------------
@@ -74,7 +84,8 @@ namespace HazardSystem {
                                     m_size(0UL),
                                     m_slots(),
                                     m_bitmask(),
-                                    m_available(std::nullopt),
+                                    m_available(),
+                                    m_use_tree(false),
                                     m_initialize(false) {
                 //--------------------------
             }// end BitmaskTable(void)
@@ -85,7 +96,8 @@ namespace HazardSystem {
                                     m_size(0UL),
                                     m_slots(),
                                     m_bitmask(initial_bitmask()),
-                                    m_available(std::nullopt),
+                                    m_available(),
+                                    m_use_tree(false),
                                     m_initialize(false) {
                 //--------------------------
             }// end BitmaskTable(void)
@@ -96,7 +108,8 @@ namespace HazardSystem {
                                     m_size(0UL),
                                     m_slots(),
                                     m_bitmask(),
-                                    m_available(std::nullopt),
+                                    m_available(),
+                                    m_use_tree(false),
                                     m_initialize(Initialization(0ULL) and maybe_initialize_tree(static_cast<size_t>(get_mask_count()))) { 
                 //--------------------------
             }// end BitmaskTable(void)
@@ -107,7 +120,8 @@ namespace HazardSystem {
                                                     m_size(0UL),
                                                     m_slots(bitmask_capacity(capacity)),
                                                     m_bitmask(bitmask_calculator(bitmask_capacity(capacity))),
-                                                    m_available(use_tree(bitmask_capacity(capacity)) ? std::optional<BitmapTree>(BitmapTree()) : std::nullopt),
+                                                    m_available(),
+                                                    m_use_tree(use_tree(bitmask_capacity(capacity))),
                                                     m_initialize(Initialization(0ULL) and maybe_initialize_tree(static_cast<size_t>(get_mask_count()))) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
@@ -118,7 +132,8 @@ namespace HazardSystem {
                                     m_size(0UL),
                                     m_slots(bitmask_capacity(N)),
                                     m_bitmask(bitmask_calculator(bitmask_capacity(N))),
-                                    m_available(use_tree(bitmask_capacity(N)) ? std::optional<BitmapTree>(BitmapTree()) : std::nullopt),
+                                    m_available(),
+                                    m_use_tree(use_tree(bitmask_capacity(N))),
                                     m_initialize(Initialization(0ULL) and maybe_initialize_tree(static_cast<size_t>(get_mask_count()))) {
                 //--------------------------
             }// end BitmaskTable(const size_t& capacity)
@@ -330,7 +345,8 @@ namespace HazardSystem {
                 }// end if (!capacity or !mask_count)
                 //--------------------------
                 const size_t available_plane    = plane_index(PartPlane::Available);
-                const bool _use_tree            = m_available.has_value();
+                const bool _use_tree            = tree_enabled();
+                BitmapTree* tree                = _use_tree ? tree_ptr() : nullptr;
                 thread_local size_t part_hint   = 0;
                 thread_local uint8_t bit_hint   = 0;
                 size_t start_part               = part_hint % mask_count_size;
@@ -338,7 +354,7 @@ namespace HazardSystem {
                 while (m_size.load(std::memory_order_relaxed) < capacity_size) {
                     std::optional<size_t> part_opt;
                     if (_use_tree) {
-                        part_opt = m_available->find(start_part, available_plane);
+                        part_opt = tree->find(start_part, available_plane);
                         if (!part_opt) {
                             // Tree is a hint; fall back to a bounded scan to avoid spurious failures under contention.
                             //--------------------------
@@ -688,7 +704,7 @@ namespace HazardSystem {
                     return;
                 }// end if (!mask_count)
                 //--------------------------
-                if (!m_available) {
+                if (!tree_enabled()) {
                     for (IndexType part = 0; part < mask_count; ++part) {
                         //--------------------------
                         uint64_t mask = m_bitmask[part].load(std::memory_order_acquire);
@@ -713,12 +729,13 @@ namespace HazardSystem {
                         }// end  while (mask)
                     }// end for (IndexType part = 0; part < mask_count; ++part)
                     return;
-                }// end if (!m_available)
+                }// end if (!tree_enabled)
                 //--------------------------
                 size_t hint = 0;
-                for (auto part_opt = m_available->find_next(hint, plane_index(PartPlane::NonEmpty));
+                BitmapTree* tree = tree_ptr();
+                for (auto part_opt = tree->find_next(hint, plane_index(PartPlane::NonEmpty));
 	                    part_opt;
-	                    part_opt = m_available->find_next(hint, plane_index(PartPlane::NonEmpty))) {
+	                    part_opt = tree->find_next(hint, plane_index(PartPlane::NonEmpty))) {
                     //--------------------------
                     const IndexType part    = static_cast<IndexType>(part_opt.value());
                     uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
@@ -814,9 +831,10 @@ namespace HazardSystem {
                     m_bitmask.store(initial_bitmask(), std::memory_order_release);
                 } else {
                     static_cast<void>(Initialization(0ULL));
-                    if (m_available) {
-                        m_available->reset_set(plane_index(PartPlane::Available));
-                        m_available->reset_clear(plane_index(PartPlane::NonEmpty));
+                    if (tree_enabled()) {
+                        BitmapTree* tree = tree_ptr();
+                        tree->reset_set(plane_index(PartPlane::Available));
+                        tree->reset_clear(plane_index(PartPlane::NonEmpty));
                     }
                 }// end if constexpr ((N > 0) and (N <= 64))
                 //--------------------------
@@ -830,6 +848,58 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             // Helper functions
             //--------------------------------------------------------------
+            bool tree_enabled(void) const noexcept {
+                if constexpr (!C_TREE_POSSIBLE) {
+                    return false;
+                } else {
+                    if (!m_use_tree) {
+                        return false;
+                    }
+                    if constexpr (C_TREE_ALWAYS) {
+                        return true;
+                    } else {
+                        return static_cast<bool>(m_available);
+                    }
+                }
+            }// end bool tree_enabled(void) const noexcept
+            //--------------------------
+            BitmapTree* tree_ptr(void) noexcept {
+                if constexpr (!C_TREE_POSSIBLE) {
+                    return nullptr;
+                } else {
+                    if constexpr (C_TREE_ALWAYS) {
+                        return &m_available;
+                    } else {
+                        return m_available.get();
+                    }
+                }
+            }// end BitmapTree* tree_ptr(void) noexcept
+            //--------------------------
+            BitmapTree* tree_ptr(void) const noexcept {
+                if constexpr (!C_TREE_POSSIBLE) {
+                    return nullptr;
+                } else {
+                    if constexpr (C_TREE_ALWAYS) {
+                        return &m_available;
+                    } else {
+                        return m_available.get();
+                    }
+                }
+            }// end BitmapTree* tree_ptr(void) const noexcept
+            //--------------------------
+            void disable_tree(void) noexcept {
+                if constexpr (!C_TREE_POSSIBLE) {
+                    return;
+                } else {
+                    m_use_tree = false;
+                    if constexpr (C_TREE_ALWAYS) {
+                        m_available = BitmapTree();
+                    } else {
+                        m_available.reset();
+                    }
+                }
+            }// end void disable_tree(void) noexcept
+            //--------------------------
             uint8_t select_free_bit(const uint64_t& mask, const uint8_t& bit_hint) noexcept {
                 //--------------------------
                 const uint64_t _free = ~mask;
@@ -857,7 +927,8 @@ namespace HazardSystem {
             std::enable_if_t<(M == 0) or (M > 64), std::optional<size_t>>
             scan_available(const size_t& start_part, const size_t& mask_count_size, const size_t& available_plane) {
                 //--------------------------
-                const bool _use_tree = m_available.has_value();
+                const bool _use_tree = tree_enabled();
+                BitmapTree* tree = _use_tree ? tree_ptr() : nullptr;
                 for (size_t offset = 0; offset < mask_count_size; ++offset) {
                     //--------------------------
                     size_t probe = start_part + offset;
@@ -868,7 +939,7 @@ namespace HazardSystem {
                     //--------------------------
                     if (m_bitmask[probe].load(std::memory_order_acquire) != ~0ULL) {
                         if (_use_tree) {
-                            m_available->set(probe, available_plane);
+                            tree->set(probe, available_plane);
                         }// end if (_use_tree)
                         return probe;
                     }// end if (m_bitmask[probe].load(std::memory_order_acquire) != ~0ULL)
@@ -880,13 +951,14 @@ namespace HazardSystem {
             std::enable_if_t<(M == 0) or (M > 64), bool>
             refresh_hint(const IndexType& part, const size_t& available_plane) noexcept {
                 //--------------------------
-                if (!m_available) {
+                if (!tree_enabled()) {
                     return false;
-                }// end if (!m_available)
+                }// end if (!tree_enabled)
                 //--------------------------
-                m_available->clear(static_cast<size_t>(part), available_plane);
+                BitmapTree* tree = tree_ptr();
+                tree->clear(static_cast<size_t>(part), available_plane);
                 if (m_bitmask[part].load(std::memory_order_acquire) != ~0ULL) {
-                    m_available->set(static_cast<size_t>(part), available_plane);
+                    tree->set(static_cast<size_t>(part), available_plane);
                 }// end if (m_bitmask[part].load(std::memory_order_acquire) != ~0ULL)
                 //--------------------------
                 return true;
@@ -909,27 +981,27 @@ namespace HazardSystem {
                     return true;
                 }// end if (old != ~0ULL)
                 //--------------------------
-                if (!m_available) {
+                if (!tree_enabled()) {
                     return false;
-                }// end if (!m_available)
+                }// end if (!tree_enabled)
                 //--------------------------
-                return m_available->set(static_cast<size_t>(part), available_plane);
+                return tree_ptr()->set(static_cast<size_t>(part), available_plane);
             }// end bool available_not_full(const IndexType& part, const uint64_t& old, const size_t& available_plane) noexcept 
             //--------------------------
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), bool> mark_non_empty(IndexType part) noexcept {
-                if (!m_available) {
+                if (!tree_enabled()) {
                     return false;
-                }// end if (!m_available)
-                return m_available->set(static_cast<size_t>(part), plane_index(PartPlane::NonEmpty));
+                }// end if (!tree_enabled)
+                return tree_ptr()->set(static_cast<size_t>(part), plane_index(PartPlane::NonEmpty));
             }// end std::enable_if_t<(M == 0) or (M > 64), bool> mark_non_empty(IndexType part) noexcept
             //--------------------------
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), bool> clear_non_empty(IndexType part) const noexcept {
-                if (!m_available) {
+                if (!tree_enabled()) {
                     return false;
-                }// end if (!m_available)
-                return m_available->clear(static_cast<size_t>(part), plane_index(PartPlane::NonEmpty));
+                }// end if (!tree_enabled)
+                return tree_ptr()->clear(static_cast<size_t>(part), plane_index(PartPlane::NonEmpty));
             }// end std::enable_if_t<(M == 0) or (M > 64), bool> clear_non_empty(IndexType part) const noexcept
             //--------------------------
             template<uint16_t M = N>
@@ -1017,30 +1089,41 @@ namespace HazardSystem {
             //--------------------------
             bool maybe_initialize_tree(const size_t& leaf_bits) {
                 //--------------------------
-                if (!m_available) {
+                if constexpr (!C_TREE_POSSIBLE) {
                     return true;
-                }// end if (!m_available)
-                //--------------------------
-                return initialize_tree(leaf_bits);
+                } else {
+                    if (!m_use_tree) {
+                        return true;
+                    }// end if (!m_use_tree)
+                    //--------------------------
+                    return initialize_tree(leaf_bits);
+                }
             }// end bool maybe_initialize_tree(const size_t& leaf_bits)
             //--------------------------
             bool initialize_tree(const size_t& leaf_bits) {
                 //--------------------------
-                if (!leaf_bits) {
-                    m_available.reset();
-                    return false;
-                }// end if (!leaf_bits)
-                //--------------------------
-                if (!m_available) {
-                    m_available = BitmapTree();
-                }// end if (!m_available)
-                //--------------------------
-                if (!m_available->initialization(leaf_bits, plane_count())) {
-                    m_available.reset();
-                    return false;
-                }// end if (!m_available->initialization(leaf_bits, plane_count()))
-                //--------------------------
-                return m_available->reset_set(plane_index(PartPlane::Available)) and m_available->reset_clear(plane_index(PartPlane::NonEmpty));
+                if constexpr (!C_TREE_POSSIBLE) {
+                    return true;
+                } else {
+                    if (!leaf_bits) {
+                        disable_tree();
+                        return false;
+                    }// end if (!leaf_bits)
+                    //--------------------------
+                    if constexpr (!C_TREE_ALWAYS) {
+                        if (!m_available) {
+                            m_available = std::make_unique<BitmapTree>();
+                        }// end if (!m_available)
+                    }
+                    //--------------------------
+                    BitmapTree* tree = tree_ptr();
+                    if (!tree or !tree->initialization(leaf_bits, plane_count())) {
+                        disable_tree();
+                        return false;
+                    }// end if (!tree or !tree->initialization(leaf_bits, plane_count()))
+                    //--------------------------
+                    return tree->reset_set(plane_index(PartPlane::Available)) and tree->reset_clear(plane_index(PartPlane::NonEmpty));
+                }
             }// end bool initialize_tree(const size_t& leaf_bits)
             //--------------------------------------------------------------
             // Constexpr / Consteval helpers
@@ -1110,7 +1193,8 @@ namespace HazardSystem {
             //--------------------------
             SlotType m_slots;
             BitmaskType m_bitmask;
-            mutable std::optional<BitmapTree> m_available;
+            mutable TreeStorage m_available;
+            bool m_use_tree;
             const bool m_initialize;
         //--------------------------------------------------------------
 	};// end class BitmaskTable
