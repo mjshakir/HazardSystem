@@ -16,7 +16,8 @@ HazardSystem::BitmapTree::BitmapTree(void) noexcept : m_mode(Mode::Empty),
                                         m_words_per_plane(0),
                                         m_single{0ULL, 0ULL},
                                         m_level_words(),
-                                        m_level_offsets() {
+                                        m_level_offsets(),
+                                        m_tree_words(nullptr) {
     //--------------------------
 }// end HazardSystem::BitmapTree::BitmapTree(void)
 //--------------------------------------------------------------
