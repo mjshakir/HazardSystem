@@ -3,19 +3,19 @@
 //--------------------------------------------------------------
 // Standard cpp library
 //--------------------------------------------------------------
-#include <cstdint>
 #include <cstdbool>
+#include <cstdint>
 #include <thread>
 //--------------------------------------------------------------
-// User Defined libraries
+// User-defined libraries
 //--------------------------------------------------------------
-#include "HazardSystemAPI.hpp"
 #include "HashSet.hpp"
+#include "HazardSystemAPI.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     class HAZARDSYSTEM_API ThreadRegistry {
-        //--------------------------------------------------------------
+            //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
             static ThreadRegistry& instance(void);
@@ -38,13 +38,13 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            ThreadRegistry(const ThreadRegistry&)               = delete;
-            ThreadRegistry& operator=(const ThreadRegistry&)    = delete;
-            ThreadRegistry(ThreadRegistry&&)                    = delete;
-            ThreadRegistry& operator=(ThreadRegistry&&)         = delete;
+            ThreadRegistry(const ThreadRegistry&)            = delete;
+            ThreadRegistry& operator=(const ThreadRegistry&) = delete;
+            ThreadRegistry(ThreadRegistry&&)                 = delete;
+            ThreadRegistry& operator=(ThreadRegistry&&)      = delete;
             //--------------------------
             HashSet<std::thread::id> m_thread_table;
-        //--------------------------------------------------------------
+            //--------------------------------------------------------------
     };// end class ThreadRegistry
     //--------------------------------------------------------------
 }// end namespace HazardSystem

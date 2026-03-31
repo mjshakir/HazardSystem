@@ -2,63 +2,72 @@
 //--------------------------------------------------------------
 // Standard cpp library
 //--------------------------------------------------------------
-#include <cstddef>
-#include <cstdbool>
-#include <atomic>
 #include <array>
-#include <vector>
-#include <memory>
+#include <atomic>
+#include <cstdbool>
+#include <cstddef>
 #include <functional>
+#include <memory>
 #include <tuple>
+#include <vector>
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
     template<typename Key, typename T, size_t N>
     class HashMultiTable {
-        //--------------------------------------------------------------
+            //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
             struct Node {
-                //--------------------------
-                Node(void) : data(nullptr), next(nullptr), prev() {
                     //--------------------------
+                    Node(void) : data(nullptr), next(nullptr), prev() {
+                        //--------------------------
                 }// end Node(void)
-                //--------------------------
-                Node(const Key& key_, std::shared_ptr<T> data_) : key(key_), data(data_), next(nullptr), prev() {
                     //--------------------------
+                    Node(const Key& key_, std::shared_ptr<T> data_)
+                        : key(key_), data(data_), next(nullptr), prev() {
+                        //--------------------------
                 }// end Node(const Key& key_, std::shared_ptr<T> data_)
-                //--------------------------
-                Key key;
-                std::atomic<std::shared_ptr<T>> data;
-                std::atomic<std::shared_ptr<Node>> next;
-                std::atomic<std::weak_ptr<Node>> prev;
-                //--------------------------
+                    //--------------------------
+                    Key                                key;
+                    std::atomic<std::shared_ptr<T>>    data;
+                    std::atomic<std::shared_ptr<Node>> next;
+                    std::atomic<std::weak_ptr<Node>>   prev;
+                    //--------------------------
             };// end struct Node
             //--------------------------------------------------------------
             class iterator {
-                //--------------------------------------------------------------
+                    //--------------------------------------------------------------
                 public:
                     iterator(std::shared_ptr<Node> ptr) : current(ptr) {
                         //--------------------------
                     }// end iterator(std::shared_ptr<Node> ptr)
                     //--------------------------
-                    Node& operator*(void) const { return *current; }
+                    Node& operator*(void) const {
+                        return *current;
+                    }
                     //--------------------------
-                    Node* operator->(void) { return current.get(); }
+                    Node* operator->(void) {
+                        return current.get();
+                    }
                     //--------------------------
                     iterator& operator++(void) {
                         current = current ? current->next.load(std::memory_order_acquire) : nullptr;
                         return *this;
-                    }// iterator& operator++(void)
+                    } // iterator& operator++(void)
                     //--------------------------
-                    bool operator==(const iterator& other) const { return current == other.current; }
+                    bool operator==(const iterator& other) const {
+                        return current == other.current;
+                    }
                     //--------------------------
-                    bool operator!=(const iterator& other) const { return current != other.current; }
+                    bool operator!=(const iterator& other) const {
+                        return current != other.current;
+                    }
                     //--------------------------
                 private:
                     //--------------------------
                     std::shared_ptr<Node> current;
-                //--------------------------------------------------------------
+                    //--------------------------------------------------------------
             };// end class iterator
             //--------------------------------------------------------------
         public:
@@ -67,12 +76,12 @@ namespace HazardSystem {
                 //--------------------------
             }// end HashMultiTable(void)
             //--------------------------
-            HashMultiTable(const HashMultiTable&)               = delete;
-            HashMultiTable& operator=(const HashMultiTable&)    = delete;
-            HashMultiTable(HashMultiTable&&)                    = delete;
-            HashMultiTable& operator=(HashMultiTable&&)         = delete;
+            HashMultiTable(const HashMultiTable&)            = delete;
+            HashMultiTable& operator=(const HashMultiTable&) = delete;
+            HashMultiTable(HashMultiTable&&)                 = delete;
+            HashMultiTable& operator=(HashMultiTable&&)      = delete;
             //--------------------------
-            ~HashMultiTable(void) = default;
+            ~HashMultiTable(void)                            = default;
             //--------------------------
             bool insert(const Key& key, std::shared_ptr<T> data) {
                 return insert_data(key, std::move(data));
@@ -131,12 +140,13 @@ namespace HazardSystem {
             }// end size_t size(void) const
             //--------------------------
             iterator begin(void) {
-                for (auto& bucket : m_table) {
-                    std::shared_ptr<Node> node = bucket.load(std::memory_order_acquire);
-                    if (node) return iterator(node);
+                for(auto& bucket : m_table) {
+                    std::shared_ptr<Node> _sp_node = bucket.load(std::memory_order_acquire);
+                    if(_sp_node)
+                        return iterator(_sp_node);
                 }
                 return iterator(nullptr);
-            }// iterator begin(void)
+            } // iterator begin(void)
             //--------------------------
             iterator end(void) {
                 return iterator(nullptr);
@@ -146,42 +156,43 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool insert_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
-                const size_t index  = hasher(key);
-                auto new_node       = std::make_shared<Node>(key, std::move(data));
-                std::shared_ptr<Node> head;
+                const size_t          _c_index    = hasher(key);
+                auto                  _p_new_node = std::make_shared<Node>(key, std::move(data));
+                std::shared_ptr<Node> _sp_head;
                 //--------------------------
                 do {
                     //--------------------------
-                    head = m_table.at(index).load(std::memory_order_acquire);
-                    new_node->next.store(head, std::memory_order_release);
+                    _sp_head = m_table.at(_c_index).load(std::memory_order_acquire);
+                    _p_new_node->next.store(_sp_head, std::memory_order_release);
                     //--------------------------
-                    if (head) {
-                        head->prev.store(new_node, std::memory_order_release);
+                    if(_sp_head) {
+                        _sp_head->prev.store(_p_new_node, std::memory_order_release);
                     }// end if (head)
                     //--------------------------
-                } while (!m_table.at(index).compare_exchange_weak(head, new_node,
-                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                } while(!m_table.at(_c_index).compare_exchange_weak(
+                    _sp_head, _p_new_node, std::memory_order_acq_rel, std::memory_order_acquire));
                 //--------------------------
                 m_size.fetch_add(1UL, std::memory_order_relaxed);
                 return true;
                 //--------------------------
-            }//end bool insert_data(const Key& key, std::shared_ptr<T> data)
+            } //end bool insert_data(const Key& key, std::shared_ptr<T> data)
             //--------------------------------------------------------------
             bool insert_node(size_t bucket_index, std::shared_ptr<Node> node) {
                 //--------------------------
-                std::shared_ptr<Node> head;
+                std::shared_ptr<Node> _sp_head;
                 //--------------------------
                 do {
                     //--------------------------
-                    head = m_table.at(bucket_index).load(std::memory_order_acquire);
-                    node->next.store(head, std::memory_order_release);
+                    _sp_head = m_table.at(bucket_index).load(std::memory_order_acquire);
+                    node->next.store(_sp_head, std::memory_order_release);
                     //--------------------------
-                    if (head) {
-                        head->prev.store(node, std::memory_order_release);
+                    if(_sp_head) {
+                        _sp_head->prev.store(node, std::memory_order_release);
                     }// end if (head)
                     //--------------------------
-                } while (!m_table.at(bucket_index).compare_exchange_weak(head, node,
-                                std::memory_order_acq_rel, std::memory_order_acquire));
+                } while(!m_table.at(bucket_index)
+                             .compare_exchange_weak(_sp_head, node, std::memory_order_acq_rel,
+                                                    std::memory_order_acquire));
                 //--------------------------
                 return true;
                 //--------------------------
@@ -189,63 +200,64 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool update_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
-                std::shared_ptr<Node> node;
-                std::tie(node, std::ignore) = find_node(key);
-                if (!node) {
+                std::shared_ptr<Node> _sp_node;
+                std::tie(_sp_node, std::ignore) = find_node(key);
+                if(!_sp_node) {
                     return false;
                 }// end if (!node)
                 //--------------------------
-                node->data.store(data, std::memory_order_release);
+                _sp_node->data.store(data, std::memory_order_release);
                 return true;
                 //--------------------------
             }// end bool update_data(const Key& key, std::shared_ptr<T> data)
             //--------------------------------------------------------------
             size_t update_data_all(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
-                auto nodes      = find_all_nodes(key);
-                size_t updated  = 0UL;
+                auto   _p_nodes = find_all_nodes(key);
+                size_t _updated = 0UL;
                 //--------------------------
-                for (auto& node : nodes) {
-                    if (node) {
+                for(auto& node : _p_nodes) {
+                    if(node) {
                         node->data.store(data, std::memory_order_release);
-                        ++updated;
+                        ++_updated;
                     }// end if (node)
                 }// end for (auto& [node, _] : nodes)
                 //--------------------------
-                return updated;
+                return _updated;
                 //--------------------------
             }// end size_t update_data_all(const Key& key, std::shared_ptr<T> data)
             //--------------------------------------------------------------
             std::vector<std::shared_ptr<T>> find_data(const Key& key) const {
                 //--------------------------
-                std::vector<std::shared_ptr<T>> results;
-                results.reserve(N);
+                std::vector<std::shared_ptr<T>> _results;
+                _results.reserve(N);
                 //--------------------------
-                std::shared_ptr<Node> current = m_table.at(hasher(key)).load(std::memory_order_acquire);
-                while (current) {
-                    if (current->key == key) {
-                        results.push_back(current->data.load(std::memory_order_acquire));
+                std::shared_ptr<Node> _sp_current =
+                    m_table.at(hasher(key)).load(std::memory_order_acquire);
+                while(_sp_current) {
+                    if(_sp_current->key == key) {
+                        _results.push_back(_sp_current->data.load(std::memory_order_acquire));
                     }// end if (current->key == key)
                     //--------------------------
-                    current = current->next.load(std::memory_order_acquire);
+                    _sp_current = _sp_current->next.load(std::memory_order_acquire);
                     //--------------------------
                 }// end  while (current)
                 //--------------------------
-                return results;
+                return _results;
                 //--------------------------
             }// end std::vector<std::shared_ptr<T>> find_data(const Key& key) const
             //--------------------------------------------------------------
             std::shared_ptr<T> find_first_data(const Key& key) const {
                 //--------------------------
-                Node* current = m_table.at(hasher(key)).load(std::memory_order_acquire).get();
+                Node* _p_current = m_table.at(hasher(key)).load(std::memory_order_acquire).get();
                 //--------------------------
-                while (current) {
+                while(_p_current) {
                     //--------------------------
-                    if (current->key == key) {
-                        return current->data.load(std::memory_order_acquire);
+                    if(_p_current->key == key) {
+                        return _p_current->data.load(std::memory_order_acquire);
                     }// end if (current->key == key)
                     //--------------------------
-                    current = current->next.load(std::memory_order_acquire).get();
+                    _p_current = _p_current->next.load(std::memory_order_acquire).get();
                     //--------------------------
                 }// end while (current)
                 //--------------------------
@@ -253,20 +265,21 @@ namespace HazardSystem {
                 //--------------------------
             }// end std::shared_ptr<T> find_first_data(const Key& key) const
             //--------------------------------------------------------------
-            std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>> find_data_node(std::shared_ptr<T> data) const {
+            std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>
+            find_data_node(std::shared_ptr<T> data) const {
                 //--------------------------
-                for (const auto& bucket : m_table) {
+                for(const auto& bucket : m_table) {
                     //--------------------------
-                    std::weak_ptr<Node> prev;
-                    std::shared_ptr<Node> current = bucket.load(std::memory_order_acquire);
+                    std::weak_ptr<Node>   _wp_prev;
+                    std::shared_ptr<Node> _sp_current = bucket.load(std::memory_order_acquire);
                     //--------------------------
-                    while (current) {
-                        if (current->data.load(std::memory_order_acquire) == data) {
-                            return {current, prev};
+                    while(_sp_current) {
+                        if(_sp_current->data.load(std::memory_order_acquire) == data) {
+                            return {_sp_current, _wp_prev};
                         }// end if (current->data.load(std::memory_order_acquire) == data)
                         //--------------------------
-                        prev    = current;
-                        current = current->next.load(std::memory_order_acquire);
+                        _wp_prev    = _sp_current;
+                        _sp_current = _sp_current->next.load(std::memory_order_acquire);
                         //--------------------------
                     }// end while (current)
                     //--------------------------
@@ -276,18 +289,21 @@ namespace HazardSystem {
                 //--------------------------
             }// end std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>> find_data_node(std::shared_ptr<T> data) const
             //--------------------------------------------------------------
-            std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>> find_node(const Key& key, std::shared_ptr<T> data) const {
+            std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>
+            find_node(const Key& key, std::shared_ptr<T> data) const {
                 //--------------------------
-                std::weak_ptr<Node> prev;
-                std::shared_ptr<Node> current = m_table.at(hasher(key)).load(std::memory_order_acquire);
+                std::weak_ptr<Node>   _wp_prev;
+                std::shared_ptr<Node> _sp_current =
+                    m_table.at(hasher(key)).load(std::memory_order_acquire);
                 //--------------------------
-                while (current) {
-                    if (current->key == key and current->data.load(std::memory_order_acquire) == data) {
-                        return {current, prev};
+                while(_sp_current) {
+                    if(_sp_current->key == key and
+                       _sp_current->data.load(std::memory_order_acquire) == data) {
+                        return {_sp_current, _wp_prev};
                     }// end if (current->key == key and current->data.load(std::memory_order_acquire) == data)
                     //--------------------------
-                    prev    = current;
-                    current = current->next.load(std::memory_order_acquire);
+                    _wp_prev    = _sp_current;
+                    _sp_current = _sp_current->next.load(std::memory_order_acquire);
                     //--------------------------
                 }// end while (current)
                 //--------------------------
@@ -297,17 +313,18 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>> find_node(const Key& key) const {
                 //--------------------------
-                std::weak_ptr<Node> prev;
-                std::shared_ptr<Node> current = m_table.at(hasher(key)).load(std::memory_order_acquire);
+                std::weak_ptr<Node>   _wp_prev;
+                std::shared_ptr<Node> _sp_current =
+                    m_table.at(hasher(key)).load(std::memory_order_acquire);
                 //--------------------------
-                while (current) {
+                while(_sp_current) {
                     //--------------------------
-                    if (current->key == key) {
-                        return {current, prev};
+                    if(_sp_current->key == key) {
+                        return {_sp_current, _wp_prev};
                     }// end if (current->key == key)
                     //--------------------------
-                    prev    = current;
-                    current = current->next.load(std::memory_order_acquire);
+                    _wp_prev    = _sp_current;
+                    _sp_current = _sp_current->next.load(std::memory_order_acquire);
                     //--------------------------
                 }// end while (current)
                 //--------------------------
@@ -317,38 +334,40 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             std::vector<std::shared_ptr<Node>> find_all_nodes(const Key& key) const {
                 //--------------------------
-                std::vector<std::shared_ptr<Node>> results;
-                results.reserve(N);
+                std::vector<std::shared_ptr<Node>> _results;
+                _results.reserve(N);
                 //--------------------------
-                std::shared_ptr<Node> current = m_table.at(hasher(key)).load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_current =
+                    m_table.at(hasher(key)).load(std::memory_order_acquire);
                 //--------------------------
-                while (current) {
+                while(_sp_current) {
                     //--------------------------
-                    if (current->key == key) {
-                        results.push_back(current);
+                    if(_sp_current->key == key) {
+                        _results.push_back(_sp_current);
                     }// end if (current->key == key) 
                     //--------------------------
-                    current = current->next.load(std::memory_order_acquire);
+                    _sp_current = _sp_current->next.load(std::memory_order_acquire);
                     //--------------------------
                 }// end while (current)
                 //--------------------------
-                return results;
+                return _results;
                 //--------------------------
             }// end std::vector<std::tuple<std::shared_ptr<Node>, std::weak_ptr<Node>>> find_all_nodes(const Key& key) const
             //--------------------------------------------------------------
             bool contain_data(const Key& key, std::shared_ptr<T> data) const {
                 //--------------------------
-                Node* current = m_table.at(hasher(key)).load(std::memory_order_acquire).get();
+                Node* _p_current = m_table.at(hasher(key)).load(std::memory_order_acquire).get();
                 //--------------------------
-                while (current) {
+                while(_p_current) {
                     //--------------------------
-                    if (current->key == key and current->data.load(std::memory_order_acquire) == data) {
+                    if(_p_current->key == key and
+                       _p_current->data.load(std::memory_order_acquire) == data) {
                         return true;
                     }// end if (current->key == key and current->data.load(std::memory_order_acquire) == data)
                     //--------------------------
-                    current = current->next.load(std::memory_order_acquire).get();
+                    _p_current = _p_current->next.load(std::memory_order_acquire).get();
                     //--------------------------
-                }// while (current)
+                } // while (current)
                 //--------------------------
                 return false;
                 //--------------------------
@@ -356,38 +375,39 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool remove_data(const Key& key, std::shared_ptr<T> data) {
                 //--------------------------
-                const size_t index          = hasher(key);
-                auto [current, prev_weak]   = find_node(key, data);
+                const size_t _c_index     = hasher(key);
+                auto [current, prev_weak] = find_node(key, data);
                 //--------------------------
-                if (!current) {
+                if(!current) {
                     return false;
                 }// end if (!current)
                 //--------------------------
-                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev = prev_weak.lock();
+                std::shared_ptr<Node> _sp_next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_prev = prev_weak.lock();
                 //--------------------------
-                if (prev) {
+                if(_sp_prev) {
                     //--------------------------
-                    prev->next.store(next, std::memory_order_release);
-                    if (next) {
-                        next->prev.store(prev, std::memory_order_release);
+                    _sp_prev->next.store(_sp_next, std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(_sp_prev, std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 } else {
                     //--------------------------
-                    std::shared_ptr<Node> expected = current;
+                    std::shared_ptr<Node> _sp_expected = current;
                     //--------------------------
                     do {
                         //--------------------------
-                        if (expected != current) {
+                        if(_sp_expected != current) {
                             return false;
                         }// end if (expected != current)
                         //--------------------------
-                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
-                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!m_table.at(_c_index).compare_exchange_weak(_sp_expected, _sp_next,
+                                                                        std::memory_order_acq_rel,
+                                                                        std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 }// end if (prev)
@@ -405,35 +425,36 @@ namespace HazardSystem {
                 //--------------------------
                 auto [current, prev_weak] = find_data_node(data);
                 //--------------------------
-                if (!current) {
+                if(!current) {
                     return false;
                 }// end if (!node)
                 //--------------------------
-                const size_t index          = hasher(current->key);
-                std::shared_ptr<Node> next  = current->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev  = prev_weak.lock();
+                const size_t          _c_index = hasher(current->key);
+                std::shared_ptr<Node> _sp_next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_prev = prev_weak.lock();
                 //--------------------------
-                if (prev) {
+                if(_sp_prev) {
                     //--------------------------
-                    prev->next.store(next, std::memory_order_release);
+                    _sp_prev->next.store(_sp_next, std::memory_order_release);
                     //--------------------------
-                    if (next) {
-                        next->prev.store(prev, std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(_sp_prev, std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 } else {
                     //--------------------------
-                    std::shared_ptr<Node> expected = current;
+                    std::shared_ptr<Node> _sp_expected = current;
                     //--------------------------
                     do {
-                        if (expected != current) {
+                        if(_sp_expected != current) {
                             return false;
                         }// end if (expected != current)
-                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
-                                    std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!m_table.at(_c_index).compare_exchange_weak(_sp_expected, _sp_next,
+                                                                        std::memory_order_acq_rel,
+                                                                        std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 }// end if (prev)
@@ -449,36 +470,37 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool remove_first_data(const Key& key) {
                 //--------------------------
-                const size_t index          = hasher(key);
-                auto [current, prev_weak]   = find_node(key);
+                const size_t _c_index     = hasher(key);
+                auto [current, prev_weak] = find_node(key);
                 //--------------------------
-                if (!current) {
+                if(!current) {
                     return false;
                 }// end if (!current)
                 //--------------------------
-                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev = prev_weak.lock();
+                std::shared_ptr<Node> _sp_next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_prev = prev_weak.lock();
                 //--------------------------
-                if (prev) {
+                if(_sp_prev) {
                     //--------------------------
-                    prev->next.store(next, std::memory_order_release);
-                    if (next) {
-                        next->prev.store(prev, std::memory_order_release);
+                    _sp_prev->next.store(_sp_next, std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(_sp_prev, std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 } else {
                     //--------------------------
-                    std::shared_ptr<Node> expected = current;
+                    std::shared_ptr<Node> _sp_expected = current;
                     //--------------------------
                     do {
-                        if (expected != current) {
+                        if(_sp_expected != current) {
                             return false;
                         }// end if (expected != current)
-                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
-                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!m_table.at(_c_index).compare_exchange_weak(_sp_expected, _sp_next,
+                                                                        std::memory_order_acq_rel,
+                                                                        std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 }// end if (prev)
@@ -494,37 +516,38 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool remove_last_data(const Key& key) {
                 //--------------------------
-                const size_t index          = hasher(key);
-                auto [current, prev_weak]   = find_last_node(key);
+                const size_t _c_index     = hasher(key);
+                auto [current, prev_weak] = find_last_node(key);
                 //--------------------------
-                if (!current) {
+                if(!current) {
                     return false;
                 }// end if (!current)
                 //--------------------------
-                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
-                std::shared_ptr<Node> prev = prev_weak.lock();
+                std::shared_ptr<Node> _sp_next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_prev = prev_weak.lock();
                 //--------------------------
-                if (prev) {
+                if(_sp_prev) {
                     //--------------------------
-                    prev->next.store(next, std::memory_order_release);
+                    _sp_prev->next.store(_sp_next, std::memory_order_release);
                     //--------------------------
-                    if (next) {
-                        next->prev.store(prev, std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(_sp_prev, std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 } else {
                     //--------------------------
-                    std::shared_ptr<Node> expected = current;
+                    std::shared_ptr<Node> _sp_expected = current;
                     //--------------------------
                     do {
-                        if (expected != current) {
+                        if(_sp_expected != current) {
                             return false;
                         }// end if (expected != current)
-                    } while (!m_table.at(index).compare_exchange_weak(expected, next,
-                                        std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!m_table.at(_c_index).compare_exchange_weak(_sp_expected, _sp_next,
+                                                                        std::memory_order_acq_rel,
+                                                                        std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 }// end if (prev)
@@ -540,43 +563,45 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data) {
                 //--------------------------
-                const size_t index_old = hasher(old_key);
-                const size_t index_new = hasher(new_key);
+                const size_t _c_index_old = hasher(old_key);
+                const size_t _c_index_new = hasher(new_key);
                 //--------------------------
                 auto [current, prev_weak] = find_node(old_key, data);
-                if (!current) {
+                if(!current) {
                     return false;
                 }// end if (!current)
                 //--------------------------
-                std::shared_ptr<Node> prev = prev_weak.lock();
-                std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
+                std::shared_ptr<Node> _sp_prev = prev_weak.lock();
+                std::shared_ptr<Node> _sp_next = current->next.load(std::memory_order_acquire);
                 //--------------------------
-                if (prev) {
+                if(_sp_prev) {
                     //--------------------------
                     do {
                         //--------------------------
-                    } while (!prev->next.compare_exchange_weak(current, next,
-                            std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!_sp_prev->next.compare_exchange_weak(
+                        current, _sp_next, std::memory_order_acq_rel, std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(prev, std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(_sp_prev, std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 } else {
                     //--------------------------
-                    std::shared_ptr<Node> expected = current;
+                    std::shared_ptr<Node> _sp_expected = current;
                     //--------------------------
                     do {
                         //--------------------------
-                        if (expected != current) {
+                        if(_sp_expected != current) {
                             return false;
                         }// end if (expected != current)
                         //--------------------------
-                    } while (!m_table.at(index_old).compare_exchange_weak(expected, next,
-                                        std::memory_order_acq_rel, std::memory_order_acquire));
+                    } while(!m_table.at(_c_index_old)
+                                 .compare_exchange_weak(_sp_expected, _sp_next,
+                                                        std::memory_order_acq_rel,
+                                                        std::memory_order_acquire));
                     //--------------------------
-                    if (next) {
-                        next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                    if(_sp_next) {
+                        _sp_next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                     }// end if (next)
                     //--------------------------
                 }// end if (prev)
@@ -585,17 +610,18 @@ namespace HazardSystem {
                 current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
                 current->key = new_key;
                 //--------------------------
-                return insert_node(index_new, current);
+                return insert_node(_c_index_new, current);
                 //--------------------------
             }// end bool swap_key(const Key& old_key, const Key& new_key, std::shared_ptr<T> data)
             //--------------------------------------------------------------
-            bool swap_data(const Key& key, std::shared_ptr<T> old_data, std::shared_ptr<T> new_data) {
+            bool swap_data(const Key& key, std::shared_ptr<T> old_data,
+                           std::shared_ptr<T> new_data) {
                 //--------------------------
-                std::shared_ptr<Node> current;
-                std::tie(current, std::ignore) = find_node(key, old_data);
+                std::shared_ptr<Node> _sp_current;
+                std::tie(_sp_current, std::ignore) = find_node(key, old_data);
                 //--------------------------
-                if (current) {
-                    current->data.store(new_data, std::memory_order_release);
+                if(_sp_current) {
+                    _sp_current->data.store(new_data, std::memory_order_release);
                     return true;
                 }// end if (current)
                 //--------------------------
@@ -605,65 +631,72 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             void scan_and_reclaim(const std::function<bool(std::shared_ptr<T>)>& is_hazard) {
                 //--------------------------
-                for (auto& bucket : m_table) {
+                for(auto& bucket : m_table) {
                     //--------------------------
-                    std::shared_ptr<Node> prev;
-                    std::shared_ptr<Node> current = bucket.load(std::memory_order_acquire);
+                    std::shared_ptr<Node> _sp_prev;
+                    std::shared_ptr<Node> _sp_current = bucket.load(std::memory_order_acquire);
                     //--------------------------
-                    while (current) {
+                    while(_sp_current) {
                         //--------------------------
-                        std::shared_ptr<T> _current_data = current->data.load(std::memory_order_acquire);
+                        std::shared_ptr<T> _current_data =
+                            _sp_current->data.load(std::memory_order_acquire);
                         //--------------------------
-                        if (_current_data and !is_hazard(_current_data)) {
+                        if(_current_data and !is_hazard(_current_data)) {
                             //--------------------------
-                            std::shared_ptr<Node> next = current->next.load(std::memory_order_acquire);
+                            std::shared_ptr<Node> _sp_next =
+                                _sp_current->next.load(std::memory_order_acquire);
                             //--------------------------
-                            if (prev) {
+                            if(_sp_prev) {
                                 //--------------------------
-                                std::shared_ptr<Node> expected = current;
+                                std::shared_ptr<Node> _sp_expected = _sp_current;
                                 //--------------------------
                                 do {
                                     //--------------------------
-                                    if (prev->next.load(std::memory_order_acquire) != current) {
+                                    if(_sp_prev->next.load(std::memory_order_acquire) !=
+                                       _sp_current) {
                                         // Someone else removed it, skip to next
                                         break;
                                     }// end if (prev->next.load(std::memory_order_acquire) != current)
                                     //--------------------------
-                                } while (!prev->next.compare_exchange_weak(expected, next,
-                                                            std::memory_order_acq_rel, std::memory_order_acquire));
+                                } while(!_sp_prev->next.compare_exchange_weak(
+                                    _sp_expected, _sp_next, std::memory_order_acq_rel,
+                                    std::memory_order_acquire));
                                 //--------------------------
-                                if (next) {
-                                    next->prev.store(prev, std::memory_order_release);
+                                if(_sp_next) {
+                                    _sp_next->prev.store(_sp_prev, std::memory_order_release);
                                 }// end if (next)
                                 //--------------------------
                             } else {
                                 //--------------------------
-                                std::shared_ptr<Node> expected = current;
+                                std::shared_ptr<Node> _sp_expected = _sp_current;
                                 //--------------------------
                                 do {
-                                    if (expected != current) {
+                                    if(_sp_expected != _sp_current) {
                                         break;
                                     }// end if (expected != current)
-                                } while (!bucket.compare_exchange_weak(expected, next,
-                                                    std::memory_order_acq_rel, std::memory_order_acquire));
+                                } while(!bucket.compare_exchange_weak(_sp_expected, _sp_next,
+                                                                      std::memory_order_acq_rel,
+                                                                      std::memory_order_acquire));
                                 //--------------------------
-                                if (next) {
-                                    next->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
+                                if(_sp_next) {
+                                    _sp_next->prev.store(std::weak_ptr<Node>(),
+                                                         std::memory_order_release);
                                 }// end if (next)
                                 //--------------------------
                             }// end if (prev)
                             //--------------------------
-                            current->next.store(nullptr, std::memory_order_release);
-                            current->prev.store(std::weak_ptr<Node>(), std::memory_order_release);
-                            current->data.store(nullptr, std::memory_order_release);
+                            _sp_current->next.store(nullptr, std::memory_order_release);
+                            _sp_current->prev.store(std::weak_ptr<Node>(),
+                                                    std::memory_order_release);
+                            _sp_current->data.store(nullptr, std::memory_order_release);
                             m_size.fetch_sub(1UL, std::memory_order_relaxed);
                             //--------------------------
-                            current = next;
+                            _sp_current = _sp_next;
                             //--------------------------
                         } else {
                             //--------------------------
-                            prev    = current;
-                            current = current->next.load(std::memory_order_acquire);
+                            _sp_prev    = _sp_current;
+                            _sp_current = _sp_current->next.load(std::memory_order_acquire);
                             //--------------------------
                         }// end if (_current_data and !is_hazard(_current_data))
                     }// end while (current)
@@ -672,7 +705,7 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             void clear_data(void) {
                 //--------------------------
-                for (auto& bucket : m_table) {
+                for(auto& bucket : m_table) {
                     bucket.store(nullptr, std::memory_order_release);
                 }// end for (auto& bucket : m_table)
                 //--------------------------
@@ -686,9 +719,9 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            std::atomic<size_t> m_size;
+            std::atomic<size_t>                               m_size;
             std::array<std::atomic<std::shared_ptr<Node>>, N> m_table;
-        //--------------------------------------------------------------
+            //--------------------------------------------------------------
     };  // end class HashMultiTable
     //--------------------------------------------------------------
 } // end namespace HazardSystem

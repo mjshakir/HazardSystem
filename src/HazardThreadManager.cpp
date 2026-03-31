@@ -1,5 +1,5 @@
 //--------------------------------------------------------------
-// Main Header 
+// Main Header
 //--------------------------------------------------------------
 #include "HazardThreadManager.hpp"
 //--------------------------------------------------------------
@@ -12,8 +12,8 @@
 #include "ThreadRegistry.hpp"
 //--------------------------------------------------------------
 HazardSystem::HazardThreadManager& HazardSystem::HazardThreadManager::instance(void) {
-    thread_local HazardThreadManager instance;
-    return instance;
+    thread_local HazardThreadManager _instance;
+    return _instance;
 }// end HazardSystem::HazardThreadManager::instance(void)
 //--------------------------------------------------------------
 HazardSystem::HazardThreadManager::HazardThreadManager(void) {
