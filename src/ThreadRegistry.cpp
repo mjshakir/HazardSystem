@@ -1,5 +1,5 @@
 //--------------------------------------------------------------
-// Main Header
+// Main Header 
 //--------------------------------------------------------------
 #include "ThreadRegistry.hpp"
 //--------------------------------------------------------------
@@ -15,8 +15,8 @@ HazardSystem::ThreadRegistry::ThreadRegistry(void) : m_thread_table(1024UL) {
 //--------------------------------------------------------------
 HazardSystem::ThreadRegistry& HazardSystem::ThreadRegistry::instance(void) {
     //--------------------------
-    static ThreadRegistry _sg_instance;
-    return _sg_instance;
+    static ThreadRegistry instance;
+    return instance;
     //--------------------------
 }// end HazardSystem::ThreadRegistry::instance(void)
 //--------------------------------------------------------------
@@ -42,7 +42,7 @@ bool HazardSystem::ThreadRegistry::register_thread(void) {
     //--------------------------
     const std::thread::id _thread_id = std::this_thread::get_id();
     //--------------------------
-    if(m_thread_table.contains(_thread_id)) {
+    if (m_thread_table.contains(_thread_id)) {
         return true;
     }// end if (m_thread_table.contains(s_m_thread_id))
     //--------------------------

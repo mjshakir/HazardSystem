@@ -3,8 +3,8 @@
 // Standard cpp library
 //--------------------------------------------------------------
 #include <atomic>
-#include <functional>
 #include <memory>
+#include <functional>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -13,7 +13,7 @@
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
-    template<typename T>
+    template <typename T>
     class atomic_unique_ptr {
         public:
             //--------------------------------------------------------------
@@ -29,11 +29,10 @@ namespace HazardSystem {
                 //--------------------------
             } // end AtomicUniquePtr(std::unique_ptr<T> ptr) noexcept
             //--------------------------
-            atomic_unique_ptr(const atomic_unique_ptr&)            = delete;
-            atomic_unique_ptr& operator=(const atomic_unique_ptr&) = delete;
+            atomic_unique_ptr(const atomic_unique_ptr&)             = delete;
+            atomic_unique_ptr& operator=(const atomic_unique_ptr&)  = delete;
             //--------------------------
-            atomic_unique_ptr(atomic_unique_ptr&& other) noexcept
-                : m_ptr(other.m_ptr.exchange(nullptr, std::memory_order_acq_rel)) {
+            atomic_unique_ptr(atomic_unique_ptr&& other) noexcept : m_ptr(other.m_ptr.exchange(nullptr, std::memory_order_acq_rel)) {
                 //--------------------------
             } // end atomic_unique_ptr(atomic_unique_ptr&& other) noexcept
             //--------------------------
@@ -45,8 +44,8 @@ namespace HazardSystem {
                     //--------------------------
                 } // end if
                 //--------------------------
-                T* _p_incoming = other.m_ptr.exchange(nullptr, std::memory_order_acq_rel);
-                reset(_p_incoming);
+                T* incoming = other.m_ptr.exchange(nullptr, std::memory_order_acq_rel);
+                reset(incoming);
                 //--------------------------
                 return *this;
                 //--------------------------
@@ -101,8 +100,7 @@ namespace HazardSystem {
                 return *this;
             } // end atomic_unique_ptr& operator=(std::nullptr_t) noexcept
             //--------------------------
-            bool store(T*                       ptr,
-                       const std::memory_order& order = std::memory_order_acq_rel) noexcept {
+            bool store(T* ptr, const std::memory_order& order = std::memory_order_acq_rel) noexcept {
                 return store_data(ptr, order);
             } // end bool store(T* ptr, const std::memory_order& order)
             //--------------------------
@@ -126,8 +124,7 @@ namespace HazardSystem {
                 return get_unique();
             } // end std::unique_ptr<T> get_unique(void)
             //--------------------------
-            bool reset(T*                       ptr   = nullptr,
-                       const std::memory_order& order = std::memory_order_acq_rel) {
+            bool reset(T* ptr = nullptr, const std::memory_order& order = std::memory_order_acq_rel) {
                 //--------------------------
                 return reset_data(ptr, order);
                 //--------------------------
@@ -157,16 +154,13 @@ namespace HazardSystem {
                 //--------------------------
             } // end bool delete_data(void)
             //--------------------------
-            bool
-            compare_exchange_strong(T*& expected, T* desired,
-                                    const std::memory_order& order = std::memory_order_acq_rel) {
+            bool compare_exchange_strong(T*& expected, T* desired, const std::memory_order& order = std::memory_order_acq_rel) {
                 //--------------------------
                 return compare_exchange_strong_data(expected, desired, order);
                 //--------------------------
             } // end bool compare_exchange_strong(T*& expected, T* desired, const std::memory_order& order)
             //--------------------------
-            bool compare_exchange_weak(T*& expected, T* desired,
-                                       const std::memory_order& order = std::memory_order_acq_rel) {
+            bool compare_exchange_weak(T*& expected, T* desired, const std::memory_order& order = std::memory_order_acq_rel) {
                 //--------------------------
                 return compare_exchange_weak_data(expected, desired, order);
                 //--------------------------
@@ -176,9 +170,9 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             bool store_data(T* ptr, const std::memory_order& order) noexcept {
                 //--------------------------
-                T* _p_old = m_ptr.exchange(ptr, order);
-                if(_p_old && _p_old != ptr) {
-                    hp_manager().retire(_p_old);
+                T* old = m_ptr.exchange(ptr, order);
+                if (old && old != ptr) {
+                    hp_manager().retire(old);
                 }
                 return true;
                 //--------------------------
@@ -190,7 +184,7 @@ namespace HazardSystem {
                 T* p_old = m_ptr.exchange(ptr, order);
                 //--------------------------
                 // If there's an old pointer, retire it safely
-                if(p_old) {
+                if (p_old) {
                     hp_manager().retire(p_old);
                     return true;
                 } // end if (p_old)
@@ -202,7 +196,7 @@ namespace HazardSystem {
             T* release_data(const std::memory_order& order) noexcept {
                 //--------------------------
                 // Check if the pointer has already been released (nullptr)
-                if(!m_ptr.load(std::memory_order_acquire)) {
+                if (!m_ptr.load(std::memory_order_acquire)) {
                     return nullptr; // Return nullptr if the pointer is already released
                 } // end if (!m_ptr)
                 //--------------------------
@@ -224,10 +218,10 @@ namespace HazardSystem {
             //--------------------------
             std::shared_ptr<T> get_shared(void) const noexcept {
                 //--------------------------
-                T* _p_ptr = m_ptr.load(std::memory_order_acquire);
+                T* ptr = m_ptr.load(std::memory_order_acquire);
                 //--------------------------
                 // Return a shared_ptr with a no-op deleter, so it doesn't delete the pointer
-                return std::shared_ptr<T>(_p_ptr, [](T*) {
+                return std::shared_ptr<T>(ptr, [](T*) {
                     // Do nothing in the deleter since atomic_unique_ptr manages the pointer
                 });
                 //--------------------------
@@ -235,9 +229,9 @@ namespace HazardSystem {
             //--------------------------
             // Method to return a unique_ptr without transferring ownership
             std::unique_ptr<T, std::function<void(T*)>> get_unique(void) const noexcept {
-                T* _p_ptr = m_ptr.load(std::memory_order_acquire);
+                T* ptr = m_ptr.load(std::memory_order_acquire);
                 // Return a unique_ptr with a custom deleter that does nothing
-                return std::unique_ptr<T, std::function<void(T*)>>(_p_ptr, [](T*) {
+                return std::unique_ptr<T, std::function<void(T*)>>(ptr, [](T*) {
                     // Do nothing in the deleter since atomic_unique_ptr manages the pointer
                 });
             } // end std::unique_ptr<T> get_unique(void)
@@ -245,24 +239,21 @@ namespace HazardSystem {
             void swap_data(atomic_unique_ptr& other) noexcept {
                 //--------------------------
                 // Atomically exchange pointers between 'this' and 'other'
-                T* _p_temp =
-                    m_ptr.exchange(other.m_ptr.exchange(nullptr, std::memory_order_acq_rel),
-                                   std::memory_order_acq_rel);
-                other.m_ptr.store(_p_temp, std::memory_order_release);
+                T* temp = m_ptr.exchange(other.m_ptr.exchange(nullptr, std::memory_order_acq_rel), std::memory_order_acq_rel);
+                other.m_ptr.store(temp, std::memory_order_release);
                 //--------------------------
             } // end void swap_data(atomic_unique_ptr& other)
             //--------------------------
             bool transfer_data(std::shared_ptr<T>& s_ptr) {
                 //--------------------------
-                if(s_ptr) {
+                if (s_ptr) {
                     return false;
                 }// end if (s_ptr)
                 //--------------------------
-                T* _p_current = m_ptr.load(std::memory_order_acquire);
-                while(_p_current) {
-                    if(m_ptr.compare_exchange_weak(_p_current, nullptr, std::memory_order_acq_rel,
-                                                   std::memory_order_acquire)) {
-                        s_ptr.reset(_p_current);
+                T* current = m_ptr.load(std::memory_order_acquire);
+                while (current) {
+                    if (m_ptr.compare_exchange_weak(current, nullptr, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                        s_ptr.reset(current);
                         return true;
                     }// end if (m_ptr.compare_exchange_weak(current, nullptr, std::memory_order_acq_rel, std::memory_order_acquire))
                 }// end while (current)
@@ -276,24 +267,22 @@ namespace HazardSystem {
                 T* p_old = m_ptr.exchange(nullptr, std::memory_order_acq_rel);
                 //--------------------------
                 // If there's an old pointer, delete it
-                if(p_old) {
+                if (p_old) {
                     hp_manager().retire(p_old);
                     return true;
-                } // ebd if (p_old)
+                }// ebd if (p_old)
                 //--------------------------
                 return false;
                 //--------------------------
             } // end bool delete_data(void)
             //--------------------------
-            bool compare_exchange_strong_data(T*& expected, T* desired,
-                                              const std::memory_order& order) {
+            bool compare_exchange_strong_data(T*& expected, T* desired, const std::memory_order& order) {
                 //--------------------------
                 return m_ptr.compare_exchange_strong(expected, desired, order);
                 //--------------------------
             } // end bool compare_exchange_strong(T*& expected, T* desired, const std::memory_order& order)
             //--------------------------
-            bool compare_exchange_weak_data(T*& expected, T* desired,
-                                            const std::memory_order& order) {
+            bool compare_exchange_weak_data(T*& expected, T* desired, const std::memory_order& order) {
                 //--------------------------
                 return m_ptr.compare_exchange_weak(expected, desired, order);
                 //--------------------------
@@ -310,7 +299,7 @@ namespace HazardSystem {
             }// end ProtectedPointer<T> protect_data(const size_t max_retries) const
             //--------------------------
             std::atomic<T*> m_ptr;
-            //--------------------------------------------------------------
+        //--------------------------------------------------------------
     }; // end class atomic_unique_ptr
     //--------------------------------------------------------------
 } // end namespace HazardSystem
