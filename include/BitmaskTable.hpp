@@ -26,17 +26,9 @@ namespace HazardSystem {
         //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-#if defined(BUILD_HAZARDSYSTEM_DISABLE_BITMASK_ROTATION)
-            static constexpr bool C_ENABLE_ROTATION     = false;
-#else
-            static constexpr bool C_ENABLE_ROTATION     = true;
-#endif
-            //--------------------------
             static constexpr uint16_t C_ARRAY_LIMIT     = 1024U;
             //--------------------------
             static constexpr uint16_t C_BITS_PER_MASK   = std::numeric_limits<uint64_t>::digits;
-
-            static constexpr uint8_t C_ROTATE_THRESHOLD = static_cast<uint8_t>(C_BITS_PER_MASK / 2);
             static constexpr uint16_t C_MASK_COUNT      = (N == 0 ? 0 : static_cast<uint16_t>((N + C_BITS_PER_MASK - 1) / C_BITS_PER_MASK));
             //--------------------------
             static constexpr bool C_TREE_POSSIBLE       = (N == 0) or (N > C_ARRAY_LIMIT);
@@ -45,9 +37,7 @@ namespace HazardSystem {
             struct NoTree {
             };
             //--------------------------
-            using TreeStorage                            = std::conditional_t<C_TREE_POSSIBLE,
-                                                            std::conditional_t<C_TREE_ALWAYS, BitmapTree, std::unique_ptr<BitmapTree>>,
-                                                            NoTree>;
+            using TreeStorage                            = std::conditional_t<C_TREE_POSSIBLE, BitmapTree, NoTree>;
             //--------------------------
             using SlotType                              = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT),
                                                             std::vector<HazardPointer<T>>, std::array<HazardPointer<T>, N>>;
@@ -110,7 +100,7 @@ namespace HazardSystem {
                                     m_bitmask(),
                                     m_available(),
                                     m_use_tree(false),
-                                    m_initialize(Initialization(0ULL) and maybe_initialize_tree(static_cast<size_t>(get_mask_count()))) { 
+                                    m_initialize(Initialization(0ULL)) {
                 //--------------------------
             }// end BitmaskTable(void)
             //--------------------------
@@ -344,69 +334,54 @@ namespace HazardSystem {
                     return std::nullopt;
                 }// end if (!capacity or !mask_count)
                 //--------------------------
-                const size_t available_plane    = plane_index(PartPlane::Available);
-                const bool _use_tree            = tree_enabled();
-                BitmapTree* tree                = _use_tree ? tree_ptr() : nullptr;
-                thread_local size_t part_hint   = 0;
-                thread_local uint8_t bit_hint   = 0;
-                size_t start_part               = part_hint % mask_count_size;
+                const size_t available_plane = plane_index(PartPlane::Available);
                 //--------------------------
-                while (m_size.load(std::memory_order_relaxed) < capacity_size) {
-                    std::optional<size_t> part_opt;
-                    if (_use_tree) {
-                        part_opt = tree->find(start_part, available_plane);
-                        if (!part_opt) {
-                            // Tree is a hint; fall back to a bounded scan to avoid spurious failures under contention.
-                            //--------------------------
-                            if (m_size.load(std::memory_order_relaxed) >= capacity_size) {
-                                return std::nullopt;
-                            }// end if (m_size.load(std::memory_order_relaxed) >= capacity)
-                            //--------------------------
-                            part_opt = scan_available(start_part, mask_count_size, available_plane);
-                            if (!part_opt) {
-                                return std::nullopt;
-                            }// end if (!part_opt)
-                        }// end if (!part_opt)
-                    } else {
-                        part_opt = scan_available(start_part, mask_count_size, available_plane);
-                        if (!part_opt) {
-                            return std::nullopt;
-                        }// end if (!part_opt)
-                    }// end if (_use_tree)
+                const size_t _retry_budget = (mask_count_size * 2UL) + 16UL;
+                //--------------------------
+                for (size_t _attempt = 0UL; _attempt < _retry_budget; ++_attempt) {
                     //--------------------------
-                    const IndexType part    = static_cast<IndexType>(part_opt.value());
-		            part_hint               = static_cast<size_t>(part);
-		            start_part              = (static_cast<size_t>(part) + 1) % mask_count_size;
-                    uint64_t mask           = m_bitmask[part].load(std::memory_order_relaxed);
+                    if (m_size.load(std::memory_order_relaxed) >= capacity_size) {
+                        return std::nullopt;
+                    }// end if (m_size.load(relaxed) >= capacity_size)
                     //--------------------------
-                    while (mask != ~0ULL) {
+                    const std::optional<size_t> _part_opt = lookup_free_part(mask_count_size, available_plane);
+                    if (!_part_opt) {
+                        return std::nullopt;
+                    }// end if (!_part_opt)
+                    //--------------------------
+                    const IndexType _part   = static_cast<IndexType>(_part_opt.value());
+                    uint64_t _mask          = m_bitmask[_part].load(std::memory_order_relaxed);
+                    //--------------------------
+                    while (_mask != ~0ULL) {
                         //--------------------------
-                        const uint8_t bit           = select_free_bit(mask, bit_hint);
-                        const IndexType slot_index  = static_cast<IndexType>((part * C_BITS_PER_MASK) + bit);
+                        const uint8_t _bit          = select_free_bit(_mask);
+                        const IndexType _slot_index = static_cast<IndexType>((_part * C_BITS_PER_MASK) + _bit);
                         //--------------------------
-                        if (slot_index >= capacity) {
+                        if (_slot_index >= capacity) {
                             break;
-                        }// end if (slot_index >= capacity)
+                        }// end if (_slot_index >= capacity)
                         //--------------------------
-                        const uint64_t flag     = 1ULL << bit;
-                        const uint64_t desired  = mask | flag;
+                        const uint64_t _flag         = 1ULL << _bit;
+                        const uint64_t _desired      = _mask | _flag;
+                        const uint64_t _pre_cas_mask = _mask;
                         //--------------------------
-                        if (m_bitmask[part].compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                        if (m_bitmask[_part].compare_exchange_weak(_mask, _desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                             m_size.fetch_add(1, std::memory_order_relaxed);
-                            static_cast<void>(mark_non_empty(part));
-                            if constexpr (C_ENABLE_ROTATION) {
-                                bit_hint = static_cast<uint8_t>((bit + 1) % C_BITS_PER_MASK);
-                            }// end if constexpr (C_ENABLE_ROTATION)
-                            static_cast<void>(update_on_full(part, desired, available_plane));
-                            return slot_index;
-                        }// end if (m_bitmask[part].compare_exchange_weak(...))
-                    }// end while (mask != ~0ULL)
+                            // NonEmpty plane: only the 0 -> nonempty transition updates the tree.
+                            if (_pre_cas_mask == 0ULL) {
+                                static_cast<void>(mark_non_empty(_part));
+                            }// end if (_pre_cas_mask == 0ULL)
+                            // Available plane: update_on_full self-guards on `desired == ~0ULL`.
+                            static_cast<void>(update_on_full(_part, _desired, available_plane));
+                            return _slot_index;
+                        }// end if (m_bitmask[_part].compare_exchange_weak(...))
+                    }// end while (_mask != ~0ULL)
                     //--------------------------
-                    // Part is (now) full; clear and retry.
-                    static_cast<void>(refresh_hint(part, available_plane));
-                }// end while (m_size.load(std::memory_order_relaxed) < capacity)
-	            return std::nullopt;
+                    // Part is (now) full; refresh the tree hint and retry inside the budget.
+                    static_cast<void>(refresh_hint(_part, available_plane));
+                }// end for (size_t _attempt = 0UL; _attempt < _retry_budget; ++_attempt)
                 //--------------------------
+                return std::nullopt;
             }// end std::enable_if_t<(M == 0) or (M > 64), std::optional<IndexType>> acquire_data(void)
             //--------------------------
             std::optional<iterator> acquire_data_iterator(void) {
@@ -528,16 +503,25 @@ namespace HazardSystem {
                 //--------------------------
                 if (ptr) {
                     //--------------------------
-                    const uint64_t old  = m_bitmask[part].fetch_or(bitmask, std::memory_order_acq_rel);
-                    const bool marked   = mark_non_empty(part);
+                    const uint64_t old = m_bitmask[part].fetch_or(bitmask, std::memory_order_acq_rel);
+                    const uint64_t now = old | bitmask;
                     //--------------------------
                     if ((old & bitmask) == 0) {
                         m_size.fetch_add(1, std::memory_order_relaxed);
                     }// end if ((old & bitmask) == 0)
-                    const uint64_t now = old | bitmask;
-                    if (marked) {
-                        static_cast<void>(update_on_full(part, now, plane_index(PartPlane::Available)));
-                    }
+                    //--------------------------
+                    // Available plane: the word just became full. This is the only moment
+                    // the Available tree bit needs to be cleared, and it is independent of
+                    // the NonEmpty plane transition below — the two planes track different
+                    // events and must not share a gate.
+                    if (old != ~0ULL and now == ~0ULL) {
+                        static_cast<void>(refresh_hint(part, plane_index(PartPlane::Available)));
+                    }// end if (old != ~0ULL and now == ~0ULL)
+                    //--------------------------
+                    // NonEmpty plane: the word just woke up from zero.
+                    if (old == 0ULL) {
+                        static_cast<void>(mark_non_empty(part));
+                    }// end if (old == 0ULL)
                 } else {
                     const uint64_t old = m_bitmask[part].fetch_and(~bitmask, std::memory_order_acq_rel);
                     if (old & bitmask) {
@@ -705,65 +689,32 @@ namespace HazardSystem {
                 }// end if (!mask_count)
                 //--------------------------
                 if (!tree_enabled()) {
-                    for (IndexType part = 0; part < mask_count; ++part) {
+                    scan_all_active_parts(mask_count, capacity, std::forward<Fn>(fn));
+                    return;
+                }// end if (!tree_enabled())
+                //--------------------------
+                // Tree-guided walk: find the first populated part, then advance by directly
+                // probing adjacent m_bitmask entries so dense runs cost O(1) per part and
+                // only gaps pay the logarithmic find_next cost.
+                if constexpr (C_TREE_POSSIBLE) {
+                    BitmapTree* const tree          = tree_ptr();
+                    const size_t non_empty_plane    = plane_index(PartPlane::NonEmpty);
+                    //--------------------------
+                    for (auto part_opt = tree->find_next(0UL, non_empty_plane); part_opt.has_value(); ) {
+                        const IndexType part = static_cast<IndexType>(part_opt.value());
+                        const uint64_t mask  = m_bitmask[part].load(std::memory_order_acquire);
                         //--------------------------
-                        uint64_t mask = m_bitmask[part].load(std::memory_order_acquire);
+                        emit_active_bits_in_part(part, mask, capacity, std::forward<Fn>(fn));
                         //--------------------------
+                        // Empty part = stale NonEmpty bit in the tree; correct it lazily.
                         if (!mask) {
-                            continue;
+                            static_cast<void>(clear_non_empty(part));
                         }// end if (!mask)
                         //--------------------------
-                        const IndexType base = static_cast<IndexType>(part * C_BITS_PER_MASK);
-                        while (mask) {
-                            const IndexType index = base + static_cast<uint8_t>(std::countr_zero(mask));
-                            if (index >= capacity) {
-                                break;
-                            }// end if (index >= capacity)
-                            //--------------------------
-                            auto ptr = m_slots[index].load(std::memory_order_acquire);
-                            if (ptr) {
-                                fn(index, ptr);
-                            }// end if (ptr)
-                            //--------------------------
-                            mask &= mask - 1;
-                        }// end  while (mask)
-                    }// end for (IndexType part = 0; part < mask_count; ++part)
-                    return;
-                }// end if (!tree_enabled)
-                //--------------------------
-                size_t hint = 0;
-                BitmapTree* tree = tree_ptr();
-                for (auto part_opt = tree->find_next(hint, plane_index(PartPlane::NonEmpty));
-	                    part_opt;
-	                    part_opt = tree->find_next(hint, plane_index(PartPlane::NonEmpty))) {
-                    //--------------------------
-                    const IndexType part    = static_cast<IndexType>(part_opt.value());
-                    uint64_t mask           = m_bitmask[part].load(std::memory_order_acquire);
-                    //--------------------------
-                    if (!mask) {
-                        static_cast<void>(clear_non_empty(part));
-                        hint = part_opt.value() + 1;
-                        continue;
-                    }// end if (!mask)
-                    //--------------------------
-                    const IndexType base = static_cast<IndexType>(part * C_BITS_PER_MASK);
-                    while (mask) {
-                        const IndexType index = base + static_cast<uint8_t>(std::countr_zero(mask));
-                        if (index >= capacity) {
-                            break;
-                        }// end if (index >= capacity)
-                        //--------------------------
-                        auto ptr = m_slots[index].load(std::memory_order_acquire);
-                        if (ptr) {
-                            fn(index, ptr);
-                        }// end if (ptr)
-                        //--------------------------
-                        mask &= mask - 1;
-                    }// end  while (mask)
-                    //--------------------------
-                    hint = part_opt.value() + 1;
-                }// end for
-            }// end void for_each_active_fast(std::function<void(IndexType index, T*)>&& fn) const
+                        part_opt = advance_non_empty_cursor(tree, part, mask_count, non_empty_plane);
+                    }// end for (auto part_opt = ...)
+                }// end if constexpr (C_TREE_POSSIBLE)
+            }// end void for_each_active_fast(Fn&& fn) const
             //--------------------------
             template<uint16_t M = N, typename Fn>
             std::enable_if_t<(M > 0) and (M <= 64), bool> find_data(Fn&& fn) const {
@@ -848,80 +799,104 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             // Helper functions
             //--------------------------------------------------------------
-            bool tree_enabled(void) const noexcept {
-                if constexpr (!C_TREE_POSSIBLE) {
-                    return false;
-                } else {
-                    if (!m_use_tree) {
-                        return false;
-                    }
-                    if constexpr (C_TREE_ALWAYS) {
-                        return true;
-                    } else {
-                        return static_cast<bool>(m_available);
-                    }
-                }
-            }// end bool tree_enabled(void) const noexcept
+            constexpr bool tree_enabled(void) const noexcept {
+                if constexpr (C_TREE_POSSIBLE) {
+                    return m_use_tree;
+                }// end if constexpr (C_TREE_POSSIBLE)
+                return false;
+            }// end constexpr bool tree_enabled(void) const noexcept
             //--------------------------
-            BitmapTree* tree_ptr(void) noexcept {
-                if constexpr (!C_TREE_POSSIBLE) {
-                    return nullptr;
-                } else {
-                    if constexpr (C_TREE_ALWAYS) {
-                        return &m_available;
-                    } else {
-                        return m_available.get();
-                    }
-                }
-            }// end BitmapTree* tree_ptr(void) noexcept
+            constexpr BitmapTree* tree_ptr(void) noexcept {
+                if constexpr (C_TREE_POSSIBLE) {
+                    return &m_available;
+                }// end if constexpr (C_TREE_POSSIBLE)
+                return nullptr;
+            }// end constexpr BitmapTree* tree_ptr(void) noexcept
             //--------------------------
-            BitmapTree* tree_ptr(void) const noexcept {
-                if constexpr (!C_TREE_POSSIBLE) {
-                    return nullptr;
-                } else {
-                    if constexpr (C_TREE_ALWAYS) {
-                        return &m_available;
-                    } else {
-                        return m_available.get();
-                    }
-                }
-            }// end BitmapTree* tree_ptr(void) const noexcept
+            constexpr BitmapTree* tree_ptr(void) const noexcept {
+                if constexpr (C_TREE_POSSIBLE) {
+                    return &m_available;
+                }// end if constexpr (C_TREE_POSSIBLE)
+                return nullptr;
+            }// end constexpr BitmapTree* tree_ptr(void) const noexcept
             //--------------------------
             void disable_tree(void) noexcept {
                 if constexpr (!C_TREE_POSSIBLE) {
                     return;
-                } else {
-                    m_use_tree = false;
-                    if constexpr (C_TREE_ALWAYS) {
-                        m_available = BitmapTree();
-                    } else {
-                        m_available.reset();
-                    }
-                }
+                }// end if constexpr (!C_TREE_POSSIBLE)
+                m_use_tree = false;
+                m_available = BitmapTree();
             }// end void disable_tree(void) noexcept
             //--------------------------
-            uint8_t select_free_bit(const uint64_t& mask, const uint8_t& bit_hint) noexcept {
-                //--------------------------
-                const uint64_t _free = ~mask;
-                //--------------------------
-                if constexpr (C_ENABLE_ROTATION) {
-                    if ((bit_hint != 0) and (std::popcount(_free) >= C_ROTATE_THRESHOLD)) {
-                        //--------------------------
-                        const uint64_t _rotated      = std::rotr(_free, bit_hint);
-                        const uint8_t _bit_offset    = static_cast<uint8_t>(std::countr_zero(_rotated));
-                        uint16_t _bit                = static_cast<uint16_t>(_bit_offset + bit_hint);
-                        //--------------------------
-                        if (_bit >= C_BITS_PER_MASK) {
-                            _bit = static_cast<uint16_t>(_bit - C_BITS_PER_MASK);
-                        }// end if (_bit >= C_BITS_PER_MASK)
-                        //--------------------------
-                        return static_cast<uint8_t>(_bit);
-                    }// end if ((bit_hint != 0) and (std::popcount(free) >= C_ROTATE_THRESHOLD))
-                } else {
-                    static_cast<void>(bit_hint);
-                }// end if constexpr (C_ENABLE_ROTATION)
-                return static_cast<uint8_t>(std::countr_zero(_free));
+            static constexpr uint8_t select_free_bit(const uint64_t& mask) noexcept {
+                // countr_one = number of occupied slots below the first free one,
+                // which is exactly the index of that free slot.
+                return static_cast<uint8_t>(std::countr_one(mask));
             }// end select_free_bit
+            //--------------------------
+            // Fallback iterator used by for_each_active_fast when the BitmapTree is
+            // unavailable or disabled. Linear sweep over the raw bitmask, no tree access.
+            template<typename Fn>
+            void scan_all_active_parts(const IndexType& mask_count, const IndexType& capacity, Fn&& fn) const {
+                for (IndexType part = 0; part < mask_count; ++part) {
+                    const uint64_t mask = m_bitmask[part].load(std::memory_order_acquire);
+                    emit_active_bits_in_part(part, mask, capacity, std::forward<Fn>(fn));
+                }// end for (IndexType part = 0; part < mask_count; ++part)
+            }// end void scan_all_active_parts(...) const
+            //--------------------------
+            // for_each_active_fast worker — emits every live slot inside one part.
+            // Kept separate from the outer walk so the hot loop body is a single
+            // straight-line function call that the compiler can inline freely.
+            template<typename Fn>
+            void emit_active_bits_in_part(const IndexType& part, uint64_t mask, const IndexType& capacity, Fn&& fn) const {
+                const IndexType base = static_cast<IndexType>(part * C_BITS_PER_MASK);
+                while (mask) {
+                    const IndexType index = base + static_cast<uint8_t>(std::countr_zero(mask));
+                    if (index >= capacity) {
+                        return;
+                    }// end if (index >= capacity)
+                    //--------------------------
+                    auto* const ptr = m_slots[index].load(std::memory_order_acquire);
+                    if (ptr) {
+                        fn(index, ptr);
+                    }// end if (ptr)
+                    //--------------------------
+                    mask &= mask - 1;
+                }// end while (mask)
+            }// end void emit_active_bits_in_part(...) const
+            //--------------------------
+            template<uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), std::optional<size_t>>
+            advance_non_empty_cursor(BitmapTree* tree, const IndexType& current_part, const IndexType& mask_count, const size_t& non_empty_plane) const {
+                const size_t next = static_cast<size_t>(current_part) + 1UL;
+                if (next >= static_cast<size_t>(mask_count)) {
+                    return std::nullopt;
+                }// end if (next >= mask_count)
+                //--------------------------
+                if (m_bitmask[next].load(std::memory_order_acquire) != 0ULL) {
+                    return next;
+                }// end if (next part already non-empty)
+                //--------------------------
+                return tree->find_next(next + 1UL, non_empty_plane);
+            }// end advance_non_empty_cursor(...)
+            //--------------------------
+            // Decide which part has a free slot. Tree is consulted first when enabled;
+            // the scan is the authoritative fallback for the rare case where the tree
+            // lags reality under contention. Single call site keeps the hot loop body
+            // in acquire_data branch-free.
+            template<uint16_t M = N>
+            std::enable_if_t<(M == 0) or (M > 64), std::optional<size_t>>
+            lookup_free_part(const size_t& mask_count_size, const size_t& available_plane) {
+                if (!tree_enabled()) {
+                    return scan_available(0UL, mask_count_size, available_plane);
+                }// end if (!tree_enabled())
+                //--------------------------
+                if (const auto hit = tree_ptr()->find(0UL, available_plane); hit) {
+                    return hit;
+                }// end if (hit)
+                //--------------------------
+                return scan_available(0UL, mask_count_size, available_plane);
+            }// end lookup_free_part(...)
             //--------------------------
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), std::optional<size_t>>
@@ -1032,13 +1007,18 @@ namespace HazardSystem {
                 uint64_t mask = m_bitmask[part].load(std::memory_order_relaxed);
                 //--------------------------
                 while ((mask & flag) == 0) {
-                    const uint64_t desired = mask | flag;
+                    const uint64_t desired      = mask | flag;
+                    const uint64_t pre_cas_mask = mask;
                     if (m_bitmask[part].compare_exchange_weak(mask, desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                         m_size.fetch_add(1, std::memory_order_relaxed);
-                        const bool marked = mark_non_empty(part);
-                        if (marked) {
-                            static_cast<void>(update_on_full(part, desired, plane_index(PartPlane::Available)));
-                        }
+                        // NonEmpty plane: word just woke up from zero.
+                        if (pre_cas_mask == 0ULL) {
+                            static_cast<void>(mark_non_empty(part));
+                        }// end if (pre_cas_mask == 0ULL)
+                        // Available plane: word just became full.
+                        if (desired == ~0ULL) {
+                            static_cast<void>(refresh_hint(part, plane_index(PartPlane::Available)));
+                        }// end if (desired == ~0ULL)
                         return true;
                     }// end if (m_bitmask[part].compare_exchange_weak(...))
                 }// end while ((mask & flag) == 0)
@@ -1110,12 +1090,6 @@ namespace HazardSystem {
                         return false;
                     }// end if (!leaf_bits)
                     //--------------------------
-                    if constexpr (!C_TREE_ALWAYS) {
-                        if (!m_available) {
-                            m_available = std::make_unique<BitmapTree>();
-                        }// end if (!m_available)
-                    }
-                    //--------------------------
                     BitmapTree* tree = tree_ptr();
                     if (!tree or !tree->initialization(leaf_bits, plane_count())) {
                         disable_tree();
@@ -1185,7 +1159,8 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            std::atomic<size_t> m_capacity, m_mask_count, m_size;
+            std::atomic<size_t> m_capacity, m_mask_count;
+            alignas(64) std::atomic<size_t> m_size;
             //--------------------------
             using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,
                                     std::conditional_t<(N > C_BITS_PER_MASK) and (N <= C_ARRAY_LIMIT ), std::array<std::atomic<uint64_t>, C_MASK_COUNT>,
