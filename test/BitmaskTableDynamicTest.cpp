@@ -182,7 +182,7 @@ TEST(BitmaskTableDynamic, AcquireReleaseSingleThread) {
     ASSERT_GE(table.capacity(), DYNAMIC_SMALL);
 }
 
-TEST(BitmaskTableDynamic, RotationThresholdSelection) {
+TEST(BitmaskTableDynamic, LowestFreeBitSelection) {
     constexpr size_t c_capacity = 64UL;
     BitmaskTable<int, 0> table(c_capacity);
     std::array<int, c_capacity> values;
@@ -190,7 +190,7 @@ TEST(BitmaskTableDynamic, RotationThresholdSelection) {
     for (size_t i = 0; i < c_capacity; ++i) {
         values[i] = static_cast<int>(i);
     }
-    // Step 1: only bit 39 is free, so the first acquire must return 39.
+    // Only bit 39 is free; acquire must return 39.
     for (size_t i = 0; i < c_capacity; ++i) {
         if (i == 39) {
             ASSERT_TRUE(table.set(i, nullptr));
@@ -202,7 +202,7 @@ TEST(BitmaskTableDynamic, RotationThresholdSelection) {
     ASSERT_TRUE(idx1.has_value());
     ASSERT_EQ(*idx1, 39U);
 
-    // Step 2: free 0..31 and 50 (33 free bits >= threshold), occupy the rest.
+    // Free 0..31 and 50; acquire must return 0 (lowest free bit, no rotation).
     for (size_t i = 0; i < c_capacity; ++i) {
         if (i <= 31 || i == 50) {
             ASSERT_TRUE(table.set(i, nullptr));
@@ -212,47 +212,7 @@ TEST(BitmaskTableDynamic, RotationThresholdSelection) {
     }
     auto idx2 = table.acquire();
     ASSERT_TRUE(idx2.has_value());
-#if defined(BUILD_HAZARDSYSTEM_DISABLE_BITMASK_ROTATION)
     ASSERT_EQ(*idx2, 0U);
-#else
-    ASSERT_EQ(*idx2, 50U);
-#endif
-    ASSERT_TRUE(table.release(*idx1));
-    ASSERT_TRUE(table.release(*idx2));
-}
-
-TEST(BitmaskTableDynamic, RotationBelowThresholdFallback) {
-    constexpr size_t c_capacity = 64UL;
-    BitmaskTable<int, 0> table(c_capacity);
-    std::array<int, c_capacity> values;
-
-    for (size_t i = 0; i < c_capacity; ++i) {
-        values[i] = static_cast<int>(i);
-    }
-    // Seed a non-zero bit hint when rotation is enabled.
-    for (size_t i = 0; i < c_capacity; ++i) {
-        if (i == 7) {
-            ASSERT_TRUE(table.set(i, nullptr));
-        } else {
-            ASSERT_TRUE(table.set(i, &values[i]));
-        }
-    }
-    auto idx1 = table.acquire();
-    ASSERT_TRUE(idx1.has_value());
-    ASSERT_EQ(*idx1, 7U);
-
-    // Only two free bits (< threshold), so rotation should not apply.
-    for (size_t i = 0; i < c_capacity; ++i) {
-        if (i == 5 or i == 10) {
-            ASSERT_TRUE(table.set(i, nullptr));
-        } else {
-            ASSERT_TRUE(table.set(i, &values[i]));
-        }
-    }
-    auto idx2 = table.acquire();
-    ASSERT_TRUE(idx2.has_value());
-    ASSERT_EQ(*idx2, 5U);
-
     ASSERT_TRUE(table.release(*idx1));
     ASSERT_TRUE(table.release(*idx2));
 }
