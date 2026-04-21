@@ -274,48 +274,48 @@ BENCHMARK_DEFINE_F(BitmaskDynamicFixture, EmplaceReturn)(benchmark::State& state
 }
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireRelease)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireFailWhenFull)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireWorstCaseNearFull)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, IterateActive)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, Clear)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, AcquireIteratorSet)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, ActiveChecks)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, FindPredicate)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 BENCHMARK_REGISTER_F(BitmaskDynamicFixture, EmplaceReturn)
-    ->RangeMultiplier(2)
-    ->Range(64, 4096)
+    ->RangeMultiplier(8)
+    ->Range(64, 65536)
     ->Complexity(benchmark::oAuto);
 
 int main(int argc, char** argv) {
