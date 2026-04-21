@@ -32,6 +32,12 @@ namespace HazardSystem {
             static constexpr size_t C_MAX_PLANES    = 2UL;
             static constexpr size_t C_MAX_LEVELS    = (C_WORD_BITS + (C_LEVEL_SHIFT - 1)) / C_LEVEL_SHIFT;
             //--------------------------
+            // The tree depth cap must stay small so every loop in the hot path can be
+            // header-bounded by a constant-ish iteration count. If this ever needs to
+            // grow, re-review every for-loop that iterates `m_levels` or uses
+            // `std::array<size_t, C_MAX_LEVELS>` to make sure nothing silently blows up.
+            static_assert(C_MAX_LEVELS <= 16UL, "BitmapTree depth must stay small for header-bounded loops");
+            //--------------------------
             enum class Mode : uint8_t {Empty = 1 << 0, SingleWord = 1 << 1, Tree = 1 << 2};
         //----------------------------------------------------------
         public:
@@ -71,6 +77,10 @@ namespace HazardSystem {
             //----------------------------------------------------------
         protected:
             //----------------------------------------------------------
+            constexpr bool in_bounds(size_t bit_index, size_t plane) const noexcept {
+                return (plane < m_planes) and (bit_index < m_leaf_bits);
+            }// end constexpr bool in_bounds(size_t bit_index, size_t plane) const noexcept
+            //----------------------------------------------------------
             bool initialization_data(const size_t& leaf_bits);
             //--------------------------
             bool initialization_data(const size_t& leaf_bits, const size_t& planes);
@@ -87,6 +97,14 @@ namespace HazardSystem {
             //--------------------------
             std::optional<size_t> find_next_data(const size_t& start, const size_t& plane) const noexcept;
             //--------------------------
+            bool set_single_word(const size_t& bit_index, const size_t& plane) noexcept;
+            //--------------------------
+            bool clear_single_word(const size_t& bit_index, const size_t& plane) noexcept;
+            //--------------------------
+            std::optional<size_t> find_single_word(const size_t& hint, const size_t& plane) const noexcept;
+            //--------------------------
+            std::optional<size_t> find_next_single_word(const size_t& start, const size_t& plane) const noexcept;
+            //--------------------------
             size_t leaf_bits_data(void) const noexcept;
             //--------------------------
             size_t planes_data(void) const noexcept;
@@ -102,9 +120,9 @@ namespace HazardSystem {
             //--------------------------
             bool clear_bit(const size_t& plane, const size_t& level, const size_t& bit_index) noexcept;
             //--------------------------
-            std::optional<size_t> find_next_set_bit(const size_t& plane, const size_t& level, const size_t& start_bit) const noexcept;
-            //--------------------------
             std::optional<size_t> find_from_leaf(const size_t& plane, const size_t& start_leaf_bit) const noexcept;
+            //--------------------------
+            std::optional<size_t> find_from_root(const size_t& plane) const noexcept;
             //----------------------------------------------------------
         private:
             //----------------------------------------------------------
