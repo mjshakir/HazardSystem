@@ -11,6 +11,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    env:
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -47,7 +50,7 @@ jobs:
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
         -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
         -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
-        -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer'
+        -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer -O1'
         -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread'
 
     - name: Build
@@ -57,7 +60,13 @@ jobs:
       working-directory: build
       run: ctest -R HazardSystem_HazardPointer_Protect_Probe --output-on-failure
 
+    - name: Test (no benchmarks, TSan with repeat)
+      if: matrix.variant == 'tsan'
+      working-directory: build
+      run: ctest -LE benchmark --output-on-failure --repeat until-fail:3
+
     - name: Test (no benchmarks)
+      if: matrix.variant != 'tsan'
       working-directory: build
       run: ctest -LE benchmark --output-on-failure
 
@@ -65,10 +74,6 @@ jobs:
       if: matrix.variant == 'release'
       working-directory: build
       run: ctest -LE benchmark --output-on-failure --repeat until-fail:20
-
-    - name: Run HashTable Benchmarks
-      if: matrix.variant == 'release'
-      run: ./build/benchmarkbin/HazardSystem_HashTable_Benchmark
 
     - name: Run Static HazardSystem Benchmarks
       if: matrix.variant == 'release'
@@ -97,7 +102,3 @@ jobs:
     - name: Run Hazard Registry Benchmarks
       if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_HazardRegistry_Benchmark
-
-    - name: Run Atomic Unique Ptr Benchmarks
-      if: matrix.variant == 'release'
-      run: ./build/benchmarkbin/HazardSystem_AtomicUniquePtr_Benchmark
