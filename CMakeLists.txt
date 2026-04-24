@@ -99,7 +99,6 @@ option(BUILD_HAZARDSYSTEM_SHARED_LIBS "Build using shared libraries" ON)
 option(BUILD_HAZARDSYSTEM_EXAMPLE "Build HazardSystem example" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_TESTS "Build HazardSystem tests" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_BENCHMARK "Build HazardSystem benchmarks" ${HAZARDSYSTEM_STANDALONE_PROJECT})
-option(BUILD_HAZARDSYSTEM_DISABLE_BITMASK_ROTATION "Disable BitmaskTable rotation" OFF)
 set(HAS_TBB OFF CACHE BOOL "Set to TRUE if TBB is found, otherwise FALSE")
 #------------------------------------------------------------------------------------------
 # Force colored output
@@ -117,14 +116,9 @@ set(HAZARDSYSTEM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
 set(HAZARDSYSTEM_SOURCES
-    # ${HAZARDSYSTEM_SOURCE_DIR}/atomic_unique_ptr.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/BitmapTree.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/Hasher.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/HashTable.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/HashMultiTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/BitmaskTable.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/RetireSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp

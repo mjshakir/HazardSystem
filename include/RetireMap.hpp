@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard C++ library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <cstddef>
 #include <unordered_map>
@@ -157,7 +158,7 @@ namespace HazardSystem {
                     const size_t requested_size = current_size + (increase ? increase : 1UL);
                     if (!resize_retired(requested_size)) {
                         return false;
-                    }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
+                    }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE)))
                 }// end if (should_resize)
                 //--------------------------
                 if (m_retired.find(ptr) != m_retired.end()) {
@@ -222,7 +223,7 @@ namespace HazardSystem {
                 //--------------------------
             }// end bool should_resize(void)
             //--------------------------
-            void clear_data(void) { 
+            void clear_data(void) {
                 m_retired.clear();
             }// end void clear_data(void)
             //--------------------------------------------------------------
@@ -234,5 +235,5 @@ namespace HazardSystem {
         //--------------------------------------------------------------
     };// end clas class RetireMap
     //--------------------------------------------------------------
-} // namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

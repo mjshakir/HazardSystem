@@ -1,9 +1,9 @@
 //--------------------------------------------------------------
-// Main Header 
+// Main header
 //--------------------------------------------------------------
 #include "ThreadRegistry.hpp"
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <algorithm>
 //--------------------------------------------------------------
@@ -15,8 +15,8 @@ HazardSystem::ThreadRegistry::ThreadRegistry(void) : m_thread_table(1024UL) {
 //--------------------------------------------------------------
 HazardSystem::ThreadRegistry& HazardSystem::ThreadRegistry::instance(void) {
     //--------------------------
-    static ThreadRegistry instance;
-    return instance;
+    static ThreadRegistry s_instance;
+    return s_instance;
     //--------------------------
 }// end HazardSystem::ThreadRegistry::instance(void)
 //--------------------------------------------------------------

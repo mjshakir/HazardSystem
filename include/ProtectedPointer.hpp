@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard C++ library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <functional>
 #include <memory>
@@ -26,11 +27,11 @@ namespace HazardSystem {
                 static_cast<void>(release_data());
             }// end ~ProtectedPointer(void)
             //--------------------------
-            ProtectedPointer(   T* protected_pointer,
+            ProtectedPointer(   T* p_protected_pointer,
                                 std::function<bool(void)>&& release,
-                                std::shared_ptr<T> owner = nullptr) :   m_protected_pointer(protected_pointer),
-                                                                        m_release(std::move(release)),
-                                                                        m_owner(std::move(owner)) {
+                                std::shared_ptr<T> sp_owner = nullptr) :    m_protected_pointer(p_protected_pointer),
+                                                                            m_release(std::move(release)),
+                                                                            m_owner(std::move(sp_owner)) {
                 //--------------------------
             }// end ProtectedPointer
             //--------------------------
@@ -104,11 +105,11 @@ namespace HazardSystem {
                     return false;
                 }// end if(!m_protected_pointer or !m_release)
                 //--------------------------
-                const bool released = m_release();
+                const bool c_released = m_release();
                 m_protected_pointer = nullptr;
                 m_owner.reset();
                 //--------------------------
-                return released;
+                return c_released;
                 //--------------------------
             }// end void release_data(void)
             //--------------------------------------------------------------
@@ -120,5 +121,5 @@ namespace HazardSystem {
         //--------------------------------------------------------------
     };// end class ProtectedPointer
     //--------------------------------------------------------------
-} // end namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

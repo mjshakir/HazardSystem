@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <cstddef>
 #include <cstdbool>
@@ -18,14 +19,11 @@
 // User Defined Headers
 //--------------------------------------------------------------
 #include "HazardPointer.hpp"
-#include "HashTable.hpp"
-#include "HashMultiTable.hpp"
 #include "ThreadRegistry.hpp"
 #include "HazardThreadManager.hpp"
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireMap.hpp"
-// #include "RetireSet.hpp"
 #include "HazardRegistry.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
@@ -41,13 +39,13 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     public:
         //--------------------------------------------------------------
-        template<size_t N = HAZARD_POINTERS> 
+        template<size_t N = HAZARD_POINTERS>
         static  std::enable_if_t<(N > 0), HazardPointerManager&> instance(const size_t& retired_size = 2UL) {
             static HazardPointerManager instance(retired_size);
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
-        template<size_t N = HAZARD_POINTERS> 
+        template<size_t N = HAZARD_POINTERS>
         static  std::enable_if_t<(N == 0), HazardPointerManager&> instance( const size_t& hazards_size = std::thread::hardware_concurrency(),
                                                                             const size_t& retired_size = 2UL) {
             static HazardPointerManager instance(hazards_size, retired_size);
@@ -202,7 +200,7 @@ class HazardPointerManager {
             if (!protected_obj) {
                 release_data_iterator(it_opt.value());
                 return ProtectedPointer<T>();
-            }// end if (!protected_obj) 
+            }// end if (!protected_obj)
             //--------------------------
             if (!m_registry.add(protected_obj)) {
                 release_data_iterator(it_opt.value());
@@ -230,7 +228,7 @@ class HazardPointerManager {
             if (!protected_obj) {
                 release_data_iterator(it_opt.value());
                 return ProtectedPointer<T>();
-            }// end if (!protected_obj) 
+            }// end if (!protected_obj)
             //--------------------------
             if (!m_registry.add(protected_obj.get())) {
                 release_data_iterator(it_opt.value());
@@ -321,7 +319,7 @@ class HazardPointerManager {
             //--------------------------
         }// end ProtectedPointer<T> try_protect(const std::atomic<std::shared_ptr<T>>& a_sp_data, const size_t& max_retries)
         //--------------------------
-        ProtectedPointer<T> create_protected_pointer(typename BitmaskType::iterator it, 
+        ProtectedPointer<T> create_protected_pointer(typename BitmaskType::iterator it,
                                                     T* protected_obj,
                                                     std::shared_ptr<T> owner = nullptr) {
             return ProtectedPointer<T>(protected_obj, std::bind(&HazardPointerManager::release_data_iterator, this, std::move(it)), std::move(owner));
@@ -362,7 +360,7 @@ class HazardPointerManager {
         } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
         //--------------------------
         bool release_data_iterator(typename BitmaskType::iterator it) {
-            //--------------------------        
+            //--------------------------
             T* ptr = it->load(std::memory_order_acquire);
             // Clear the hazard slot first, then drop from registry.
             const bool cleared = m_hazard_pointers.set(it, nullptr);
@@ -444,5 +442,5 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
-} // end namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard C++ library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <cstddef>
 #include <cstdint>
@@ -60,7 +61,6 @@ namespace HazardSystem {
         public:
             //--------------------------------------------------------------
             using IndexType                 = typename IndexTypeSelector<N>::type;
-            //--------------------------
             using iterator                  = typename SlotType::iterator;
             using const_iterator            = typename SlotType::const_iterator;
             using reverse_iterator          = typename SlotType::reverse_iterator;
@@ -254,7 +254,7 @@ namespace HazardSystem {
             //--------------------------
             const_iterator begin(void) const noexcept {
                 return m_slots.begin();
-            }// end const_iterator begin(void) const noexcept 
+            }// end const_iterator begin(void) const noexcept
             //--------------------------
             const_iterator end(void) const noexcept {
                 return m_slots.end();
@@ -759,7 +759,7 @@ namespace HazardSystem {
                             auto ptr = m_slots[index].load(std::memory_order_acquire);
                             if (ptr and fn(ptr)) {
                                 return true;
-                            }//end if (sp_data and fn(index, sp_data)) 
+                            }//end if (sp_data and fn(index, sp_data))
                             //--------------------------
                         }// end if (index < get_capacity())
                         //--------------------------
@@ -944,7 +944,7 @@ namespace HazardSystem {
             update_on_full(const IndexType& part, const uint64_t& desired, const size_t& available_plane) noexcept {
                 if (desired != ~0ULL) {
                     return true;
-                }// end if (desired != ~0ULL) 
+                }// end if (desired != ~0ULL)
                 return refresh_hint(part, available_plane);
             }// end bool update_on_full(const IndexType& part, const uint64_t& desired, const size_t& available_plane) noexcept
             //--------------------------
@@ -961,7 +961,7 @@ namespace HazardSystem {
                 }// end if (!tree_enabled)
                 //--------------------------
                 return tree_ptr()->set(static_cast<size_t>(part), available_plane);
-            }// end bool available_not_full(const IndexType& part, const uint64_t& old, const size_t& available_plane) noexcept 
+            }// end bool available_not_full(const IndexType& part, const uint64_t& old, const size_t& available_plane) noexcept
             //--------------------------
             template<uint16_t M = N>
             std::enable_if_t<(M == 0) or (M > 64), bool> mark_non_empty(IndexType part) noexcept {
@@ -1097,7 +1097,7 @@ namespace HazardSystem {
                     }// end if (!tree or !tree->initialization(leaf_bits, plane_count()))
                     //--------------------------
                     return tree->reset_set(plane_index(PartPlane::Available)) and tree->reset_clear(plane_index(PartPlane::NonEmpty));
-                }
+                }// end if constexpr (!C_TREE_POSSIBLE)
             }// end bool initialize_tree(const size_t& leaf_bits)
             //--------------------------------------------------------------
             // Constexpr / Consteval helpers
@@ -1174,5 +1174,5 @@ namespace HazardSystem {
         //--------------------------------------------------------------
 	};// end class BitmaskTable
     //--------------------------------------------------------------
-} // namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

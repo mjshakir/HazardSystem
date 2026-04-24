@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard C++ library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <array>
 #include <atomic>
@@ -351,7 +352,7 @@ namespace HazardSystem {
                             static_cast<uint8_t>(SlotState::Occupied) and
                         !is_hazard(slot.key)) {
                         remove(slot.key);
-                    }// end if 
+                    }// end if
                 }// end for (auto& slot : m_slots)
                 //--------------------------
             }// end void reclaim_data(Predicate&& is_hazard)
@@ -399,5 +400,5 @@ namespace HazardSystem {
         //--------------------------------------------------------------
     };// end class HashSet
     //--------------------------------------------------------------
-} // namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

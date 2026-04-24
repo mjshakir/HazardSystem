@@ -57,8 +57,6 @@ function(create_benchmark_target TARGET_NAME SOURCE_FILE)
 endfunction()
 #------------------------------------------------------------------------------------------
 # Add the benchmarks without the 'benchmark/' prefix since we are already in the benchmark directory
-create_benchmark_target(${PROJECT_NAME}_HashTable_Benchmark HashTableBenchmark.cpp)
-# create_benchmark_target(${PROJECT_NAME}_Benchmark HazardPointerManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Fixed_Benchmark     HazardPointerManagerFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Dynamic_Benchmark     HazardPointerManagerDynamicBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Fixed_Benchmark   BitmaskTableFixedBenchmark.cpp)
@@ -67,7 +65,6 @@ create_benchmark_target(${PROJECT_NAME}_HashSet_Benchmark              HashSetBe
 create_benchmark_target(${PROJECT_NAME}_HashSet_Fixed_Benchmark        HashSetFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ProtectedPointer_Benchmark     ProtectedPointerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardRegistry_Benchmark       HazardRegistryBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_AtomicUniquePtr_Benchmark      AtomicUniquePtrBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ThreadRegistry_Benchmark       ThreadRegistryBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardThreadManager_Benchmark  HazardThreadManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_AvailabilityBitmapTree_Benchmark AvailabilityBitmapTreeBenchmark.cpp)

@@ -1,13 +1,13 @@
 #pragma once
 
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <cstdint>
 #include <cstdbool>
 #include <thread>
 //--------------------------------------------------------------
-// User Defined libraries
+// User Defined Headers
 //--------------------------------------------------------------
 #include "HazardSystemAPI.hpp"
 #include "HashSet.hpp"

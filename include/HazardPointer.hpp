@@ -1,6 +1,7 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <atomic>
 //--------------------------------------------------------------
@@ -11,12 +12,12 @@ namespace HazardSystem {
         //--------------------------
         public:
             //--------------------------
-            using atomic_type = std::atomic<T*>;
-            using atomic_type::atomic_type;
+            using AtomicType = std::atomic<T*>;
+            using AtomicType::AtomicType;
             //--------------------------
         public:
             //--------------------------
-            HazardPointer(void) : atomic_type(nullptr) {
+            HazardPointer(void) : AtomicType(nullptr) {
                 //--------------------------
             }// end HazardPointer(void)
             //--------------------------
@@ -37,7 +38,7 @@ namespace HazardSystem {
             //--------------------------
             T* operator->(void) const noexcept {
                 return this->load(std::memory_order_acquire);
-            }// end T* operator->(void) const noexcept 
+            }// end T* operator->(void) const noexcept
             //--------------------------
             T& operator*(void) const {
                 return *this->load(std::memory_order_acquire);
@@ -59,12 +60,12 @@ namespace HazardSystem {
                 return *this;
             }// end std::atomic<std::shared_ptr<T>>& atomic_ref() noexcept
             //--------------------------
-            void store_safe(T* ptr) noexcept {
-                T* expected = this->load(std::memory_order_acquire);
-                while (!this->compare_exchange_weak(expected, ptr, std::memory_order_acq_rel, std::memory_order_relaxed));
+            void store_safe(T* p_ptr) noexcept {
+                T* p_expected = this->load(std::memory_order_acquire);
+                while (!this->compare_exchange_weak(p_expected, p_ptr, std::memory_order_acq_rel, std::memory_order_relaxed));
             }// end bool store(std::shared_ptr<T> p) noexcept
         //--------------------------
-    }; // end struct HazardPointer    
+    }; // end struct HazardPointer
     //--------------------------------------------------------------
 }// end namespace HazardSystem
 //--------------------------------------------------------------
