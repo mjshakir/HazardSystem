@@ -28,6 +28,14 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             using Base = std::unordered_map<T*, std::unique_ptr<T, Deleter<T>>>;
+            //--------------------------
+            using Base::operator[];
+            using Base::insert;
+            using Base::insert_or_assign;
+            using Base::emplace;
+            using Base::emplace_hint;
+            using Base::try_emplace;
+            using Base::merge;
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
