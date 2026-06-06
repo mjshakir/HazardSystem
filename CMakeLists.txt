@@ -61,6 +61,7 @@ if(HAZARDSYSTEM_STANDALONE_PROJECT)
 
         if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
             target_compile_options(common_options INTERFACE "-fmax-errors=${HAZARDSYSTEM_MAX_ERRORS}")
+            target_compile_options(common_options INTERFACE "-Wno-error=maybe-uninitialized")
         elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
             target_compile_options(common_options INTERFACE "-ferror-limit=${HAZARDSYSTEM_MAX_ERRORS}")
         endif()
