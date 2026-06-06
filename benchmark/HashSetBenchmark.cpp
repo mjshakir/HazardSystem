@@ -97,7 +97,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Remove)(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations());
 }
 
-// Traverse active buckets via for_each_fast
+// Traverse active buckets via for_each
 BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
     for (auto _ : state) {
         state.PauseTiming();
@@ -108,7 +108,7 @@ BENCHMARK_DEFINE_F(HashSetFixture, Iterate)(benchmark::State& state) {
         state.ResumeTiming();
 
         size_t visited = 0;
-        set->for_each_fast([&](int value) {
+        set->for_each([&](int value) {
             benchmark::DoNotOptimize(value);
             ++visited;
         });
