@@ -45,7 +45,7 @@ TEST_F(HashSetFixedTest, FillAndTraverse) {
         EXPECT_TRUE(set->insert(i));
     }
     std::set<int> found;
-    set->for_each_fast([&](int v) { found.insert(v); });
+    set->for_each([&](int v) { found.insert(v); });
     EXPECT_EQ(found.size(), count);
     for (int i = 0; i < count; ++i) {
         EXPECT_TRUE(found.count(i));

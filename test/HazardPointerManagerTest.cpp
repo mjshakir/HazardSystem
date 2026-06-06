@@ -400,6 +400,37 @@ TEST_F(ProtectOnlyHazardPointerManagerTest, RetireThresholdConfiguration) {
 }
 
 //-----------------------------------------------------------------------------
+// Each thread that touches the manager materializes its own thread_local
+// RetireMap that holds a copy of the manager's shared hazard predicate.
+// Exercises the shared-predicate plumbing under contention.
+//-----------------------------------------------------------------------------
+TEST(HazardPointerManagerTest, SharedHazardPredicateAcrossThreads) {
+    using Mgr = HazardPointerManager<BasicData, 64>;
+    auto& mgr = Mgr::instance(8UL);
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 32;
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+    std::atomic<int> failures{0};
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([&]{
+            ThreadRegistry::instance().register_id();
+            for (int i = 0; i < kPerThread; ++i) {
+                auto sp = std::make_shared<BasicData>(i);
+                auto guard = mgr.protect(sp);
+                if (!guard) { failures.fetch_add(1, std::memory_order_relaxed); continue; }
+                guard.reset();
+                if (!mgr.retire(sp)) { failures.fetch_add(1, std::memory_order_relaxed); }
+            }
+            mgr.reclaim();
+        });
+    }
+    for (auto& w : workers) w.join();
+    EXPECT_EQ(failures.load(), 0);
+    mgr.clear();
+}
+
+//-----------------------------------------------------------------------------
 // main()
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
