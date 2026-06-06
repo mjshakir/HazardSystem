@@ -78,30 +78,30 @@ namespace HazardSystem {
             template <size_t M = N, std::enable_if_t<M == 0, int> = 0>
             explicit HashSet(size_t capacity = 1024UL) :    m_capacity(next_power_of_two(safe_double(capacity))),
                                                             m_mask(m_capacity - 1),
+                                                            m_max_load(load_limit(m_capacity)),
                                                             m_slots(m_capacity),
                                                             m_size(0),
-                                                            m_deleted(0),
-                                                            m_max_load(load_limit(m_capacity)) {
+                                                            m_deleted(0) {
                 //--------------------------
             }// end explicit HashSet(size_t capacity = 1024UL)
             //--------------------------
             template <size_t M = N, std::enable_if_t<(M != 0) && (M <= C_ARRAY_LIMIT), int> = 0>
             HashSet(void) : m_capacity(C_CAPACITY),
                             m_mask(m_capacity - 1),
+                            m_max_load(load_limit(m_capacity)),
                             m_slots(),
                             m_size(0),
-                            m_deleted(0),
-                            m_max_load(load_limit(m_capacity)) {
+                            m_deleted(0) {
                 //--------------------------
             }// end HashSet(void)
             //--------------------------
             template <size_t M = N, std::enable_if_t<(M != 0) && (M > C_ARRAY_LIMIT), int> = 0>
             HashSet(void) : m_capacity(next_power_of_two(safe_double_const(N))),
                             m_mask(m_capacity - 1),
+                            m_max_load(load_limit(m_capacity)),
                             m_slots(m_capacity),
                             m_size(0),
-                            m_deleted(0),
-                            m_max_load(load_limit(m_capacity)) {
+                            m_deleted(0) {
 
             }// end HashSet(void)
             //--------------------------
@@ -128,11 +128,6 @@ namespace HazardSystem {
             void for_each(Func&& fn) const {
                 for_each_data(std::forward<Func>(fn));
             }// end void for_each(Func&& fn) const
-            //--------------------------
-            template <typename Func>
-            void for_each_fast(Func&& fn) const {
-                for_each(std::forward<Func>(fn));
-            }// end void for_each_fast(Func&& fn) const
             //--------------------------
             template <typename Predicate>
             void reclaim(Predicate&& is_hazard) {
@@ -177,9 +172,6 @@ namespace HazardSystem {
                 size_t idx              = hash & m_mask;
                 //--------------------------
                 for (size_t probe = 0; probe < m_capacity; ++probe) {
-                    if (m_size.load(std::memory_order_relaxed) >= m_max_load) {
-                        return false; // avoid pathological probe chains when nearly full
-                    }// end if (m_size.load(std::memory_order_relaxed) >= m_max_load)
                     Slot& slot          = slot_at(idx);
                     SlotState state     = static_cast<SlotState>(slot.state.load(std::memory_order_acquire));
                     //--------------------------
@@ -312,20 +304,11 @@ namespace HazardSystem {
                     }// end if (state == SlotState::Empty)
                     //--------------------------
                     if (state == SlotState::Occupied and slot.key == key) {
-                        uint8_t expected = static_cast<uint8_t>(SlotState::Occupied);
-                        while (expected == static_cast<uint8_t>(SlotState::Occupied)) {
-                            if (slot.state.compare_exchange_weak(
-                                    expected,
-                                    static_cast<uint8_t>(SlotState::Deleted),
-                                    std::memory_order_acq_rel,
-                                    std::memory_order_acquire)) {
-                                //--------------------------
-                                m_size.fetch_sub(1, std::memory_order_relaxed);
-                                m_deleted.fetch_add(1, std::memory_order_relaxed);
-                                return true;
-                                //--------------------------
-                            }// end if (slot.state.compare_exchange_weak
-                        }// end while (expected == static_cast<uint8_t>(SlotState::Occupied))
+                        if (try_mark_deleted(slot)) {
+                            m_size.fetch_sub(1, std::memory_order_relaxed);
+                            m_deleted.fetch_add(1, std::memory_order_relaxed);
+                            return true;
+                        }// end if (try_mark_deleted(slot))
                     }// end if (state == SlotState::Occupied and slot.key == key)
                     idx = (idx + step) & m_mask;
                 }// end for (size_t probe = 0; probe < m_capacity; ++probe)
@@ -347,12 +330,17 @@ namespace HazardSystem {
             template <typename Predicate>
             void reclaim_data(Predicate&& is_hazard) {
                 //--------------------------
+                constexpr uint8_t occupied = static_cast<uint8_t>(SlotState::Occupied);
+                //--------------------------
                 for (auto& slot : m_slots) {
-                    if (slot.state.load(std::memory_order_acquire) ==
-                            static_cast<uint8_t>(SlotState::Occupied) and
-                        !is_hazard(slot.key)) {
-                        remove(slot.key);
-                    }// end if
+                    if (slot.state.load(std::memory_order_acquire) != occupied or is_hazard(slot.key)) {
+                        continue;
+                    }// end if (slot.state.load(std::memory_order_acquire) != occupied or is_hazard(slot.key))
+                    //--------------------------
+                    if (try_mark_deleted(slot)) {
+                        m_size.fetch_sub(1, std::memory_order_relaxed);
+                        m_deleted.fetch_add(1, std::memory_order_relaxed);
+                    }// end if (try_mark_deleted(slot))
                 }// end for (auto& slot : m_slots)
                 //--------------------------
             }// end void reclaim_data(Predicate&& is_hazard)
@@ -377,6 +365,25 @@ namespace HazardSystem {
                 return step ? step : 1ULL; // keep probe cycle relatively prime to capacity
             }// end size_t step_hash(size_t h) const
             //--------------------------
+            bool try_mark_deleted(Slot& slot) {
+                //--------------------------
+                constexpr uint8_t deleted   = static_cast<uint8_t>(SlotState::Deleted);
+                uint8_t expected            = static_cast<uint8_t>(SlotState::Occupied);
+                //--------------------------
+                while (!slot.state.compare_exchange_weak(
+                        expected,
+                        deleted,
+                        std::memory_order_acq_rel,
+                        std::memory_order_acquire)) {
+                    if (static_cast<SlotState>(expected) != SlotState::Occupied) {
+                        return false;
+                    }// end if (static_cast<SlotState>(expected) != SlotState::Occupied)
+                }// end while (!slot.state.compare_exchange_weak(...))
+                //--------------------------
+                return true;
+                //--------------------------
+            }// end bool try_mark_deleted(Slot& slot)
+            //--------------------------
             constexpr size_t next_power_of_two(size_t n) {
                 return n ? std::bit_ceil(n) : 1ULL;
             }// end constexpr size_t next_power_of_two(size_t n)
@@ -391,12 +398,9 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            const size_t m_capacity;
-            const size_t m_mask;
+            const size_t m_capacity, m_mask, m_max_load;
             Storage m_slots;
-            std::atomic<size_t> m_size;
-            std::atomic<size_t> m_deleted;
-            const size_t m_max_load;
+            std::atomic<size_t> m_size, m_deleted;
         //--------------------------------------------------------------
     };// end class HashSet
     //--------------------------------------------------------------

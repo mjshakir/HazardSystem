@@ -39,10 +39,13 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
+            using SharedFn = typename Deleter<T>::SharedFn;
+            //--------------------------
             explicit RetireMap( const size_t& threshold,
-                                const std::function<bool(const T*)>& is_hazard) :  Base(),
-                                                                                   m_threshold(std::bit_ceil(threshold)),
-                                                                                   m_hazard(is_hazard) {
+                                std::shared_ptr<std::function<bool(const T*)>> hazard) 
+                                    :   Base(),
+                                        m_threshold(std::bit_ceil(threshold)),
+                                        m_hazard(std::move(hazard)) {
                 //--------------------------
                 Base::reserve(threshold);
                 //--------------------------
@@ -59,16 +62,22 @@ namespace HazardSystem {
                 return retire_data(ptr, Deleter<T>());
             }// end bool retire(T* ptr)
             //--------------------------
-            bool retire(T* ptr, std::function<void(T*)>&& deleter) {
-                return retire_data(ptr, Deleter<T>(std::move(deleter)));
-            }// end bool retire(T* ptr, std::function<void(T*)>)
+            bool retire(T* ptr, SharedFn&& shared_fn) {
+                if (!shared_fn) {
+                    return false;
+                }// end if (!shared_fn)
+                return retire_data(ptr, Deleter<T>(std::move(shared_fn)));
+            }// end bool retire(T* ptr, SharedFn shared_fn)
             //--------------------------
             bool retire(std::shared_ptr<T>&& owner) {
                 return retire_shared(std::move(owner));
             }// end bool retire(std::shared_ptr<T> owner)
             //--------------------------
             std::optional<size_t> reclaim(void) {
-                return scan_and_reclaim(m_hazard);
+                if (!m_hazard) {
+                    return std::nullopt;
+                }// end if (!m_hazard)
+                return scan_and_reclaim([h = m_hazard](const T* p){ return (*h)(p); });
             }// end std::optional<size_t> reclaim(void)
             //--------------------------
             template<class Pred>
@@ -89,9 +98,13 @@ namespace HazardSystem {
                 }// end if (!ptr)
                 //--------------------------
                 if (Base::size() >= m_threshold) {
-                    if (!scan_and_reclaim(m_hazard)) {
+                    if (!m_hazard) {
                         return false;
-                    }// end if (!scan_and_reclaim(m_hazard))
+                    }// end if (!m_hazard)
+                    auto h = m_hazard;
+                    if (!scan_and_reclaim([h](const T* p){ return (*h)(p); })) {
+                        return false;
+                    }// end if (!scan_and_reclaim(...))
                 }// end if (Base::size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
@@ -162,7 +175,7 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(const T*)> m_hazard;
+            std::shared_ptr<std::function<bool(const T*)>> m_hazard;
         //--------------------------------------------------------------
     };// end class RetireMap
     //--------------------------------------------------------------

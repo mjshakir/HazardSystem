@@ -135,7 +135,9 @@ class HazardPointerManager {
         template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
         HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
                                                           m_hazard_pointers(),
-                                                          m_registry(hazard_limiter(m_hazard_pointers.capacity())) {
+                                                          m_registry(hazard_limiter(m_hazard_pointers.capacity())),
+                                                          m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
+                                                              [this](const T* p){ return is_hazard(p); })) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -143,7 +145,9 @@ class HazardPointerManager {
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
                                                                 m_hazard_pointers(hazard_limiter(hazards_size)),
-                                                                m_registry(hazard_limiter(m_hazard_pointers.capacity())){
+                                                                m_registry(hazard_limiter(m_hazard_pointers.capacity())),
+                                                                m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
+                                                                    [this](const T* p){ return is_hazard(p); })) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -371,16 +375,6 @@ class HazardPointerManager {
             //--------------------------
         } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
         //--------------------------
-        bool retire_node(T* node, std::function<void(T*)> deleter) {
-            //--------------------------
-            if (!node) {
-                return false;
-            }// end if (!node)
-            //--------------------------
-            return retired_nodes().retire(node, std::move(deleter));
-            //--------------------------
-        }// end bool retire_node(T* node, std::function<void(T*)> deleter)
-        //--------------------------
         bool retire_node(T* node) {
             if (!node) {
                 return false;
@@ -427,8 +421,7 @@ class HazardPointerManager {
         //--------------------------
         RetireMap<T>& retired_nodes(void) const {
             //--------------------------
-            static thread_local RetireMap<T> tls_retired(   m_retired_threshold,
-                                                            std::bind(&HazardPointerManager::is_hazard, this, std::placeholders::_1));
+            static thread_local RetireMap<T> tls_retired(m_retired_threshold, m_is_hazard_fn);
             //--------------------------
             return tls_retired;
             //--------------------------
@@ -439,6 +432,9 @@ class HazardPointerManager {
         const size_t m_retired_threshold;
         BitmaskType m_hazard_pointers;
         HazardRegistry<T> m_registry;
+        // Built once in the constructor and shared with every per-thread RetireMap.
+        // The captured `this` means the manager must outlive any thread that called retired_nodes().
+        std::shared_ptr<std::function<bool(const T*)>> m_is_hazard_fn;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------
