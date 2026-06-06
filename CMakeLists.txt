@@ -119,6 +119,7 @@ set(HAZARDSYSTEM_SOURCES
 	${HAZARDSYSTEM_SOURCE_DIR}/BitmapTree.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/BitmaskTable.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/Deleter.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
