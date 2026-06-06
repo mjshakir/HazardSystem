@@ -68,4 +68,5 @@ create_benchmark_target(${PROJECT_NAME}_HazardRegistry_Benchmark       HazardReg
 create_benchmark_target(${PROJECT_NAME}_ThreadRegistry_Benchmark       ThreadRegistryBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardThreadManager_Benchmark  HazardThreadManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_AvailabilityBitmapTree_Benchmark AvailabilityBitmapTreeBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_RetireMap_Benchmark              RetireMapBenchmark.cpp)
 #------------------------------------------------------------------------------------------
