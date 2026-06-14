@@ -552,7 +552,7 @@ TEST(BitmaskTableTest, SetEmplaceNonArrayMultiThread) {
     auto worker = [&](int id) {
         for (int i = 0; i < ops_per_thread; ++i) {
             auto* value = new int(id * 100 + i);
-            std::optional<IndexType> idx = table.set(value);
+            auto idx = table.set(value);
             while (!idx.has_value()) {
                 std::this_thread::yield();
                 idx = table.set(value);
@@ -766,3 +766,29 @@ TEST(BitmaskTableTest, RealWorldMixedOperations) {
         ASSERT_FALSE(table.at(idx));
     }
 }
+
+// acquire()/set() return std::expected<IndexType, AcquireError>; assert the two
+// failure modes are distinct, and that to_string names them.
+TEST(BitmaskTableTest, AcquireErrorVariantsAndNames) {
+    BitmaskTable<int, 2> table;
+    int a = 1, b = 2;
+
+    // set(nullptr) is a programmer error, distinct from a full table.
+    auto nul = table.set(nullptr);
+    ASSERT_FALSE(nul.has_value());
+    EXPECT_EQ(nul.error(), AcquireError::NULL_POINTER);
+
+    // Fill the 2-slot table, then the next acquire reports FULL (not NULL_POINTER).
+    ASSERT_TRUE(table.set(&a).has_value());
+    ASSERT_TRUE(table.set(&b).has_value());
+    auto full = table.acquire();
+    ASSERT_FALSE(full.has_value());
+    EXPECT_EQ(full.error(), AcquireError::FULL);
+
+    // to_string yields the enumerator name, distinct per variant.
+    ASSERT_TRUE(to_string(AcquireError::FULL).has_value());
+    EXPECT_EQ(to_string(AcquireError::FULL).value(), "AcquireError::FULL");
+    EXPECT_NE(to_string(AcquireError::FULL), to_string(AcquireError::NULL_POINTER));
+}
+static_assert(HazardSystem::to_string(HazardSystem::AcquireError::FULL).has_value(),
+              "known AcquireError values must resolve to a name");

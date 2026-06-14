@@ -10,7 +10,7 @@
 #include <functional>
 #include <atomic>
 #include <memory>
-#include <optional>
+#include <expected>
 #include <algorithm>
 #include <utility>
 #include <bit>
@@ -18,6 +18,7 @@
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
+#include "Error.hpp"
 #include "HazardPointer.hpp"
 #include "ThreadRegistry.hpp"
 #include "HazardThreadManager.hpp"
@@ -40,18 +41,26 @@ class HazardPointerManager {
     public:
         //--------------------------------------------------------------
         template<size_t N = HAZARD_POINTERS>
-        static  std::enable_if_t<(N > 0), HazardPointerManager&> instance(const size_t& retired_size = 2UL) {
+            requires (N > 0)
+        static HazardPointerManager& instance(const size_t& retired_size = 2UL) {
             static HazardPointerManager instance(retired_size);
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
         template<size_t N = HAZARD_POINTERS>
-        static  std::enable_if_t<(N == 0), HazardPointerManager&> instance( const size_t& hazards_size = std::thread::hardware_concurrency(),
+            requires (N == 0)
+        static HazardPointerManager& instance( const size_t& hazards_size = std::thread::hardware_concurrency(),
                                                                             const size_t& retired_size = 2UL) {
             static HazardPointerManager instance(hazards_size, retired_size);
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
+        // protect()/try_protect() keep returning ProtectedPointer<T> rather than
+        // std::expected<ProtectedPointer<T>, ...>. ProtectedPointer is already a
+        // nullable RAII value type (operator bool) whose empty state is the failure
+        // channel, so wrapping it in std::expected would double-wrap a nullable and
+        // worsen ergonomics. std::expected is used where the previous return was a
+        // bare bool / std::optional that lost the failure reason (retire / reclaim).
         ProtectedPointer<T> protect(T* data) {
             return protect_data(data);
         }// end ProtectedPointer<T> protect(T* data)
@@ -98,13 +107,13 @@ class HazardPointerManager {
         //     return release_data(hp);
         // } // end bool release(std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> hp)
         //--------------------------
-        bool retire(T* node) {
+        std::expected<void, RetireError> retire(T* node) {
             return retire_node(node);
-        } // end bool retire(T* node)
+        } // end std::expected<void, RetireError> retire(T* node)
         //--------------------------
-        bool retire(std::shared_ptr<T> node) {
+        std::expected<void, RetireError> retire(std::shared_ptr<T> node) {
             return retire_node(std::move(node));
-        } // end bool retire(std::shared_ptr<T> node)
+        } // end std::expected<void, RetireError> retire(std::shared_ptr<T> node)
         //--------------------------
         void reclaim(void) {
             scan_and_reclaim();
@@ -132,7 +141,8 @@ class HazardPointerManager {
         //--------------------------------------------------------------
     protected:
         //--------------------------------------------------------------
-        template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N > 0), int> = 0>
+        template <size_t N = HAZARD_POINTERS>
+            requires (N > 0)
         HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
                                                           m_hazard_pointers(),
                                                           m_registry(hazard_limiter(m_hazard_pointers.capacity())),
@@ -141,7 +151,8 @@ class HazardPointerManager {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
-        template <size_t N = HAZARD_POINTERS, std::enable_if_t< (N == 0), int> = 0>
+        template <size_t N = HAZARD_POINTERS>
+            requires (N == 0)
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
                                                                 m_hazard_pointers(hazard_limiter(hazards_size)),
@@ -351,7 +362,7 @@ class HazardPointerManager {
             //--------------------------
         }// end ProtectedPointer<T> protect_with_owner(T* ptr, std::shared_ptr<T> owner)
         //--------------------------
-        std::optional<typename BitmaskType::iterator> acquire_data_iterator(void) {
+        std::expected<typename BitmaskType::iterator, AcquireError> acquire_data_iterator(void) {
             //--------------------------
             HazardThreadManager::instance();
             //--------------------------
@@ -361,7 +372,7 @@ class HazardPointerManager {
             //--------------------------
             return m_hazard_pointers.acquire_iterator();
             //--------------------------
-        } // end std std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>> acquire_data(void)
+        } // end std::expected<iterator, AcquireError> acquire_data_iterator(void)
         //--------------------------
         bool release_data_iterator(typename BitmaskType::iterator it) {
             //--------------------------
@@ -375,19 +386,19 @@ class HazardPointerManager {
             //--------------------------
         } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
         //--------------------------
-        bool retire_node(T* node) {
+        std::expected<void, RetireError> retire_node(T* node) {
             if (!node) {
-                return false;
+                return std::unexpected(RetireError::NULL_POINTER);
             }
             return retired_nodes().retire(node);
-        }// end bool retire_node(T* node)
+        }// end std::expected<void, RetireError> retire_node(T* node)
         //--------------------------
-        bool retire_node(std::shared_ptr<T> node) {
+        std::expected<void, RetireError> retire_node(std::shared_ptr<T> node) {
             if (!node) {
-                return false;
+                return std::unexpected(RetireError::NULL_POINTER);
             }
             return retired_nodes().retire(std::move(node));
-        }// end bool retire_node(std::shared_ptr<T> node)
+        }// end std::expected<void, RetireError> retire_node(std::shared_ptr<T> node)
         //--------------------------
         bool is_hazard(const T* node) const {
             //--------------------------

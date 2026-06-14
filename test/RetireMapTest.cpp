@@ -3,6 +3,7 @@
 #include <set>
 #include <random>
 #include <atomic>
+#include <string_view>
 #include "RetireMap.hpp" // <-- Adjust path as needed
 
 using HazardSystem::RetireMap;
@@ -76,7 +77,10 @@ TEST(RetireMapTest, ReclaimKeepsHazard) {
     s.retire(ptr1);
     s.retire(ptr2);
     auto removed = s.reclaim();
-    EXPECT_FALSE(removed.has_value());
+    // Hazard function is installed and reclaims nothing: 0 is a valid result,
+    // not an error (the previous std::optional API conflated the two).
+    ASSERT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, 0u);
     EXPECT_EQ(s.size(), 2u);
 }
 
@@ -121,7 +125,7 @@ TEST(RetireMapTest, ResizeIncreasesThreshold) {
     EXPECT_GE(s.size(), 0u);
     for (int i = 0; i < 120; ++i) {
         auto* ptr = new Dummy(i);
-        const bool ok = s.retire(ptr);
+        const bool ok = s.retire(ptr).has_value();
         if (!ok) {
             delete ptr;
         }
@@ -145,7 +149,9 @@ TEST(RetireMapTest, ResizeFailsOnShrink) {
 TEST(RetireMapTest, ReclaimOnEmptyIsNoop) {
     RetireMap<Dummy> s(8, always_hazard);
     auto removed = s.reclaim();
-    EXPECT_FALSE(removed.has_value());
+    // Hazard function present, nothing to reclaim: a valid 0, not an error.
+    ASSERT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, 0u);
     EXPECT_EQ(s.size(), 0u);
 }
 
@@ -283,10 +289,47 @@ TEST(RetireMapTest, NullSharedDeleterRejected) {
     RetireMap<Dummy> s(4, never);
     auto* ptr = new Dummy(7);
     std::shared_ptr<std::function<void(Dummy*)>> null_fn;
-    EXPECT_FALSE(s.retire(ptr, std::move(null_fn)));
+    auto rejected = s.retire(ptr, std::move(null_fn));
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error(), HazardSystem::RetireError::NULL_CALLBACK);
     EXPECT_EQ(s.size(), 0u);
     delete ptr; // not owned by the map; clean up to avoid leaking the test pointer
 }
+
+// std::expected carries a distinct error per failure mode; assert they are
+// not collapsed (the headline win over the old bool / std::optional returns).
+TEST(RetireMapTest, ReclaimWithoutHazardFunctionIsError) {
+    RetireMap<Dummy> s(8, nullptr); // no hazard predicate installed
+    auto* ptr = new Dummy(1);
+    ASSERT_TRUE(s.retire(ptr).has_value());
+    auto removed = s.reclaim();
+    ASSERT_FALSE(removed.has_value());
+    EXPECT_EQ(removed.error(), HazardSystem::RetireError::NO_HAZARD_FUNCTION);
+    s.clear(); // drops the retained pointer through its Deleter
+}
+
+TEST(RetireMapTest, RetireErrorVariantsAreDistinct) {
+    RetireMap<Dummy> s(8, always_hazard);
+    EXPECT_EQ(s.retire(nullptr).error(), HazardSystem::RetireError::NULL_POINTER);
+    auto* ptr = new Dummy(3);
+    EXPECT_TRUE(s.retire(ptr).has_value());
+    EXPECT_EQ(s.retire(ptr).error(), HazardSystem::RetireError::DUPLICATE);
+}
+
+// to_string returns the enumerator's name as std::optional<string_view>, and
+// std::nullopt for a value that is not a recognised enumerator.
+TEST(RetireMapTest, ErrorToStringNames) {
+    using HazardSystem::RetireError;
+    using HazardSystem::to_string;
+    ASSERT_TRUE(to_string(RetireError::NULL_POINTER).has_value());
+    EXPECT_EQ(to_string(RetireError::NULL_POINTER).value(), "RetireError::NULL_POINTER");
+    EXPECT_NE(to_string(RetireError::NULL_POINTER), to_string(RetireError::DUPLICATE));
+    // A value that is not a recognised enumerator has no name.
+    EXPECT_FALSE(to_string(static_cast<RetireError>(0)).has_value());
+}
+// Usable in constant expressions (constexpr, not consteval).
+static_assert(HazardSystem::to_string(HazardSystem::RetireError::DUPLICATE).has_value(),
+              "known RetireError values must resolve to a name");
 
 // Locks in the size win from replacing std::function<void(T*)> with a shared_ptr inside the variant.
 static_assert(sizeof(HazardSystem::Deleter<int>) <= 32,

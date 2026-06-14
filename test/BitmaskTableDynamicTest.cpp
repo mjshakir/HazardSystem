@@ -543,14 +543,13 @@ TEST(BitmaskTableDynamic, SetEmplaceArraySingleThread) {
 // Test 3: m_bitmask is not array, multi-threaded (N=32)
 TEST(BitmaskTableDynamic, SetEmplaceNonArrayMultiThread) {
     BitmaskTable<int, 0> table(DYNAMIC_SMALL);
-    using IndexType = typename BitmaskTable<int, 0>::IndexType;
     constexpr int ops_per_thread = 100;
     std::atomic<int> success{0};
 
     auto worker = [&](int id) {
         for (int i = 0; i < ops_per_thread; ++i) {
             auto* value = new int(id * 100 + i);
-            std::optional<IndexType> idx = table.set(value);
+            auto idx = table.set(value);
             while (!idx.has_value()) {
                 std::this_thread::yield();
                 idx = table.set(value);

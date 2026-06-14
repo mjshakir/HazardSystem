@@ -5,14 +5,15 @@
 //--------------------------------------------------------------
 #include <bit>
 #include <cstddef>
+#include <expected>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 //--------------------------------------------------------------
 // HazardSystem
 //--------------------------------------------------------------
 #include "Deleter.hpp"
+#include "Error.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
@@ -58,119 +59,117 @@ namespace HazardSystem {
             RetireMap& operator=(RetireMap&& other) noexcept    = default;
             ~RetireMap(void)                                    = default;
             //--------------------------
-            bool retire(T* ptr) {
+            std::expected<void, RetireError> retire(T* ptr) {
                 return retire_data(ptr, Deleter<T>());
-            }// end bool retire(T* ptr)
+            }// end std::expected<void, RetireError> retire(T* ptr)
             //--------------------------
-            bool retire(T* ptr, SharedFn&& shared_fn) {
+            std::expected<void, RetireError> retire(T* ptr, SharedFn&& shared_fn) {
                 if (!shared_fn) {
-                    return false;
+                    return std::unexpected(RetireError::NULL_CALLBACK);
                 }// end if (!shared_fn)
                 return retire_data(ptr, Deleter<T>(std::move(shared_fn)));
-            }// end bool retire(T* ptr, SharedFn shared_fn)
+            }// end std::expected<void, RetireError> retire(T* ptr, SharedFn shared_fn)
             //--------------------------
-            bool retire(std::shared_ptr<T>&& owner) {
+            std::expected<void, RetireError> retire(std::shared_ptr<T>&& owner) {
                 return retire_shared(std::move(owner));
-            }// end bool retire(std::shared_ptr<T> owner)
+            }// end std::expected<void, RetireError> retire(std::shared_ptr<T> owner)
             //--------------------------
-            std::optional<size_t> reclaim(void) {
+            // Reclaims using the installed hazard predicate. The success value is
+            // the number of reclaimed pointers (0 is a valid result); the error
+            // channel distinguishes "no hazard function" from "reclaimed nothing".
+            std::expected<size_t, RetireError> reclaim(void) {
                 if (!m_hazard) {
-                    return std::nullopt;
+                    return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
                 }// end if (!m_hazard)
                 return scan_and_reclaim([h = m_hazard](const T* p){ return (*h)(p); });
-            }// end std::optional<size_t> reclaim(void)
+            }// end std::expected<size_t, RetireError> reclaim(void)
             //--------------------------
+            // Caller supplies the predicate, so this can never fail; returns the
+            // number of reclaimed pointers (0 valid).
             template<class Pred>
-            std::optional<size_t> reclaim_with(Pred&& hazard_view) {
+            size_t reclaim_with(Pred&& hazard_view) {
                 return scan_and_reclaim(std::forward<Pred>(hazard_view));
-            }// end std::optional<size_t> reclaim_with(Pred&&)
+            }// end size_t reclaim_with(Pred&&)
             //--------------------------
-            bool resize(const size_t& requested_size) {
+            std::expected<void, RetireError> resize(const size_t& requested_size) {
                 return resize_retired(requested_size);
-            }// end bool resize(const size_t& requested_size)
+            }// end std::expected<void, RetireError> resize(const size_t& requested_size)
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            bool retire_data(T* ptr, Deleter<T>&& deleter) {
+            std::expected<void, RetireError> retire_data(T* ptr, Deleter<T>&& deleter) {
                 //--------------------------
                 if (!ptr) {
-                    return false;
+                    return std::unexpected(RetireError::NULL_POINTER);
                 }// end if (!ptr)
                 //--------------------------
                 if (Base::size() >= m_threshold) {
                     if (!m_hazard) {
-                        return false;
+                        return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
                     }// end if (!m_hazard)
                     auto h = m_hazard;
-                    if (!scan_and_reclaim([h](const T* p){ return (*h)(p); })) {
-                        return false;
-                    }// end if (!scan_and_reclaim(...))
+                    if (scan_and_reclaim([h](const T* p){ return (*h)(p); }) == 0UL) {
+                        return std::unexpected(RetireError::RECLAIM_FAILED);
+                    }// end if (scan_and_reclaim(...) == 0UL)
                 }// end if (Base::size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
                     const size_t current_size   = Base::size();
                     const size_t increase       = current_size / 5UL;
                     const size_t requested_size = current_size + (increase ? increase : 1UL);
-                    if (!resize_retired(requested_size)) {
-                        return false;
-                    }// end if (!resize_retired(requested_size))
+                    if (auto resized = resize_retired(requested_size); !resized) {
+                        return std::unexpected(resized.error());
+                    }// end if (auto resized = resize_retired(requested_size); !resized)
                 }// end if (should_resize())
                 //--------------------------
                 auto [it, inserted] = Base::try_emplace(ptr);
                 if (!inserted) {
-                    return false;
+                    return std::unexpected(RetireError::DUPLICATE);
                 }// end if (!inserted)
                 //--------------------------
                 it->second = std::unique_ptr<T, Deleter<T>>(ptr, std::move(deleter));
-                return true;
+                return {};
                 //--------------------------
-            }// end bool retire_data(T*, Deleter<T>&&)
+            }// end std::expected<void, RetireError> retire_data(T*, Deleter<T>&&)
             //--------------------------
-            bool retire_shared(std::shared_ptr<T>&& owner) {
+            std::expected<void, RetireError> retire_shared(std::shared_ptr<T>&& owner) {
                 //--------------------------
                 if (!owner) {
-                    return false;
+                    return std::unexpected(RetireError::NULL_POINTER);
                 }// end  if (!owner)
                 //--------------------------
                 T* ptr = owner.get();
                 return retire_data(ptr, Deleter<T>(std::move(owner)));
-            }// end bool retire_shared(std::shared_ptr<T>&& owner)
+            }// end std::expected<void, RetireError> retire_shared(std::shared_ptr<T>&& owner)
             //--------------------------
+            // Erase every entry whose pointer is no longer hazarded; std::erase_if
+            // returns the count removed directly (erasing runs the Deleter that
+            // frees the object). 0 is a valid result and no longer ambiguous.
             template<class Pred>
-            std::optional<size_t> scan_and_reclaim(Pred&& hazard_view) {
+            size_t scan_and_reclaim(Pred&& hazard_view) {
                 //--------------------------
-                const size_t before = Base::size();
+                return std::erase_if(static_cast<Base&>(*this),
+                    [&hazard_view](const auto& entry){ return !hazard_view(entry.first); });
                 //--------------------------
-                for (auto it = Base::begin(); it != Base::end(); ) {
-                    if (!hazard_view(it->first)) {
-                        it = Base::erase(it);
-                    } else {
-                        ++it;
-                    }// end if (!hazard_view(it->first))
-                }// end for (auto it = Base::begin(); it != Base::end(); )
-                //--------------------------
-                const size_t removed = before - Base::size();
-                return removed ? std::optional<size_t>(removed) : std::nullopt;
-                //--------------------------
-            }// end std::optional<size_t> scan_and_reclaim(Pred&&)
+            }// end size_t scan_and_reclaim(Pred&&)
             //--------------------------
             bool should_resize(void) const {
                 return Base::size() > (m_threshold - (m_threshold / 5UL));
             }// end bool should_resize(void)
             //--------------------------
-            bool resize_retired(const size_t& requested_size) {
+            std::expected<void, RetireError> resize_retired(const size_t& requested_size) {
                 //--------------------------
                 if (requested_size < Base::size()) {
-                    return false;
+                    return std::unexpected(RetireError::RESIZE_FAILED);
                 }// end if (requested_size < Base::size())
                 //--------------------------
                 const size_t resized_ceil = std::bit_ceil(requested_size);
                 Base::reserve(resized_ceil);
                 m_threshold = resized_ceil;
                 //--------------------------
-                return true;
+                return {};
                 //--------------------------
-            }// end bool resize_retired(const size_t&)
+            }// end std::expected<void, RetireError> resize_retired(const size_t&)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------

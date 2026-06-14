@@ -1,5 +1,9 @@
-# Try Finding Installed Google Test (with gmock)
-find_package(GTest QUIET COMPONENTS gtest gtest_main gmock gmock_main)
+# Try Finding Installed Google Test (with gmock).
+# NOTE: do not pass COMPONENTS gmock/gmock_main here - FindGTest does not treat
+# those as components, so it reports GTest_FOUND=false even when the libraries
+# (and the GTest::gmock_main target) are present, which then collides with the
+# FetchContent aliases below.
+find_package(GTest QUIET)
 #------------------------------------------------------------------------------------------
 # Use Installed Version or Fetch
 if(NOT GTest_FOUND)
@@ -13,12 +17,22 @@ if(NOT GTest_FOUND)
 
     # This line ensures GoogleTest uses the same runtime library
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    
+
     FetchContent_MakeAvailable(googletest)
-    add_library(GTest::GTest ALIAS gtest)
-    add_library(GTest::Main ALIAS gtest_main)
-    add_library(GTest::gmock ALIAS gmock)
-    add_library(GTest::gmock_main ALIAS gmock_main)
+    # Guard each alias: a partial find_package may already have created some of
+    # these imported targets even while reporting GTest_FOUND=false.
+    if(NOT TARGET GTest::GTest)
+        add_library(GTest::GTest ALIAS gtest)
+    endif()
+    if(NOT TARGET GTest::Main)
+        add_library(GTest::Main ALIAS gtest_main)
+    endif()
+    if(NOT TARGET GTest::gmock)
+        add_library(GTest::gmock ALIAS gmock)
+    endif()
+    if(NOT TARGET GTest::gmock_main)
+        add_library(GTest::gmock_main ALIAS gmock_main)
+    endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Function to setup a test executable

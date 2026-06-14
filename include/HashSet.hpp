@@ -11,6 +11,7 @@
 #include <functional>
 #include <limits>
 #include <type_traits>
+#include <utility>
 #include <vector>
 //--------------------------------------------------------------
 namespace HazardSystem {
@@ -37,11 +38,11 @@ namespace HazardSystem {
             //--------------------------
             struct Slot {
                 //--------------------------------------------------------------
-                Slot(void) :    state(static_cast<uint8_t>(SlotState::Empty)),
+                Slot(void) :    state(std::to_underlying(SlotState::Empty)),
                                 key() {
                 }// end Slot(void)
                 //--------------------------
-                Slot(const SlotState& state_, const Key& key_) :    state(static_cast<uint8_t>(state_)),
+                Slot(const SlotState& state_, const Key& key_) :    state(std::to_underlying(state_)),
                                                                     key(key_) {
                 }// end Slot(void)
                 //--------------------------
@@ -75,7 +76,8 @@ namespace HazardSystem {
             //--------------------------
         public:
             //--------------------------------------------------------------
-            template <size_t M = N, std::enable_if_t<M == 0, int> = 0>
+            template <size_t M = N>
+                requires (M == 0)
             explicit HashSet(size_t capacity = 1024UL) :    m_capacity(next_power_of_two(safe_double(capacity))),
                                                             m_mask(m_capacity - 1),
                                                             m_max_load(load_limit(m_capacity)),
@@ -85,7 +87,8 @@ namespace HazardSystem {
                 //--------------------------
             }// end explicit HashSet(size_t capacity = 1024UL)
             //--------------------------
-            template <size_t M = N, std::enable_if_t<(M != 0) && (M <= C_ARRAY_LIMIT), int> = 0>
+            template <size_t M = N>
+                requires ((M != 0) && (M <= C_ARRAY_LIMIT))
             HashSet(void) : m_capacity(C_CAPACITY),
                             m_mask(m_capacity - 1),
                             m_max_load(load_limit(m_capacity)),
@@ -95,7 +98,8 @@ namespace HazardSystem {
                 //--------------------------
             }// end HashSet(void)
             //--------------------------
-            template <size_t M = N, std::enable_if_t<(M != 0) && (M > C_ARRAY_LIMIT), int> = 0>
+            template <size_t M = N>
+                requires ((M != 0) && (M > C_ARRAY_LIMIT))
             HashSet(void) : m_capacity(next_power_of_two(safe_double_const(N))),
                             m_mask(m_capacity - 1),
                             m_max_load(load_limit(m_capacity)),
@@ -196,20 +200,20 @@ namespace HazardSystem {
                             Slot& target_slot       = slot_at(target_idx);
                             //--------------------------
                             uint8_t expected        = (first_tombstone != C_NPOS)
-                                ? static_cast<uint8_t>(SlotState::Deleted)
-                                : static_cast<uint8_t>(SlotState::Empty);
+                                ? std::to_underlying(SlotState::Deleted)
+                                : std::to_underlying(SlotState::Empty);
                             //--------------------------
-                            while (expected == static_cast<uint8_t>(SlotState::Deleted) or
-                                   expected == static_cast<uint8_t>(SlotState::Empty)) {
+                            while (expected == std::to_underlying(SlotState::Deleted) or
+                                   expected == std::to_underlying(SlotState::Empty)) {
                                 //--------------------------
                                 if (target_slot.state.compare_exchange_weak(expected,
-                                            static_cast<uint8_t>(SlotState::Busy),
+                                            std::to_underlying(SlotState::Busy),
                                             std::memory_order_acq_rel,
                                             std::memory_order_acquire)) {
                                     //--------------------------
                                     target_slot.key = key;
                                     //--------------------------
-                                    target_slot.state.store(static_cast<uint8_t>(SlotState::Occupied),
+                                    target_slot.state.store(std::to_underlying(SlotState::Occupied),
                                                             std::memory_order_release);
                                     m_size.fetch_add(1, std::memory_order_relaxed);
                                     //--------------------------
@@ -234,14 +238,14 @@ namespace HazardSystem {
                 //--------------------------
                 if (first_tombstone != C_NPOS) {
                     Slot& target_slot = slot_at(first_tombstone);
-                    uint8_t expected  = static_cast<uint8_t>(SlotState::Deleted);
+                    uint8_t expected  = std::to_underlying(SlotState::Deleted);
                     if (target_slot.state.compare_exchange_strong(
                             expected,
-                            static_cast<uint8_t>(SlotState::Busy),
+                            std::to_underlying(SlotState::Busy),
                             std::memory_order_acq_rel,
                             std::memory_order_acquire)) {
                         target_slot.key = key;
-                        target_slot.state.store(static_cast<uint8_t>(SlotState::Occupied), std::memory_order_release);
+                        target_slot.state.store(std::to_underlying(SlotState::Occupied), std::memory_order_release);
                         m_size.fetch_add(1, std::memory_order_relaxed);
                         if (m_deleted.load(std::memory_order_relaxed) > 0) {
                             m_deleted.fetch_sub(1, std::memory_order_relaxed);
@@ -321,7 +325,7 @@ namespace HazardSystem {
             void for_each_data(Func&& fn) const {
                 for (const auto& slot : m_slots) {
                     if (slot.state.load(std::memory_order_acquire) ==
-                        static_cast<uint8_t>(SlotState::Occupied)) {
+                        std::to_underlying(SlotState::Occupied)) {
                         fn(slot.key);
                     }// end if
                 }// end for (const auto& slot : m_slots)
@@ -330,7 +334,7 @@ namespace HazardSystem {
             template <typename Predicate>
             void reclaim_data(Predicate&& is_hazard) {
                 //--------------------------
-                constexpr uint8_t occupied = static_cast<uint8_t>(SlotState::Occupied);
+                constexpr uint8_t occupied = std::to_underlying(SlotState::Occupied);
                 //--------------------------
                 for (auto& slot : m_slots) {
                     if (slot.state.load(std::memory_order_acquire) != occupied or is_hazard(slot.key)) {
@@ -348,7 +352,7 @@ namespace HazardSystem {
             void clear_data(void) {
                 //--------------------------
                 for (auto& slot : m_slots) {
-                    slot.state.store(static_cast<uint8_t>(SlotState::Empty), std::memory_order_release);
+                    slot.state.store(std::to_underlying(SlotState::Empty), std::memory_order_release);
                 }// end for (auto& slot : m_slots)
                 //--------------------------
                 m_size.store(0, std::memory_order_relaxed);
@@ -367,8 +371,8 @@ namespace HazardSystem {
             //--------------------------
             bool try_mark_deleted(Slot& slot) {
                 //--------------------------
-                constexpr uint8_t deleted   = static_cast<uint8_t>(SlotState::Deleted);
-                uint8_t expected            = static_cast<uint8_t>(SlotState::Occupied);
+                constexpr uint8_t deleted   = std::to_underlying(SlotState::Deleted);
+                uint8_t expected            = std::to_underlying(SlotState::Occupied);
                 //--------------------------
                 while (!slot.state.compare_exchange_weak(
                         expected,

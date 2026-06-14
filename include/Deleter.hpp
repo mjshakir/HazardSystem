@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <type_traits>
+#include <utility>
 #include <variant>
 //--------------------------------------------------------------
 namespace HazardSystem {
@@ -51,17 +52,18 @@ namespace HazardSystem {
                     using A = std::decay_t<decltype(alternative)>;
                     if constexpr (std::is_same_v<A, std::monostate>) {
                         std::default_delete<T>()(ptr);
-                    }// end if constexpr (std::is_same_v<A, std::monostate>)
-                    if constexpr (std::is_same_v<A, std::shared_ptr<T>>) {
+                    } else if constexpr (std::is_same_v<A, std::shared_ptr<T>>) {
                         alternative.reset();
-                    }// end if constexpr (std::is_same_v<A, std::shared_ptr<T>>)
-                    if constexpr (std::is_same_v<A, SharedFn>) {
+                    } else if constexpr (std::is_same_v<A, SharedFn>) {
                         if (alternative and *alternative) {
                             (*alternative)(ptr);
                         } else {
                             std::default_delete<T>()(ptr);
                         }// end if (alternative and *alternative)
-                    }// end if constexpr (std::is_same_v<A, SharedFn>)
+                    } else {
+                        // Every alternative of m_storage is handled above.
+                        std::unreachable();
+                    }// end if constexpr (std::is_same_v<A, ...>)
                 }, m_storage);
             }// end void selector(T* ptr)
             //--------------------------------------------------------------
