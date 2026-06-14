@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 #------------------------------------------------------------------------------------------
 # Determine if HazardSystem is built as a standalone project or included by other projects
 set(HAZARDSYSTEM_STANDALONE_PROJECT OFF)
@@ -12,7 +12,7 @@ string(REPLACE " " "_" PARENT_DIR_NAME ${PARENT_DIR_NAME})
 project(${PARENT_DIR_NAME} VERSION 1.0 DESCRIPTION "A Circularbuffer function library" LANGUAGES CXX)
 #------------------------------------------------------------------------------------------
 # Set the C++ standard
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #------------------------------------------------------------------------------------------
 # Print out the build type
@@ -121,6 +121,7 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/BitmaskTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/Deleter.cpp
+    ${HAZARDSYSTEM_SOURCE_DIR}/Error.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointer.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
