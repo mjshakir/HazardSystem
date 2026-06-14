@@ -787,7 +787,7 @@ TEST(BitmaskTableTest, AcquireErrorVariantsAndNames) {
 
     // to_string yields the enumerator name, distinct per variant.
     ASSERT_TRUE(to_string(AcquireError::FULL).has_value());
-    EXPECT_EQ(to_string(AcquireError::FULL).value(), "AcquireError::FULL");
+    EXPECT_EQ(to_string(AcquireError::FULL).value(), "FULL");
     EXPECT_NE(to_string(AcquireError::FULL), to_string(AcquireError::NULL_POINTER));
 }
 static_assert(HazardSystem::to_string(HazardSystem::AcquireError::FULL).has_value(),

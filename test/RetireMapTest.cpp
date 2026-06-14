@@ -322,7 +322,7 @@ TEST(RetireMapTest, ErrorToStringNames) {
     using HazardSystem::RetireError;
     using HazardSystem::to_string;
     ASSERT_TRUE(to_string(RetireError::NULL_POINTER).has_value());
-    EXPECT_EQ(to_string(RetireError::NULL_POINTER).value(), "RetireError::NULL_POINTER");
+    EXPECT_EQ(to_string(RetireError::NULL_POINTER).value(), "NULL_POINTER");
     EXPECT_NE(to_string(RetireError::NULL_POINTER), to_string(RetireError::DUPLICATE));
     // A value that is not a recognised enumerator has no name.
     EXPECT_FALSE(to_string(static_cast<RetireError>(0)).has_value());
