@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [release, asan-ubsan, tsan, tsan-gcc]
+        variant: [release, asan-ubsan, tsan]
 
     runs-on: ubuntu-latest
 
@@ -19,24 +19,15 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install -y libgtest-dev libgmock-dev libbenchmark-dev cmake clang-18 g++-14
+      run: sudo apt-get update && sudo apt-get install -y libgtest-dev libgmock-dev libbenchmark-dev cmake g++-14
 
     - name: Setup CMake and Ninja
       uses: lukka/get-cmake@v4.2.0
 
     - name: Check compiler versions
       run: |
+        g++ --version
         g++-14 --version
-        clang++-18 --version
-        echo "=== clang selected GCC / libstdc++ ==="
-        clang++-18 -v -std=c++23 -fsyntax-only -x c++ /dev/null 2>&1 | grep -i "selected gcc" || true
-        echo "g++-14 install dir: $(dirname $(g++-14 -print-libgcc-file-name))"
-        echo "=== std::expected probe (clang default libstdc++ selection) ==="
-        printf '#include <expected>\nstd::expected<int,int> e;\n' | clang++-18 -std=c++23 -x c++ -fsyntax-only - && echo "OK: default stdlib sees std::expected" || echo "WARN: default stdlib does NOT see std::expected"
-        echo "=== std::expected probe (pinned to g++-14 libstdc++) ==="
-        printf '#include <expected>\nstd::expected<int,int> e;\n' | clang++-18 -std=c++23 --gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -x c++ -fsyntax-only - && echo "OK: pinned g++-14 stdlib sees std::expected" || echo "WARN: pinned g++-14 stdlib does NOT see std::expected"
-        echo "=== feature macros (default selection) ==="
-        clang++-18 -std=c++23 -dM -E -x c++ /dev/null | grep -E '__cplusplus|__cpp_concepts|__GLIBCXX__' || true
 
     - name: Create build directory
       run: mkdir build
@@ -53,17 +44,8 @@ jobs:
         -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
         -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
 
-    - name: Configure CMake (TSAN, Clang)
+    - name: Configure CMake (TSAN)
       if: matrix.variant == 'tsan'
-      run: >
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-        -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
-        -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
-        -DCMAKE_CXX_FLAGS="-std=c++23 --gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -fsanitize=thread -fno-omit-frame-pointer -O1"
-        -DCMAKE_EXE_LINKER_FLAGS="--gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -fsanitize=thread"
-
-    - name: Configure CMake (TSAN, GCC)
-      if: matrix.variant == 'tsan-gcc'
       run: >
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
         -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
