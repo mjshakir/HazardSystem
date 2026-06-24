@@ -175,10 +175,16 @@ endif()
 if(MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "/O2 /MD")
     set(CMAKE_CXX_FLAGS_DEBUG "/Od /MDd")
-    target_compile_options(${PROJECT_NAME} PRIVATE 
-        "$<$<CONFIG:Release>:/O2>" 
-        "$<$<CONFIG:Debug>:/Od>" 
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        "$<$<CONFIG:Release>:/O2>"
+        "$<$<CONFIG:Debug>:/Od>"
         "$<$<CONFIG:Debug>:/Zi>"
+        # Benign for this library: the warned members are private and never
+        # crossed across the DLL boundary. Lets a shared (DLL) Windows build
+        # succeed under /W4 /WX (C4251: STL member needs dll-interface;
+        # C4275: non dll-interface base of a dll-interface class).
+        /wd4251
+        /wd4275
     )
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_options(${PROJECT_NAME} PRIVATE /DEBUG)

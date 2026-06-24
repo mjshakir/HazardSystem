@@ -28,7 +28,15 @@ jobs:
       run: |
         g++-14 --version
         clang++-18 --version
-        echo '#include <expected>' | clang++-18 -std=c++23 -x c++ -fsyntax-only - && echo "OK: clang sees std::expected" || echo "WARN: clang does NOT see std::expected"
+        echo "=== clang selected GCC / libstdc++ ==="
+        clang++-18 -v -std=c++23 -fsyntax-only -x c++ /dev/null 2>&1 | grep -i "selected gcc" || true
+        echo "g++-14 install dir: $(dirname $(g++-14 -print-libgcc-file-name))"
+        echo "=== std::expected probe (clang default libstdc++ selection) ==="
+        printf '#include <expected>\nstd::expected<int,int> e;\n' | clang++-18 -std=c++23 -x c++ -fsyntax-only - && echo "OK: default stdlib sees std::expected" || echo "WARN: default stdlib does NOT see std::expected"
+        echo "=== std::expected probe (pinned to g++-14 libstdc++) ==="
+        printf '#include <expected>\nstd::expected<int,int> e;\n' | clang++-18 -std=c++23 --gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -x c++ -fsyntax-only - && echo "OK: pinned g++-14 stdlib sees std::expected" || echo "WARN: pinned g++-14 stdlib does NOT see std::expected"
+        echo "=== feature macros (default selection) ==="
+        clang++-18 -std=c++23 -dM -E -x c++ /dev/null | grep -E '__cplusplus|__cpp_concepts|__GLIBCXX__' || true
 
     - name: Create build directory
       run: mkdir build
@@ -51,8 +59,8 @@ jobs:
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
         -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
         -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
-        -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer -O1'
-        -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread'
+        -DCMAKE_CXX_FLAGS="-std=c++23 --gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -fsanitize=thread -fno-omit-frame-pointer -O1"
+        -DCMAKE_EXE_LINKER_FLAGS="--gcc-install-dir=$(dirname $(g++-14 -print-libgcc-file-name)) -fsanitize=thread"
 
     - name: Configure CMake (TSAN, GCC)
       if: matrix.variant == 'tsan-gcc'
