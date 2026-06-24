@@ -142,7 +142,7 @@ else()
 endif()
 #------------------------------------------------------------------------------------------
 if(HAZARDSYSTEM_STANDALONE_PROJECT)
-    target_link_libraries(${PROJECT_NAME} PRIVATE common_options)
+    target_link_libraries(${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:common_options>)
 endif()
 #------------------------------------------------------------------------------------------
 target_include_directories(${PROJECT_NAME} PUBLIC 
