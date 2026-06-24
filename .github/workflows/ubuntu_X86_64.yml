@@ -91,10 +91,6 @@ jobs:
       if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_BitmaskTable_Dynamic_Benchmark
 
-    - name: Run HashSet Benchmarks
-      if: matrix.variant == 'release'
-      run: ./build/benchmarkbin/HazardSystem_HashSet_Benchmark
-
     - name: Run Protected Pointer Benchmarks
       if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_ProtectedPointer_Benchmark
