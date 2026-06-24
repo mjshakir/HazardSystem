@@ -21,7 +21,7 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 if(HAZARDSYSTEM_STANDALONE_PROJECT)
     add_library(common_options INTERFACE)
     if(MSVC)
-        target_compile_options(common_options INTERFACE /W4 /WX)
+        target_compile_options(common_options INTERFACE /W4)
     else()
         option(HAZARDSYSTEM_ENABLE_GCC_ANALYZER "Enable GCC static analyzer (-fanalyzer)." OFF)
         option(HAZARDSYSTEM_ENABLE_CLANG_ANALYZER "Enable Clang static analyzer (--analyze). Not intended for normal builds." OFF)
@@ -137,7 +137,7 @@ if(BUILD_HAZARDSYSTEM_SHARED_LIBS)
     # If needed, set properties specific to shared libraries here
 else()
     add_library(${PROJECT_NAME} STATIC ${HAZARDSYSTEM_SOURCES})
-    target_compile_definitions(${PROJECT_NAME} PRIVATE HAZARDSYSTEM_STATIC)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC HAZARDSYSTEM_STATIC)
     # If needed, set properties specific to static libraries here
 endif()
 #------------------------------------------------------------------------------------------
@@ -179,10 +179,7 @@ if(MSVC)
         "$<$<CONFIG:Release>:/O2>"
         "$<$<CONFIG:Debug>:/Od>"
         "$<$<CONFIG:Debug>:/Zi>"
-        # Benign for this library: the warned members are private and never
-        # crossed across the DLL boundary. Lets a shared (DLL) Windows build
-        # succeed under /W4 /WX (C4251: STL member needs dll-interface;
-        # C4275: non dll-interface base of a dll-interface class).
+        /WX
         /wd4251
         /wd4275
     )
