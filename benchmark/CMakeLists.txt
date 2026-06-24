@@ -16,7 +16,9 @@ if(NOT benchmark_FOUND)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 
     FetchContent_MakeAvailable(googlebenchmark)
-    add_library(benchmark::benchmark ALIAS benchmark)
+    if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+    endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Function to setup a benchmark executable
