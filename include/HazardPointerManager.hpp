@@ -21,7 +21,6 @@
 #include "Error.hpp"
 #include "HazardPointer.hpp"
 #include "ThreadRegistry.hpp"
-#include "HazardThreadManager.hpp"
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireMap.hpp"
@@ -55,12 +54,6 @@ class HazardPointerManager {
             return instance;
         } // end static HazardPointerManager& instance(void)
         //--------------------------
-        // protect()/try_protect() keep returning ProtectedPointer<T> rather than
-        // std::expected<ProtectedPointer<T>, ...>. ProtectedPointer is already a
-        // nullable RAII value type (operator bool) whose empty state is the failure
-        // channel, so wrapping it in std::expected would double-wrap a nullable and
-        // worsen ergonomics. std::expected is used where the previous return was a
-        // bare bool / std::optional that lost the failure reason (retire / reclaim).
         ProtectedPointer<T> protect(T* data) {
             return protect_data(data);
         }// end ProtectedPointer<T> protect(T* data)
@@ -364,11 +357,7 @@ class HazardPointerManager {
         //--------------------------
         std::expected<typename BitmaskType::iterator, AcquireError> acquire_data_iterator(void) {
             //--------------------------
-            HazardThreadManager::instance();
-            //--------------------------
-            // Best effort: make sure the calling thread is registered, but never fail slot acquisition on registration issues.
-            auto& registry = ThreadRegistry::instance();
-            static_cast<void>(registry.register_id());
+            ThreadRegistry::instance();
             //--------------------------
             return m_hazard_pointers.acquire_iterator();
             //--------------------------

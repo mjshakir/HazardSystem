@@ -118,7 +118,6 @@ set(HAZARDSYSTEM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 #------------------------------------------------------------------------------------------
 set(HAZARDSYSTEM_SOURCES
 	${HAZARDSYSTEM_SOURCE_DIR}/BitmapTree.cpp
-    ${HAZARDSYSTEM_SOURCE_DIR}/HashSet.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/BitmaskTable.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/Deleter.cpp
     ${HAZARDSYSTEM_SOURCE_DIR}/Error.cpp
@@ -126,7 +125,6 @@ set(HAZARDSYSTEM_SOURCES
     ${HAZARDSYSTEM_SOURCE_DIR}/HazardPointerManager.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/ThreadRegistry.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/ProtectedPointer.cpp
-	${HAZARDSYSTEM_SOURCE_DIR}/HazardThreadManager.cpp
 	${HAZARDSYSTEM_SOURCE_DIR}/HazardSystemAPI.cpp
 )
 #------------------------------------------------------------------------------------------

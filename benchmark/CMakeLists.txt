@@ -63,12 +63,9 @@ create_benchmark_target(${PROJECT_NAME}_Fixed_Benchmark     HazardPointerManager
 create_benchmark_target(${PROJECT_NAME}_Dynamic_Benchmark     HazardPointerManagerDynamicBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Fixed_Benchmark   BitmaskTableFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Dynamic_Benchmark BitmaskTableDynamicBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HashSet_Benchmark              HashSetBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HashSet_Fixed_Benchmark        HashSetFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ProtectedPointer_Benchmark     ProtectedPointerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardRegistry_Benchmark       HazardRegistryBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ThreadRegistry_Benchmark       ThreadRegistryBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HazardThreadManager_Benchmark  HazardThreadManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_AvailabilityBitmapTree_Benchmark AvailabilityBitmapTreeBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_RetireMap_Benchmark              RetireMapBenchmark.cpp)
 #------------------------------------------------------------------------------------------
