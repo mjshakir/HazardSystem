@@ -31,6 +31,7 @@ struct BenchmarkTestData {
 };
 
 using FixedTable = BitmaskTable<BenchmarkTestData, 64>;
+using FixedLargeTable = BitmaskTable<BenchmarkTestData, 1024>;
 
 class BitmaskFixedFixture : public benchmark::Fixture {
 public:
@@ -43,6 +44,19 @@ public:
     }
 
     FixedTable table;
+};
+
+class BitmaskFixedLargeFixture : public benchmark::Fixture {
+public:
+    void SetUp(const ::benchmark::State&) override {
+        table.clear();
+    }
+
+    void TearDown(const ::benchmark::State&) override {
+        table.clear();
+    }
+
+    FixedLargeTable table;
 };
 
 // Acquire + set + release cycle to probe bitmask allocation cost
@@ -72,7 +86,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireRelease)(benchmark::State& state)
         table.release(id);
     }
 
-    state.SetComplexityN(batch);
+    state.SetComplexityN(static_cast<int64_t>(batch));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -103,8 +117,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, IterateActive)(benchmark::State& state) 
         benchmark::DoNotOptimize(visited);
     }
 
-    state.SetComplexityN(to_fill);
-    state.SetItemsProcessed(state.iterations() * to_fill);
+    state.SetComplexityN(static_cast<int64_t>(to_fill));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(to_fill));
 }
 
 // Clear all hazard slots and bitmask state
@@ -127,8 +141,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, Clear)(benchmark::State& state) {
         benchmark::DoNotOptimize(table.size());
     }
 
-    state.SetComplexityN(table.capacity());
-    state.SetItemsProcessed(state.iterations() * table.capacity());
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(table.capacity()));
 }
 
 // Exercise acquire_iterator + set(iterator) path
@@ -146,7 +160,7 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, AcquireIteratorSet)(benchmark::State& st
         table.release(index);
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -179,8 +193,8 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, ActiveChecks)(benchmark::State& state) {
         benchmark::DoNotOptimize(hits);
     }
 
-    state.SetComplexityN(fill_count);
-    state.SetItemsProcessed(state.iterations() * fill_count);
+    state.SetComplexityN(static_cast<int64_t>(fill_count));
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(fill_count));
 }
 
 // Find with predicate scanning through active slots
@@ -194,22 +208,23 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, FindPredicate)(benchmark::State& state) 
         table.clear();
         owned.clear();
         // Fill all slots; place a unique seed in the last slot to force scanning
-        for (size_t i = 0; i < table.capacity(); ++i) {
+        const size_t capacity = static_cast<size_t>(table.capacity());
+        for (size_t i = 0; i < capacity; ++i) {
             auto idx = table.acquire();
             if (!idx) break;
-            const int seed = static_cast<int>(i == table.capacity() - 1 ? target_seed : static_cast<int>(i));
+            const int seed = static_cast<int>(i == capacity - 1 ? target_seed : static_cast<int>(i));
             owned.emplace_back(std::make_unique<BenchmarkTestData>(seed));
             table.set(idx.value(), owned.back().get());
         }
         state.ResumeTiming();
 
-        const bool found = table.find([&](const BenchmarkTestData* ptr) {
+        bool found = table.find([&](const BenchmarkTestData* ptr) {
             return ptr && ptr->data.front() == target_seed;
         });
         benchmark::DoNotOptimize(found);
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -225,8 +240,58 @@ BENCHMARK_DEFINE_F(BitmaskFixedFixture, EmplaceReturn)(benchmark::State& state) 
         }
     }
 
-    state.SetComplexityN(table.capacity());
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
     state.SetItemsProcessed(state.iterations());
+}
+
+// Worst-case: full table, acquire should scan and fail.
+BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireFailWhenFull)(benchmark::State& state) {
+    BenchmarkTestData payload(1);
+    for (size_t i = 0; i < table.capacity(); ++i) {
+        table.set(static_cast<FixedLargeTable::IndexType>(i), &payload);
+    }
+
+    for (auto _ : state) {
+        constexpr size_t kBatch = 64;
+        for (size_t i = 0; i < kBatch; ++i) {
+            auto idx = table.acquire();
+            benchmark::DoNotOptimize(idx);
+        }
+    }
+
+    state.SetComplexityN(static_cast<int64_t>(table.capacity()));
+    state.SetItemsProcessed(state.iterations() * 64);
+}
+
+// Worst-case: only one free slot in the last mask word; acquire scans all previous words.
+BENCHMARK_DEFINE_F(BitmaskFixedLargeFixture, AcquireWorstCaseNearFull)(benchmark::State& state) {
+    BenchmarkTestData payload(2);
+    const auto cap = table.capacity();
+    for (size_t i = 0; i < cap; ++i) {
+        table.set(static_cast<FixedLargeTable::IndexType>(i), &payload);
+    }
+
+    const auto last = static_cast<FixedLargeTable::IndexType>(cap - 1);
+    table.set(last, nullptr);
+    table.set(static_cast<FixedLargeTable::IndexType>(0), nullptr);
+    table.set(static_cast<FixedLargeTable::IndexType>(0), &payload);
+
+    for (auto _ : state) {
+        constexpr size_t kBatch = 64;
+        for (size_t i = 0; i < kBatch; ++i) {
+            auto idx = table.acquire();
+            benchmark::DoNotOptimize(idx);
+            if (idx) {
+                table.release(idx.value());
+                // Reset hint to part 0 without changing the single free-slot location.
+                table.set(static_cast<FixedLargeTable::IndexType>(0), nullptr);
+                table.set(static_cast<FixedLargeTable::IndexType>(0), &payload);
+            }
+        }
+    }
+
+    state.SetComplexityN(static_cast<int64_t>(cap));
+    state.SetItemsProcessed(state.iterations() * 64);
 }
 
 // Benchmark registration
@@ -258,6 +323,12 @@ BENCHMARK_REGISTER_F(BitmaskFixedFixture, EmplaceReturn)
     ->Range(8, 64)
     ->Complexity(benchmark::o1);
 
+BENCHMARK_REGISTER_F(BitmaskFixedLargeFixture, AcquireFailWhenFull)
+    ->Complexity(benchmark::oN);
+
+BENCHMARK_REGISTER_F(BitmaskFixedLargeFixture, AcquireWorstCaseNearFull)
+    ->Complexity(benchmark::oN);
+
 int main(int argc, char** argv) {
     ::benchmark::Initialize(&argc, argv);
     if (::benchmark::ReportUnrecognizedArguments(argc, argv)) {
@@ -265,7 +336,7 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "=== BitmaskTable Fixed Benchmark ===\n";
-    std::cout << "Capacity fixed at 64 hazard slots, expect O(1) allocation/clear.\n\n";
+    std::cout << "Capacity fixed at 64 hazard slots for baseline, plus 1024-slot worst-case scan benchmarks.\n\n";
 
     ::benchmark::RunSpecifiedBenchmarks();
     ::benchmark::Shutdown();

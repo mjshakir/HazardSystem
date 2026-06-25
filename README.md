@@ -5,12 +5,12 @@ A header-first hazard-pointer library with fixed-size and dynamic hazard tables,
 ## Features
 - HazardPointerManager with fixed (`HAZARD_POINTERS > 0`) or dynamic (`HAZARD_POINTERS == 0`) capacity.
 - Lock-free BitmaskTable for slot allocation (array-backed up to 1024, dynamic vector beyond).
-- ThreadRegistry + HazardThreadManager for per-thread registration.
+- ThreadRegistry (per-thread, thread_local) auto-registers a thread on first hazard use.
 - RetireSet for deferred reclamation with threshold-based sweeping.
 - Benchmarks covering protect/try_protect, retire/reclaim, and contended scenarios.
 
 ## Build
-Requires CMake ≥ 3.15 and a C++20 compiler.
+Requires CMake ≥ 3.20 and a C++23 compiler
 
 ```bash
 # Configure (Release recommended for benchmarking)
@@ -25,18 +25,18 @@ cmake --build build --config Release
 The library target is `HazardSystem::hazardsystem`. Examples build as `<project>_example`.
 
 ### Platform Notes
-- **Linux/macOS**: Any recent Clang or GCC with C++20. Example:  
+- **Linux/macOS**: Any recent Clang or GCC with C++23. Example:  
   ```bash
   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFORCE_COLORED_OUTPUT=ON && ninja -C build
   ```
-- **Windows (MSVC)**: Use Visual Studio 2019+ or MSVC toolchain with C++20. Example from a VS dev shell:  
+- **Windows (MSVC)**: Use Visual Studio 2022+ or MSVC toolchain with C++23. Example from a VS dev shell:  
   ```bash
   cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release && ninja -C build
   ```
 
 ### Prerequisites
-- CMake ≥ 3.15
-- C++20 toolchain (GCC 10+/Clang 12+/MSVC 19.3+)
+- CMake ≥ 3.20
+- C++23 toolchain (GCC 12+/Clang 16+/MSVC 19.34+) — required for `std::expected`
 - Build tool: Ninja or Make on Unix; Ninja/MSBuild on Windows
 - GoogleTest and Google Benchmark are fetched via CMake’s FetchContent; no manual install needed
 - (Optional) Git if you want FetchContent to pull sources
@@ -119,7 +119,7 @@ cmake --build build --target HazardSystem_example
 ## Design Notes
 - BitmaskTable uses atomic 64-bit masks to find/free slots with `std::countr_zero`/`std::popcount`.
 - Size accounting increments only on 0→1 bit transitions and decrements on 1→0 to avoid double-counting.
-- HazardThreadManager auto-registers threads on first use.
+- ThreadRegistry is a per-thread (`thread_local`) instance whose constructor auto-registers the thread on first hazard use; its state is a single `std::thread::id` in thread-local storage.
 - RetireSet triggers reclamation when its threshold is exceeded; `reclaim_all()` forces a sweep.
 
 ### Fixed vs Dynamic

@@ -7,6 +7,9 @@
 #include <numeric>
 #include <array>
 #include <iostream>
+#include <string_view>
+#include <charconv>
+#include <system_error>
 
 // Include the headers under test
 #include "HazardPointerManager.hpp"
@@ -41,7 +44,7 @@ public:
 // Benchmark fixture for setup/teardown
 class DynamicHazardPointerBenchmark : public benchmark::Fixture {
 public:
-    void SetUp(const ::benchmark::State& state) override {
+    void SetUp(const ::benchmark::State&) override {
         // Register thread for hazard pointer operations
         ThreadRegistry::instance().register_id();
         
@@ -50,7 +53,7 @@ public:
         manager.clear();
     }
     
-    void TearDown(const ::benchmark::State& state) override {
+    void TearDown(const ::benchmark::State&) override {
         // Clean up manager
         auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance();
         manager.clear();
@@ -61,12 +64,74 @@ public:
 using DynamicManagerType = HazardPointerManager<BenchmarkTestData, 0>;
 using DynamicHandleType = std::pair<std::optional<typename DynamicManagerType::IndexType>, std::shared_ptr<HazardPointer<BenchmarkTestData>>>;
 
+namespace {
+constexpr size_t kDefaultHazardSize = 8192;
+constexpr size_t kDefaultRetiredSize = 2;
+
+bool consume_size_arg(std::string_view arg, std::string_view key, size_t* out) {
+    if (!out) {
+        return false;
+    }
+    if (!arg.starts_with("--")) {
+        return false;
+    }
+    arg.remove_prefix(2);
+    if (!arg.starts_with(key)) {
+        return false;
+    }
+    arg.remove_prefix(key.size());
+    if (arg.empty() || arg.front() != '=') {
+        return false;
+    }
+    arg.remove_prefix(1);
+    if (arg.empty()) {
+        return false;
+    }
+
+    size_t parsed = 0;
+    const auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), parsed);
+    if (ec != std::errc{} || ptr != arg.data() + arg.size()) {
+        return false;
+    }
+
+    *out = parsed;
+    return true;
+}
+
+void consume_custom_args(int* argc, char** argv, size_t* hazard_size, size_t* retired_size) {
+    if (!argc || !argv) {
+        return;
+    }
+    int write = 1;
+    for (int read = 1; read < *argc; ++read) {
+        const std::string_view arg{argv[read]};
+
+        size_t parsed = 0;
+        if (consume_size_arg(arg, "hazard_size", &parsed)) {
+            if (hazard_size) {
+                *hazard_size = parsed;
+            }
+            continue;
+        }
+        if (consume_size_arg(arg, "retired_size", &parsed)) {
+            if (retired_size) {
+                *retired_size = parsed;
+            }
+            continue;
+        }
+
+        argv[write++] = argv[read];
+    }
+    *argc = write;
+}
+} // namespace
+
 // ============================================================================
 // Dynamic Size Hazard Pointer Manager Benchmarks (HAZARD_POINTERS = 0)
 // ============================================================================
 
-// Time Complexity: O(n) where n = number of hazard pointer slots
-// Uses BitmaskTable with linear search for first available slot
+// Time Complexity (expected): O(1) for acquire/release in the common case
+// (bitmask + availability hints).
 // BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Acquire)(benchmark::State& state) {
 //     const size_t hazard_size = state.range(0);
 //     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
@@ -98,19 +163,21 @@ using DynamicHandleType = std::pair<std::optional<typename DynamicManagerType::I
 
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Acquire)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
-
+    BenchmarkTestData data(0);
+    
     for (auto _ : state) {
-        // each iteration we grab a new shared_ptr and protect it
-        auto p = manager.protect(std::make_shared<BenchmarkTestData>(0));
+        auto p = manager.protect(&data);
         benchmark::DoNotOptimize(p);
         // immediately reset to release the hazard slot
-        if (p) p.reset();
+        if (p) {
+            p.reset();
+        }
     }
 
-    // Complexity now is O(n) per protect, where n = hazard_size
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -154,14 +221,16 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Acquire)(benchmark::State& sta
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Release)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    BenchmarkTestData data(0);
 
     // Pre‐warm: grab hazard_size–1 live protects so we can exercise resets only
     std::vector<ProtectedPointer<BenchmarkTestData>> guards;
     guards.reserve(hazard_size-1);
     for (size_t i = 0; i + 1 < hazard_size; ++i) {
-        auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+        auto p = manager.protect(&data);
         if (p) guards.push_back(std::move(p));
     }
 
@@ -171,18 +240,20 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Release)(benchmark::State& sta
         guards[idx].reset();
         benchmark::DoNotOptimize(guards[idx]);
         // immediately re-protect into the same slot
-        guards[idx] = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(idx)));
+        guards[idx] = manager.protect(&data);
         if (++idx >= guards.size()) idx = 0;
     }
 
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
 
-// Time Complexity: O(n) where n = hazard_size (due to acquisition cost)
+// Time Complexity (expected): O(1) per protect (acquire + registry add + store).
+// Worst-case can degrade due to contention / registry probing.
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectSharedPtr)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     auto test_data = std::make_shared<BenchmarkTestData>(42);
     
@@ -194,13 +265,15 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectSharedPtr)(benchmark::S
         }
     }
     
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
-// Time Complexity: O(n) for acquisition + O(1) for atomic load
+// Time Complexity (expected): O(1) per protect (acquire + atomic load + registry add + store).
+// Worst-case can degrade due to contention / registry probing.
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectAtomicPtr)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     std::atomic<std::shared_ptr<BenchmarkTestData>> atomic_data;
     atomic_data.store(std::make_shared<BenchmarkTestData>(42));
@@ -213,14 +286,15 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectAtomicPtr)(benchmark::S
         }
     }
     
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
-// Time Complexity: O(k*n) where k = max_retries, n = hazard_size
+// Time Complexity: O(k) retries in the worst case (each attempt is a protect-like operation).
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, TryProtect)(benchmark::State& state) {
     const size_t hazard_size = 64;  // Fixed for this test
-    const size_t max_retries = state.range(0);
+    const auto max_retries_range = state.range(0);
+    const size_t max_retries = static_cast<size_t>(max_retries_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     std::atomic<std::shared_ptr<BenchmarkTestData>> atomic_data;
     atomic_data.store(std::make_shared<BenchmarkTestData>(42));
@@ -233,13 +307,14 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, TryProtect)(benchmark::State& 
         }
     }
     
-    state.SetComplexityN(max_retries);
+    state.SetComplexityN(max_retries_range);
     state.SetItemsProcessed(state.iterations());
 }
 
 // Time Complexity: O(1) - Direct insertion into hash set
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Retire)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     std::vector<std::shared_ptr<BenchmarkTestData>> test_objects;
     
@@ -256,14 +331,15 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Retire)(benchmark::State& stat
         index++;
     }
     
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
-// Time Complexity: O(r*h) where r = retired objects, h = hazard_size
+// Time Complexity (expected): O(r) where r = retired objects (hazard checks via registry).
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Reclaim)(benchmark::State& state) {
     const size_t hazard_size = 64;  // Fixed for this test
-    const size_t retire_count = state.range(0);
+    const auto retire_count_range = state.range(0);
+    const size_t retire_count = static_cast<size_t>(retire_count_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     
     for (auto _ : state) {
@@ -285,11 +361,11 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Reclaim)(benchmark::State& sta
         benchmark::DoNotOptimize(manager.retire_size());
     }
     
-    state.SetComplexityN(retire_count);
-    state.SetItemsProcessed(state.iterations() * retire_count);
+    state.SetComplexityN(retire_count_range);
+    state.SetItemsProcessed(state.iterations() * retire_count_range);
 }
 
-// Time Complexity: O(n) where n = hazard_size (proportional cleanup)
+// Time Complexity: O(hazards + registry + retired) for cleanup.
 // BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state) {
 //     const size_t hazard_size = state.range(0);
 //     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
@@ -322,7 +398,8 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Reclaim)(benchmark::State& sta
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
 
     for (auto _ : state) {
@@ -347,7 +424,7 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state
         benchmark::DoNotOptimize(manager.hazard_size());
     }
 
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -387,15 +464,17 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, Clear)(benchmark::State& state
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityAcquisition)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    BenchmarkTestData data(0);
 
     for (auto _ : state) {
         // fill all but one slot
         std::vector<ProtectedPointer<BenchmarkTestData>> guards;
         guards.reserve(hazard_size);
         for (size_t i = 0; i + 1 < hazard_size; ++i) {
-            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            auto p = manager.protect(&data);
             if (!p) break;
             guards.push_back(std::move(p));
         }
@@ -405,15 +484,17 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityAcquisition)(benchm
         // when `guards` goes out of scope, each ProtectedPointer resets itself
     }
 
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
 
 // Test protection performance with different hazard pool sizes
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityProtection)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
-    const size_t data_count = state.range(1);
+    const auto hazard_size_range = state.range(0);
+    const auto data_count_range = state.range(1);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
+    const size_t data_count = static_cast<size_t>(data_count_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     
     // Create test data
@@ -433,13 +514,14 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityProtection)(benchma
         }
     }
     
-    state.SetComplexityN(hazard_size * data_count);
-    state.SetItemsProcessed(state.iterations() * data_count);
+    state.SetComplexityN(hazard_size_range * data_count_range);
+    state.SetItemsProcessed(state.iterations() * data_count_range);
 }
 
 // Test reclamation performance with varying hazard pool sizes
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityReclamation)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     const size_t retire_count = 100;  // Fixed retire count
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size, retire_count);
     
@@ -462,8 +544,8 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityReclamation)(benchm
         benchmark::DoNotOptimize(manager.retire_size());
     }
     
-    state.SetComplexityN(hazard_size);
-    state.SetItemsProcessed(state.iterations() * retire_count);
+    state.SetComplexityN(hazard_size_range);
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(retire_count));
 }
 
 // ============================================================================
@@ -491,26 +573,31 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ScalabilityReclamation)(benchm
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RapidProtectResetCycle)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
-    const size_t cycle_count = state.range(1);
+    const auto hazard_size_range = state.range(0);
+    const auto cycle_count_range = state.range(1);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
+    const size_t cycle_count = static_cast<size_t>(cycle_count_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    BenchmarkTestData data(0);
 
     for (auto _ : state) {
         for (size_t i = 0; i < cycle_count; ++i) {
-            auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+            auto p = manager.protect(&data);
             benchmark::DoNotOptimize(p);
             if (p) p.reset();
         }
     }
 
-    state.SetComplexityN(hazard_size * cycle_count);
-    state.SetItemsProcessed(state.iterations() * cycle_count);
+    state.SetComplexityN(hazard_size_range * cycle_count_range);
+    state.SetItemsProcessed(state.iterations() * cycle_count_range);
 }
 
 // Test protection pattern with varying pool and data sizes
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectionPattern)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
-    const size_t data_count = state.range(1);
+    const auto hazard_size_range = state.range(0);
+    const auto data_count_range = state.range(1);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
+    const size_t data_count = static_cast<size_t>(data_count_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
     
     // Create test data
@@ -530,15 +617,17 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, ProtectionPattern)(benchmark::
         }
     }
     
-    state.SetComplexityN(hazard_size * data_count);
-    state.SetItemsProcessed(state.iterations() * data_count);
+    state.SetComplexityN(hazard_size_range * data_count_range);
+    state.SetItemsProcessed(state.iterations() * data_count_range);
 }
 
 // Test retire/reclaim pattern with different configurations
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RetireReclaimPattern)(benchmark::State& state) {
     const size_t hazard_size = 64;  // Fixed hazard size
-    const size_t retire_threshold = state.range(0);
-    const size_t operations = state.range(1);
+    const auto retire_threshold_range = state.range(0);
+    const auto operations_range = state.range(1);
+    const size_t retire_threshold = static_cast<size_t>(retire_threshold_range);
+    const size_t operations = static_cast<size_t>(operations_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size, retire_threshold);
     
     for (auto _ : state) {
@@ -553,8 +642,8 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RetireReclaimPattern)(benchmar
         benchmark::DoNotOptimize(manager.retire_size());
     }
     
-    state.SetComplexityN(operations);
-    state.SetItemsProcessed(state.iterations() * operations);
+    state.SetComplexityN(operations_range);
+    state.SetItemsProcessed(state.iterations() * operations_range);
 }
 
 // Test worst-case scenario: full hazard pool
@@ -592,7 +681,8 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, RetireReclaimPattern)(benchmar
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::State& state) {
-    const size_t hazard_size = state.range(0);
+    const auto hazard_size_range = state.range(0);
+    const size_t hazard_size = static_cast<size_t>(hazard_size_range);
     auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
 
     // permanently hold hazard_size-2 slots
@@ -612,7 +702,7 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::
     }
 
     // drop out of scope: permanent guards reset themselves
-    state.SetComplexityN(hazard_size);
+    state.SetComplexityN(hazard_size_range);
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -654,28 +744,71 @@ BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, WorstCaseFullPool)(benchmark::
 // }
 
 BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)(benchmark::State& state) {
-    constexpr size_t hazard_size = 128;
-    const size_t util_pct = state.range(0);
-    auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size);
+    const auto util_pct_range = state.range(0);
+    const size_t util_pct = static_cast<size_t>(util_pct_range);
+    auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(kDefaultHazardSize);
+    const size_t hazard_size = manager.hazard_capacity();
+    BenchmarkTestData data(0);
 
     // Pre‐fill
     size_t to_acquire = (hazard_size * util_pct) / 100;
     std::vector<ProtectedPointer<BenchmarkTestData>> background;
     background.reserve(to_acquire);
     for (size_t i = 0; i < to_acquire; ++i) {
-        auto p = manager.protect(std::make_shared<BenchmarkTestData>(static_cast<int>(i)));
+        auto p = manager.protect(&data);
         if (!p) break;
         background.push_back(std::move(p));
     }
 
     for (auto _ : state) {
         // single protect+reset under that utilization
-        auto p = manager.protect(std::make_shared<BenchmarkTestData>(0));
+        auto p = manager.protect(&data);
         benchmark::DoNotOptimize(p);
         if (p) p.reset();
     }
 
-    state.SetComplexityN(util_pct);
+    state.SetComplexityN(util_pct_range);
+    state.SetItemsProcessed(state.iterations());
+}
+
+// Worst-case near-full acquisition: keep the pool at (capacity-1) utilization and force the
+// search hint to start at the beginning, so the only free slot is far away.
+BENCHMARK_DEFINE_F(DynamicHazardPointerBenchmark, AcquireWorstCaseNearFull)(benchmark::State& state) {
+    auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(kDefaultHazardSize);
+    BenchmarkTestData data(0);
+
+    const size_t capacity = manager.hazard_capacity();
+    if (capacity < 2) {
+        state.SkipWithError("Need hazard_capacity >= 2");
+        return;
+    }
+
+    // Fill capacity-1 slots once (leaving the last slot free).
+    std::vector<ProtectedPointer<BenchmarkTestData>> guards;
+    guards.reserve(capacity - 1);
+    for (size_t i = 0; i + 1 < capacity; ++i) {
+        auto p = manager.protect(&data);
+        if (!p) {
+            state.SkipWithError("Unable to prefill hazard pool");
+            return;
+        }
+        guards.push_back(std::move(p));
+    }
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        // Force the internal hint back toward the start by releasing + re-acquiring the first slot.
+        guards.front().reset();
+        guards.front() = manager.protect(&data);
+        state.ResumeTiming();
+
+        auto p = manager.protect(&data);
+        benchmark::DoNotOptimize(p);
+        if (p) {
+            p.reset();
+        }
+    }
+
     state.SetItemsProcessed(state.iterations());
 }
 
@@ -704,7 +837,7 @@ BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, ProtectAtomicPtr)
     ->Range(8, 512)
     ->Complexity(benchmark::oN);
 
-// TryProtect - O(k*n) where k = max_retries, n = hazard_size (64)
+// TryProtect - O(k) where k = max_retries (each attempt is a protect-like operation)
 BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, TryProtect)
     ->RangeMultiplier(2)
     ->Range(1, 256)
@@ -716,7 +849,7 @@ BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, Retire)
     ->Range(8, 512)
     ->Complexity(benchmark::o1);
 
-// Reclaim - O(r*h) where r = retired objects, h = 64 hazard pointers
+// Reclaim - expected O(r) where r = retired objects (hazard checks via registry)
 BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, Reclaim)
     ->RangeMultiplier(2)
     ->Range(1, 1024)
@@ -782,27 +915,38 @@ BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, AcquisitionVsUtilization)
     ->DenseRange(10, 90, 10)  // 0%, 10%, 20%, ..., 90% utilization
     ->Complexity(benchmark::oN);
 
+BENCHMARK_REGISTER_F(DynamicHazardPointerBenchmark, AcquireWorstCaseNearFull)
+    ->Complexity(benchmark::o1);
+
 // ============================================================================
 // Main function for Dynamic benchmarks
 // ============================================================================
 
 int main(int argc, char** argv) {
     ::benchmark::Initialize(&argc, argv);
+
+    size_t hazard_size = kDefaultHazardSize;
+    size_t retired_size = kDefaultRetiredSize;
+    consume_custom_args(&argc, argv, &hazard_size, &retired_size);
     
     if (::benchmark::ReportUnrecognizedArguments(argc, argv)) {
         return 1;
     }
+
+    // Initialize the singleton once with a large pool (tree-mode bitset summary).
+    auto& manager = HazardPointerManager<BenchmarkTestData, 0>::instance(hazard_size, retired_size);
     
     std::cout << "=== Dynamic HazardPointerManager Benchmark Suite ===\n";
     std::cout << "Testing Dynamic Size Implementation (HAZARD_POINTERS=0)\n";
+    std::cout << "Configured hazards_size=" << hazard_size
+              << " (capacity=" << manager.hazard_capacity() << "), retired_size=" << retired_size << "\n";
     std::cout << "Expected Time Complexities:\n";
-    std::cout << "- Acquire: O(n) - Linear search through bitmask table\n";
-    std::cout << "- Release: O(1) - Direct index access\n";
-    std::cout << "- Protect Operations: O(n) - Due to acquisition overhead\n";
-    std::cout << "- TryProtect: O(k*n) - Where k = max_retries, n = hazard_size\n";
-    std::cout << "- Retire: O(1) - Hash set insertion\n";
-    std::cout << "- Reclaim: O(r*h) - Where r = retired objects, h = hazard_size\n";
-    std::cout << "- Clear: O(n) - Proportional to hazard_size\n";
+    std::cout << "- Acquire/Release: expected O(1) - Bitmask + availability hints\n";
+    std::cout << "- Protect: expected O(1) - Acquire + registry add + store\n";
+    std::cout << "- TryProtect: O(k) - Where k = max_retries\n";
+    std::cout << "- Retire: expected O(1) - Hash insertion (amortized)\n";
+    std::cout << "- Reclaim: expected O(r) - Where r = retired objects (hazard checks via registry)\n";
+    std::cout << "- Clear: O(hazards + registry + retired)\n";
     std::cout << "======================================================\n\n";
     
     // Register the current thread

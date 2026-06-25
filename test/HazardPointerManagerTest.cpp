@@ -182,11 +182,11 @@ TEST_F(ProtectOnlyHazardPointerManagerTest, MixedSingleThreadWorkload) {
     for (int i = 0; i < 10000; ++i) {
         int op = i % 3;
         if (op == 0) {
-            auto p = mgr.protect(items[i % items.size()]);
+            auto p = mgr.protect(items[static_cast<size_t>(i) % items.size()]);
             if (p) p->access();
         }
         else if (op == 1) {
-            auto p = mgr.protect(items[i % items.size()]);
+            auto p = mgr.protect(items[static_cast<size_t>(i) % items.size()]);
         }
         else {
             mgr.clear();
@@ -209,14 +209,15 @@ TEST_F(ProtectOnlyHazardPointerManagerTest, RealWorldMixedStressTest) {
     std::atomic<std::shared_ptr<BasicData>>   a64;  a64.store(std::make_shared<BasicData>(0));
     std::atomic<std::shared_ptr<BasicData128>> a128; a128.store(std::make_shared<BasicData128>(0));
 
-    const int N_THREADS = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int N_THREADS = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     constexpr int OPS   = 5000;
     std::vector<std::thread> threads;
-    threads.reserve(N_THREADS);
+    threads.reserve(static_cast<size_t>(N_THREADS));
     for (int t = 0; t < N_THREADS; ++t) {
         threads.emplace_back([&,t](){
             ThreadRegistry::instance().register_id();
-            std::mt19937_64 rng(static_cast<uint64_t>(1234u + t));
+            std::mt19937_64 rng(static_cast<uint64_t>(1234u) + static_cast<uint64_t>(t));
             std::uniform_int_distribution<int> dist(0,3);
             for (int i = 0; i < OPS; ++i) {
                 switch (dist(rng)) {
@@ -396,6 +397,37 @@ TEST_F(ProtectOnlyHazardPointerManagerTest, RetireThresholdConfiguration) {
         EXPECT_LE(mgr.retire_size(), t+1);
         mgr.clear();
     }
+}
+
+//-----------------------------------------------------------------------------
+// Each thread that touches the manager materializes its own thread_local
+// RetireMap that holds a copy of the manager's shared hazard predicate.
+// Exercises the shared-predicate plumbing under contention.
+//-----------------------------------------------------------------------------
+TEST(HazardPointerManagerTest, SharedHazardPredicateAcrossThreads) {
+    using Mgr = HazardPointerManager<BasicData, 64>;
+    auto& mgr = Mgr::instance(8UL);
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 32;
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+    std::atomic<int> failures{0};
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([&]{
+            ThreadRegistry::instance().register_id();
+            for (int i = 0; i < kPerThread; ++i) {
+                auto sp = std::make_shared<BasicData>(i);
+                auto guard = mgr.protect(sp);
+                if (!guard) { failures.fetch_add(1, std::memory_order_relaxed); continue; }
+                guard.reset();
+                if (!mgr.retire(sp)) { failures.fetch_add(1, std::memory_order_relaxed); }
+            }
+            mgr.reclaim();
+        });
+    }
+    for (auto& w : workers) w.join();
+    EXPECT_EQ(failures.load(), 0);
+    mgr.clear();
 }
 
 //-----------------------------------------------------------------------------

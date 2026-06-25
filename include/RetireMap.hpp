@@ -1,237 +1,185 @@
 #pragma once
+
 //--------------------------------------------------------------
-// Standard C++ library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
-#include <cstddef>
-#include <unordered_map>
+#include <atomic>
 #include <bit>
-#include <optional>
+#include <cstddef>
+#include <expected>
 #include <functional>
-#include <algorithm>
 #include <memory>
+#include <unordered_map>
+//--------------------------------------------------------------
+// HazardSystem
+//--------------------------------------------------------------
+#include "Deleter.hpp"
+#include "Error.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
+    // RetireMap is the per-thread bag of pointers awaiting safe
+    // reclamation. It publicly inherits std::unordered_map so the
+    // standard map API (find, erase, reserve, begin, ...) is directly
+    // available; the wrapper-only retire / reclaim methods add the
+    // hazard-aware logic on top.
+    //--------------------------------------------------------------
     template<typename T>
-    class RetireMap {
+    class RetireMap : public std::unordered_map<T*, std::unique_ptr<T, Deleter<T>>> {
         //--------------------------------------------------------------
+        private:
+            //--------------------------------------------------------------
+            using Base = std::unordered_map<T*, std::unique_ptr<T, Deleter<T>>>;
+            //--------------------------
+            using Base::operator[];
+            using Base::insert;
+            using Base::insert_or_assign;
+            using Base::emplace;
+            using Base::emplace_hint;
+            using Base::try_emplace;
+            using Base::merge;
+            //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
+            using SharedFn = typename Deleter<T>::SharedFn;
+            //--------------------------
             explicit RetireMap( const size_t& threshold,
-                                const std::function<bool(const T*)>& is_hazard) :   m_threshold(std::bit_ceil(threshold)),
-                                                                                    m_hazard(is_hazard) {
+                                std::shared_ptr<std::function<bool(const T*)>> hazard) 
+                                    :   Base(),
+                                        m_threshold(std::bit_ceil(threshold)),
+                                        m_hazard(std::move(hazard)) {
                 //--------------------------
-                m_retired.reserve(threshold);
+                Base::reserve(threshold);
                 //--------------------------
-            }// end RetireMap(const size_t& thresholdxw)
+            }// end RetireMap(const size_t& threshold, ...)
             //--------------------------
-            RetireMap(void)                         = delete;
+            RetireMap(void)                                     = delete;
+            RetireMap(const RetireMap&)                         = delete;
+            RetireMap& operator=(const RetireMap&)              = delete;
+            RetireMap(RetireMap&& other) noexcept               = default;
+            RetireMap& operator=(RetireMap&& other) noexcept    = default;
+            ~RetireMap(void)                                    = default;
             //--------------------------
-            ~RetireMap(void) {
-                clear_data();
-            }// end ~RetireMap(void)
+            std::expected<void, RetireError> retire(T* ptr) {
+                return retire_data(ptr, Deleter<T>());
+            }// end std::expected<void, RetireError> retire(T* ptr)
             //--------------------------
-            RetireMap(const RetireMap&)             = delete;
-            RetireMap& operator=(const RetireMap&)  = delete;
-            RetireMap(RetireMap&& other) noexcept   = default;
-            RetireMap& operator=(RetireMap&& other) noexcept {
-                if (this != &other) {
-                    clear_data();
-                    m_threshold = other.m_threshold;
-                    m_hazard    = std::move(other.m_hazard);
-                    m_retired   = std::move(other.m_retired);
-                }// end if (this != &other)
-                return *this;
-            }
+            std::expected<void, RetireError> retire(T* ptr, SharedFn&& shared_fn) {
+                if (!shared_fn) {
+                    return std::unexpected(RetireError::NULL_CALLBACK);
+                }// end if (!shared_fn)
+                return retire_data(ptr, Deleter<T>(std::move(shared_fn)));
+            }// end std::expected<void, RetireError> retire(T* ptr, SharedFn shared_fn)
             //--------------------------
-            bool retire(T* ptr) {
-                return retire_data(ptr, Deleter());
-            }// end bool retire(T* ptr)
-            //--------------------------
-            bool retire(T* ptr, std::function<void(T*)> deleter) {
-                return retire_data(ptr, Deleter(std::move(deleter)));
-            }// end bool retire(T* ptr, std::function<void(T*)>)
-            //--------------------------
-            bool retire(std::shared_ptr<T> owner) {
+            std::expected<void, RetireError> retire(std::shared_ptr<T>&& owner) {
                 return retire_shared(std::move(owner));
-            }// end bool retire(std::shared_ptr<T> owner)
+            }// end std::expected<void, RetireError> retire(std::shared_ptr<T> owner)
             //--------------------------
-            std::optional<size_t> reclaim(void) {
-                return scan_and_reclaim();
-            }// end std::optional<size_t> reclaim(void)
+            // Reclaims using the installed hazard predicate. The success value is
+            // the number of reclaimed pointers (0 is a valid result); the error
+            // channel distinguishes "no hazard function" from "reclaimed nothing".
+            std::expected<size_t, RetireError> reclaim(void) {
+                if (!m_hazard) {
+                    return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
+                }// end if (!m_hazard)
+                return scan_and_reclaim([h = m_hazard](const T* p){ return (*h)(p); });
+            }// end std::expected<size_t, RetireError> reclaim(void)
             //--------------------------
-            std::optional<size_t> reclaim_with(const std::function<bool(const T*)>& hazard_view) {
-                return scan_and_reclaim(hazard_view);
-            }// end reclaim_with
+            // Caller supplies the predicate, so this can never fail; returns the
+            // number of reclaimed pointers (0 valid).
+            template<class Pred>
+            size_t reclaim_with(Pred&& hazard_view) {
+                return scan_and_reclaim(std::forward<Pred>(hazard_view));
+            }// end size_t reclaim_with(Pred&&)
             //--------------------------
-            size_t size(void) const {
-                return size_data();
-            }// end size_t size(void) const
-            //--------------------------
-            void clear(void) {
-                clear_data();
-            }// end void clear(void)
-            //--------------------------
-            bool resize(const size_t& requested_size) {
+            std::expected<void, RetireError> resize(const size_t& requested_size) {
                 return resize_retired(requested_size);
-            }// end bool resize(const size_t& requested_size)
+            }// end std::expected<void, RetireError> resize(const size_t& requested_size)
             //--------------------------------------------------------------
         protected:
             //--------------------------------------------------------------
-            class Deleter {
-                private:
-                    //--------------------------------------------------------------
-                    enum class Kind : uint8_t {
-                        Default     = 1 << 0,
-                        SharedOwner = 1 << 1,
-                        Custom      = 1 << 2
-                    }; // end enum class Kind : uint8_t
-                    //--------------------------------------------------------------
-                public:
-                    Deleter(void) : kind(Kind::Default),
-                                    owner(nullptr),
-                                    custom(nullptr) {
-                        //--------------------------
-                    }// end Deleter(void)
-                    //--------------------------
-                    ~Deleter(void) = default;
-                    //--------------------------
-                    explicit Deleter(std::function<void(T*)> fn) :  kind(Kind::Custom),
-                                                                    custom(std::move(fn)) {
-                        //--------------------------
-                    }// end explicit Deleter(std::function<void(T*)> fn)
-                    //--------------------------
-                    explicit Deleter(std::shared_ptr<T> owner_ptr) : kind(Kind::SharedOwner),
-                                                                    owner(std::move(owner_ptr)) {
-                    }// end explicit Deleter(std::shared_ptr<T> owner_ptr)
-                    //--------------------------
-                    Deleter(Deleter&&) noexcept            = default;
-                    Deleter& operator=(Deleter&&) noexcept = default;
-                    Deleter(const Deleter&)                = delete;
-                    Deleter& operator=(const Deleter&)     = delete;
-                    //--------------------------
-                    void operator()(T* ptr) {
-                        selector(ptr);
-                    }// end void operator()(T* ptr)
-                    //--------------------------------------------------------------
-                protected:
-                    //--------------------------------------------------------------
-                    void selector(T* ptr) {
-                        switch (kind) {
-                            case Kind::Default:
-                                std::default_delete<T>()(ptr);
-                                break;
-                            case Kind::SharedOwner:
-                                owner.reset();
-                                break;
-                            case Kind::Custom:
-                                custom(ptr);
-                                break;
-                            default:
-                                std::default_delete<T>()(ptr);
-                                break;
-                        }// end switch (kind)
-                    }// end void selector(T* ptr)
-                    //--------------------------------------------------------------
-                private:
-                    Kind kind;
-                    std::shared_ptr<T> owner;
-                    std::function<void(T*)> custom;
-            }; // struct Deleter
-            //--------------------------
-            bool retire_data(T* ptr, Deleter&& deleter) {
+            std::expected<void, RetireError> retire_data(T* ptr, Deleter<T>&& deleter) {
                 //--------------------------
                 if (!ptr) {
-                    return false;
+                    return std::unexpected(RetireError::NULL_POINTER);
                 }// end if (!ptr)
                 //--------------------------
-                if (m_retired.size() >= m_threshold) {
-                    if (!scan_and_reclaim()) {
-                        return false;
-                    }
-                }// end if (m_retired.size() >= m_threshold)
+                if (Base::size() >= m_threshold) {
+                    if (!m_hazard) {
+                        return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
+                    }// end if (!m_hazard)
+                    auto h = m_hazard;
+                    if (scan_and_reclaim([h](const T* p){ return (*h)(p); }) == 0UL) {
+                        return std::unexpected(RetireError::RECLAIM_FAILED);
+                    }// end if (scan_and_reclaim(...) == 0UL)
+                }// end if (Base::size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
-                    constexpr float C_INCREASE_SIZE = 1.2f;
-                    if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) {
-                        return false;
-                    }// end if (!resize_retired(static_cast<size_t>(m_retired.size() * C_INCREASE_SIZE))) 
-                }// end if (should_resize)
+                    const size_t current_size   = Base::size();
+                    const size_t increase       = current_size / 5UL;
+                    const size_t requested_size = current_size + (increase ? increase : 1UL);
+                    if (auto resized = resize_retired(requested_size); !resized) {
+                        return std::unexpected(resized.error());
+                    }// end if (auto resized = resize_retired(requested_size); !resized)
+                }// end if (should_resize())
                 //--------------------------
-                if (m_retired.find(ptr) != m_retired.end()) {
-                    return false;
-                }// end if (m_retired.find(ptr) != m_retired.end())
+                auto [it, inserted] = Base::try_emplace(ptr);
+                if (!inserted) {
+                    return std::unexpected(RetireError::DUPLICATE);
+                }// end if (!inserted)
                 //--------------------------
-                std::unique_ptr<T, Deleter> owned(ptr, std::move(deleter));
-                return m_retired.emplace(ptr, std::move(owned)).second;
+                it->second = std::unique_ptr<T, Deleter<T>>(ptr, std::move(deleter));
+                return {};
                 //--------------------------
-            }// end bool retire_data(std::shared_ptr<T> ptr)
+            }// end std::expected<void, RetireError> retire_data(T*, Deleter<T>&&)
             //--------------------------
-            bool retire_shared(std::shared_ptr<T>&& owner) {
+            std::expected<void, RetireError> retire_shared(std::shared_ptr<T>&& owner) {
+                //--------------------------
                 if (!owner) {
-                    return false;
-                }
-                // Argument evaluation order is unspecified, so capture the raw pointer
-                // before moving the shared_ptr into the deleter.
+                    return std::unexpected(RetireError::NULL_POINTER);
+                }// end  if (!owner)
+                //--------------------------
                 T* ptr = owner.get();
-                return retire_data(ptr, Deleter(std::move(owner)));
-            }// end bool retire_shared(std::shared_ptr<T>&& owner)
+                return retire_data(ptr, Deleter<T>(std::move(owner)));
+            }// end std::expected<void, RetireError> retire_shared(std::shared_ptr<T>&& owner)
             //--------------------------
-            std::optional<size_t> scan_and_reclaim(void) {
-                return scan_and_reclaim(m_hazard);
-            }// end std::optional<size_t> scan_and_reclaim(void)
-            //--------------------------
-            std::optional<size_t> scan_and_reclaim(const std::function<bool(const T*)>& hazard_view) {
+            // Erase every entry whose pointer is no longer hazarded; std::erase_if
+            // returns the count removed directly (erasing runs the Deleter that
+            // frees the object). 0 is a valid result and no longer ambiguous.
+            template<class Pred>
+            size_t scan_and_reclaim(Pred&& hazard_view) {
                 //--------------------------
-                const size_t _before = m_retired.size();
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
-                for (auto it = m_retired.begin(); it != m_retired.end();) {
-                    if (!hazard_view(it->first)) {
-                        it = m_retired.erase(it);
-                    } else {
-                        ++it;
-                    }
-                }// end for (auto it = m_retired.begin(); it != m_retired.end();)
+                return std::erase_if(static_cast<Base&>(*this),
+                    [&hazard_view](const auto& entry){ return !hazard_view(entry.first); });
                 //--------------------------
-                const size_t _removed = _before -  m_retired.size();
-                return _removed ? std::optional<size_t>(_removed) : std::nullopt;
-                //--------------------------
-            }// end std::optional<size_t> scan_and_reclaim(void)
-            //--------------------------
-            size_t size_data(void) const {
-                return m_retired.size();
-            }// end size_t size_data(void) const
+            }// end size_t scan_and_reclaim(Pred&&)
             //--------------------------
             bool should_resize(void) const {
-                constexpr float C_LIMITER = 0.8f;
-                return m_retired.size() > static_cast<size_t>(m_threshold * C_LIMITER);
+                return Base::size() > (m_threshold - (m_threshold / 5UL));
             }// end bool should_resize(void)
             //--------------------------
-            bool resize_retired(const size_t& requested_size) {
+            std::expected<void, RetireError> resize_retired(const size_t& requested_size) {
                 //--------------------------
-                if (requested_size < m_retired.size()) {
-                    return false;
-                }// end if (requested_size < m_retired.size())
+                if (requested_size < Base::size()) {
+                    return std::unexpected(RetireError::RESIZE_FAILED);
+                }// end if (requested_size < Base::size())
                 //--------------------------
-                const size_t _resized_celi = std::bit_ceil(requested_size);
-                m_retired.reserve(_resized_celi);
-                m_threshold = _resized_celi;
+                const size_t resized_ceil = std::bit_ceil(requested_size);
+                Base::reserve(resized_ceil);
+                m_threshold = resized_ceil;
                 //--------------------------
-                return true;
+                return {};
                 //--------------------------
-            }// end bool should_resize(void)
-            //--------------------------
-            void clear_data(void) { 
-                m_retired.clear();
-            }// end void clear_data(void)
+            }// end std::expected<void, RetireError> resize_retired(const size_t&)
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::function<bool(const T*)> m_hazard;
-            std::unordered_map<T*, std::unique_ptr<T, Deleter>> m_retired;
+            std::shared_ptr<std::function<bool(const T*)>> m_hazard;
         //--------------------------------------------------------------
-    };// end clas class RetireMap
+    };// end class RetireMap
     //--------------------------------------------------------------
-} // namespace HazardSystem
+}// end namespace HazardSystem
 //--------------------------------------------------------------

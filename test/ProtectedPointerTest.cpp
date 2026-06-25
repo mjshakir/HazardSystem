@@ -41,7 +41,7 @@ TEST(ProtectedPointerTest, OwnerKeepsObjectAlive) {
         owner.reset();
         ASSERT_FALSE(owner);
         auto locked = weak.lock();
-        EXPECT_TRUE(locked);
+        ASSERT_TRUE(locked);
         locked->touch();
         EXPECT_GT(locked->value, 1);
     }

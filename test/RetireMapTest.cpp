@@ -3,6 +3,7 @@
 #include <set>
 #include <random>
 #include <atomic>
+#include <string_view>
 #include "RetireMap.hpp" // <-- Adjust path as needed
 
 using HazardSystem::RetireMap;
@@ -23,19 +24,16 @@ std::vector<Dummy*> make_ptrs(const size_t& n) {
 }
 
 // Always hazard: never reclaim
-auto always_hazard = [](const Dummy*) { return true; };
+auto always_hazard = std::make_shared<std::function<bool(const Dummy*)>>(
+    [](const Dummy*) { return true; });
 
 // Never hazard: always reclaim
-auto never_hazard = [](const Dummy*) { return false; };
+auto never_hazard = std::make_shared<std::function<bool(const Dummy*)>>(
+    [](const Dummy*) { return false; });
 
 // Hazard even/odd: reclaim half
-auto hazard_even = [](const Dummy* ptr) {
-    return ptr && (ptr->value % 2 == 0);
-};
-
-auto hazard_mod3 = [](const Dummy* ptr) {
-    return ptr && (ptr->value % 3 == 0);
-};
+auto hazard_even = std::make_shared<std::function<bool(const Dummy*)>>(
+    [](const Dummy* ptr) { return ptr && (ptr->value % 2 == 0); });
 
 TEST(RetireMapTest, ConstructAndBasicOps) {
     RetireMap<Dummy> s(8, always_hazard);
@@ -79,7 +77,10 @@ TEST(RetireMapTest, ReclaimKeepsHazard) {
     s.retire(ptr1);
     s.retire(ptr2);
     auto removed = s.reclaim();
-    EXPECT_FALSE(removed.has_value());
+    // Hazard function is installed and reclaims nothing: 0 is a valid result,
+    // not an error (the previous std::optional API conflated the two).
+    ASSERT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, 0u);
     EXPECT_EQ(s.size(), 2u);
 }
 
@@ -124,7 +125,7 @@ TEST(RetireMapTest, ResizeIncreasesThreshold) {
     EXPECT_GE(s.size(), 0u);
     for (int i = 0; i < 120; ++i) {
         auto* ptr = new Dummy(i);
-        const bool ok = s.retire(ptr);
+        const bool ok = s.retire(ptr).has_value();
         if (!ok) {
             delete ptr;
         }
@@ -148,18 +149,21 @@ TEST(RetireMapTest, ResizeFailsOnShrink) {
 TEST(RetireMapTest, ReclaimOnEmptyIsNoop) {
     RetireMap<Dummy> s(8, always_hazard);
     auto removed = s.reclaim();
-    EXPECT_FALSE(removed.has_value());
+    // Hazard function present, nothing to reclaim: a valid 0, not an error.
+    ASSERT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, 0u);
     EXPECT_EQ(s.size(), 0u);
 }
 
 TEST(RetireMapTest, CustomDeleterCalledOnReclaim) {
     std::atomic<int> deleted{0};
-    RetireMap<Dummy> s(4, [](const Dummy*) { return false; });
+    auto never = std::make_shared<std::function<bool(const Dummy*)>>(
+        [](const Dummy*) { return false; });
+    RetireMap<Dummy> s(4, never);
     auto* ptr = new Dummy(11);
-    ASSERT_TRUE(s.retire(ptr, [&](Dummy* p) {
-        ++deleted;
-        delete p;
-    }));
+    auto deleter = std::make_shared<std::function<void(Dummy*)>>(
+        [&](Dummy* p) { ++deleted; delete p; });
+    ASSERT_TRUE(s.retire(ptr, std::move(deleter)));
     auto removed = s.reclaim();
     EXPECT_TRUE(removed.has_value());
     EXPECT_EQ(*removed, 1u);
@@ -169,15 +173,15 @@ TEST(RetireMapTest, CustomDeleterCalledOnReclaim) {
 
 TEST(RetireMapTest, ClearInvokesDeleters) {
     std::atomic<int> deleted{0};
-    RetireMap<Dummy> s(8, [](const Dummy*) { return true; });
-    ASSERT_TRUE(s.retire(new Dummy(1), [&](Dummy* p) {
-        ++deleted;
-        delete p;
-    }));
-    ASSERT_TRUE(s.retire(new Dummy(2), [&](Dummy* p) {
-        ++deleted;
-        delete p;
-    }));
+    auto always = std::make_shared<std::function<bool(const Dummy*)>>(
+        [](const Dummy*) { return true; });
+    RetireMap<Dummy> s(8, always);
+    auto deleter = std::make_shared<std::function<void(Dummy*)>>(
+        [&](Dummy* p) { ++deleted; delete p; });
+    auto local1 = deleter;
+    ASSERT_TRUE(s.retire(new Dummy(1), std::move(local1)));
+    auto local2 = deleter;
+    ASSERT_TRUE(s.retire(new Dummy(2), std::move(local2)));
     EXPECT_EQ(s.size(), 2u);
     s.clear();
     EXPECT_EQ(deleted.load(), 2);
@@ -228,9 +232,9 @@ TEST(RetireMapTest, RandomHazardFunction) {
     constexpr size_t count = 500;
     constexpr size_t threshold = 32;
     // Hazard: keep if value divisible by 3
-    RetireMap<Dummy> s(threshold, [](const Dummy* ptr) {
-        return ptr && (ptr->value % 3 == 0);
-    });
+    auto hazard_div3 = std::make_shared<std::function<bool(const Dummy*)>>(
+        [](const Dummy* ptr) { return ptr && (ptr->value % 3 == 0); });
+    RetireMap<Dummy> s(threshold, hazard_div3);
     auto ptrs = make_ptrs(count);
     size_t expected_survivors = 0;
     std::vector<Dummy*> survivors;
@@ -254,3 +258,79 @@ TEST(RetireMapTest, RandomHazardFunction) {
     }
     EXPECT_EQ(s.size(), expected_survivors);
 }
+
+TEST(RetireMapTest, SharedDeleterInvokedExactlyOncePerPointer) {
+    constexpr size_t count = 8;
+    std::atomic<int> deleted{0};
+    auto never = std::make_shared<std::function<bool(const Dummy*)>>(
+        [](const Dummy*) { return false; });
+    RetireMap<Dummy> s(count, never);
+    auto deleter = std::make_shared<std::function<void(Dummy*)>>(
+        [&](Dummy* p) { ++deleted; delete p; });
+    const long base_use_count = deleter.use_count();
+    for (size_t i = 0; i < count; ++i) {
+        auto local = deleter;
+        ASSERT_TRUE(s.retire(new Dummy(static_cast<int>(i)), std::move(local)));
+    }
+    // The same shared deleter is held by every retired entry; use_count rises by N.
+    EXPECT_GE(deleter.use_count(), base_use_count + static_cast<long>(count));
+    auto removed = s.reclaim();
+    EXPECT_TRUE(removed.has_value());
+    EXPECT_EQ(*removed, count);
+    EXPECT_EQ(deleted.load(), static_cast<int>(count));
+    EXPECT_EQ(s.size(), 0u);
+    // After reclaim, only our local handle remains.
+    EXPECT_EQ(deleter.use_count(), base_use_count);
+}
+
+TEST(RetireMapTest, NullSharedDeleterRejected) {
+    auto never = std::make_shared<std::function<bool(const Dummy*)>>(
+        [](const Dummy*) { return false; });
+    RetireMap<Dummy> s(4, never);
+    auto* ptr = new Dummy(7);
+    std::shared_ptr<std::function<void(Dummy*)>> null_fn;
+    auto rejected = s.retire(ptr, std::move(null_fn));
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error(), HazardSystem::RetireError::NULL_CALLBACK);
+    EXPECT_EQ(s.size(), 0u);
+    delete ptr; // not owned by the map; clean up to avoid leaking the test pointer
+}
+
+// std::expected carries a distinct error per failure mode; assert they are
+// not collapsed (the headline win over the old bool / std::optional returns).
+TEST(RetireMapTest, ReclaimWithoutHazardFunctionIsError) {
+    RetireMap<Dummy> s(8, nullptr); // no hazard predicate installed
+    auto* ptr = new Dummy(1);
+    ASSERT_TRUE(s.retire(ptr).has_value());
+    auto removed = s.reclaim();
+    ASSERT_FALSE(removed.has_value());
+    EXPECT_EQ(removed.error(), HazardSystem::RetireError::NO_HAZARD_FUNCTION);
+    s.clear(); // drops the retained pointer through its Deleter
+}
+
+TEST(RetireMapTest, RetireErrorVariantsAreDistinct) {
+    RetireMap<Dummy> s(8, always_hazard);
+    EXPECT_EQ(s.retire(nullptr).error(), HazardSystem::RetireError::NULL_POINTER);
+    auto* ptr = new Dummy(3);
+    EXPECT_TRUE(s.retire(ptr).has_value());
+    EXPECT_EQ(s.retire(ptr).error(), HazardSystem::RetireError::DUPLICATE);
+}
+
+// to_string returns the enumerator's name as std::optional<string_view>, and
+// std::nullopt for a value that is not a recognised enumerator.
+TEST(RetireMapTest, ErrorToStringNames) {
+    using HazardSystem::RetireError;
+    using HazardSystem::to_string;
+    ASSERT_TRUE(to_string(RetireError::NULL_POINTER).has_value());
+    EXPECT_EQ(to_string(RetireError::NULL_POINTER).value(), "NULL_POINTER");
+    EXPECT_NE(to_string(RetireError::NULL_POINTER), to_string(RetireError::DUPLICATE));
+    // A value that is not a recognised enumerator has no name.
+    EXPECT_FALSE(to_string(static_cast<RetireError>(0)).has_value());
+}
+// Usable in constant expressions (constexpr, not consteval).
+static_assert(HazardSystem::to_string(HazardSystem::RetireError::DUPLICATE).has_value(),
+              "known RetireError values must resolve to a name");
+
+// Locks in the size win from replacing std::function<void(T*)> with a shared_ptr inside the variant.
+static_assert(sizeof(HazardSystem::Deleter<int>) <= 32,
+              "Deleter footprint regressed past the 32-byte budget");

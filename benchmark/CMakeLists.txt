@@ -16,7 +16,9 @@ if(NOT benchmark_FOUND)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 
     FetchContent_MakeAvailable(googlebenchmark)
-    add_library(benchmark::benchmark ALIAS benchmark)
+    if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+    endif()
 endif()
 #------------------------------------------------------------------------------------------
 # Function to setup a benchmark executable
@@ -34,6 +36,9 @@ function(create_benchmark_target TARGET_NAME SOURCE_FILE)
     
     # Link the main project library and Google Benchmark
     target_link_libraries(${TARGET_NAME} PRIVATE ${PROJECT_NAME})
+    if(TARGET common_options)
+        target_link_libraries(${TARGET_NAME} PRIVATE common_options)
+    endif()
     if(benchmark_FOUND)
         if(HAS_TBB AND BUILD_CIRCULARBUFFER_MULTI_THREADING)
             target_link_libraries(${TARGET_NAME} PRIVATE benchmark::benchmark tbb)
@@ -54,17 +59,13 @@ function(create_benchmark_target TARGET_NAME SOURCE_FILE)
 endfunction()
 #------------------------------------------------------------------------------------------
 # Add the benchmarks without the 'benchmark/' prefix since we are already in the benchmark directory
-create_benchmark_target(${PROJECT_NAME}_HashTable_Benchmark HashTableBenchmark.cpp)
-# create_benchmark_target(${PROJECT_NAME}_Benchmark HazardPointerManagerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Fixed_Benchmark     HazardPointerManagerFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_Dynamic_Benchmark     HazardPointerManagerDynamicBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Fixed_Benchmark   BitmaskTableFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_BitmaskTable_Dynamic_Benchmark BitmaskTableDynamicBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HashSet_Benchmark              HashSetBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HashSet_Fixed_Benchmark        HashSetFixedBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ProtectedPointer_Benchmark     ProtectedPointerBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_HazardRegistry_Benchmark       HazardRegistryBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_AtomicUniquePtr_Benchmark      AtomicUniquePtrBenchmark.cpp)
 create_benchmark_target(${PROJECT_NAME}_ThreadRegistry_Benchmark       ThreadRegistryBenchmark.cpp)
-create_benchmark_target(${PROJECT_NAME}_HazardThreadManager_Benchmark  HazardThreadManagerBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_AvailabilityBitmapTree_Benchmark AvailabilityBitmapTreeBenchmark.cpp)
+create_benchmark_target(${PROJECT_NAME}_RetireMap_Benchmark              RetireMapBenchmark.cpp)
 #------------------------------------------------------------------------------------------

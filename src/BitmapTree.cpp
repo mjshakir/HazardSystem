@@ -1,0 +1,511 @@
+//--------------------------------------------------------------
+// Main header
+//--------------------------------------------------------------
+#include "BitmapTree.hpp"
+//--------------------------------------------------------------
+// Standard Cpp Libraries
+//--------------------------------------------------------------
+#include <bit>
+#include <utility>
+#include <algorithm>
+//--------------------------------------------------------------
+HazardSystem::BitmapTree::BitmapTree(void) noexcept : m_mode(Mode::Empty),
+                                        m_leaf_bits(0),
+                                        m_planes(0),
+                                        m_levels(0),
+                                        m_words_per_plane(0),
+                                        m_single{0ULL, 0ULL},
+                                        m_level_words(),
+                                        m_level_offsets(),
+                                        m_tree_words(nullptr) {
+    //--------------------------
+}// end HazardSystem::BitmapTree::BitmapTree(void)
+//--------------------------------------------------------------
+HazardSystem::BitmapTree::BitmapTree(HazardSystem::BitmapTree&& other) noexcept
+    :   m_mode(std::move(other.m_mode)),
+        m_leaf_bits(std::move(other.m_leaf_bits)),
+        m_planes(std::move(other.m_planes)),
+        m_levels(std::move(other.m_levels)),
+        m_words_per_plane(std::move(other.m_words_per_plane)),
+        m_single{0ULL, 0ULL},
+        m_level_words(std::move(other.m_level_words)),
+        m_level_offsets(std::move(other.m_level_offsets)),
+        m_tree_words(std::move(other.m_tree_words)) {
+    //--------------------------
+    for (size_t plane = 0; plane < C_MAX_PLANES; ++plane) {
+        m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
+    //--------------------------
+    other.reset_data();
+    //--------------------------
+}// end HazardSystem::BitmapTree::BitmapTree(HazardSystem::BitmapTree&& other) noexcept
+//--------------------------------------------------------------
+HazardSystem::BitmapTree& HazardSystem::BitmapTree::operator=(HazardSystem::BitmapTree&& other) noexcept {
+    //--------------------------
+    if(this == &other) {
+        return *this;
+    }//if(this == &other)
+    //--------------------------
+    m_mode              = std::move(other.m_mode);
+    m_leaf_bits         = std::move(other.m_leaf_bits);
+    m_planes            = std::move(other.m_planes);
+    m_levels            = std::move(other.m_levels);
+    m_words_per_plane   = std::move(other.m_words_per_plane);
+    m_level_words       = std::move(other.m_level_words);
+    m_level_offsets     = std::move(other.m_level_offsets);
+    m_tree_words        = std::move(other.m_tree_words);
+    //--------------------------
+    for (size_t plane = 0; plane < C_MAX_PLANES; ++plane) {
+        m_single[plane].store(other.m_single[plane].load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }// end for (size_t plane = 0; plane < C_MAX_PLANES; ++plane)
+    //--------------------------
+    other.reset_data();
+    //--------------------------
+    return *this;
+}// end HazardSystem::BitmapTree& HazardSystem::BitmapTree::operator=(HazardSystem::BitmapTree&& other) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::initialization(const size_t& leaf_bits) {
+    return initialization_data(leaf_bits);
+}// end bool HazardSystem::BitmapTree::init(const size_t& leaf_bits)
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::initialization(const size_t& leaf_bits, const size_t& planes) {
+    return initialization_data(leaf_bits, planes);
+}// end bool HazardSystem::BitmapTree::init(const size_t& leaf_bits, const size_t& planes)
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::reset_set(const size_t& plane) noexcept {
+    return reset_all_set(plane);
+}// end bool HazardSystem::BitmapTree::reset_set(const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::reset_clear(const size_t& plane) noexcept {
+    return reset_all_clear(plane);
+}// end bool HazardSystem::BitmapTree::reset_clear(const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::set(const size_t& bit_index, const size_t& plane) noexcept {
+    return set_data(bit_index, plane);
+}// end bool HazardSystem::BitmapTree::set(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::clear(const size_t& bit_index, const size_t& plane) noexcept {
+    return clear_data(bit_index, plane);
+}// end bool HazardSystem::BitmapTree::clear(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find(const size_t& hint) const noexcept {
+    return find_data(hint, 0);
+}// end std::optional<size_t> HazardSystem::BitmapTree::find(const size_t& hint) const noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find(const size_t& hint, const size_t& plane) const noexcept {
+    return find_data(hint, plane);
+}// end std::optional<size_t> HazardSystem::BitmapTree::find(const size_t& hint, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_next(const size_t& start, const size_t& plane) const noexcept {
+    return find_next_data(start, plane);
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_next(const size_t& start, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+size_t HazardSystem::BitmapTree::leaf_bits(void) const noexcept {
+    return leaf_bits_data();
+}// end size_t HazardSystem::BitmapTree::leaf_bits(void) const noexcept
+//--------------------------------------------------------------
+size_t HazardSystem::BitmapTree::planes(void) const noexcept {
+    return planes_data();
+}// end size_t HazardSystem::BitmapTree::planes(void) const noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::initialization_data(const size_t& leaf_bits) {
+    //--------------------------
+    if (!initialization_data(leaf_bits, 1)) {
+        return false;
+    }// end if (!initialization_data(leaf_bits, 1))
+    //--------------------------
+    return reset_all_set(0);
+}// end bool HazardSystem::BitmapTree::initialization_data(const size_t& leaf_bits)
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::initialization_data(const size_t& leaf_bits, const size_t& planes) {
+    //--------------------------
+    reset_data();
+    //--------------------------
+    if (!leaf_bits or !planes) {
+        return false;
+    }// end if (!leaf_bits or !planes)
+    //--------------------------
+    m_leaf_bits = leaf_bits;
+    m_planes    = std::min(planes, C_MAX_PLANES);
+    //--------------------------
+    if (!m_planes) {
+        reset_data();
+        return false;
+    }// end if (!m_planes)
+    //--------------------------
+    if (m_leaf_bits <= C_WORD_BITS) {
+        m_mode = Mode::SingleWord;
+        return true;
+    }// end if (m_leaf_bits <= C_WORD_BITS)
+    //--------------------------
+    m_mode = Mode::Tree;
+    try {
+        build_layout();
+    } catch (...) {
+        reset_data();
+        return false;
+    }// end catch (...)
+    //--------------------------
+    return true;
+}// end bool HazardSystem::BitmapTree::initialization_data(const size_t& leaf_bits, const size_t& planes)
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::reset_all_set(const size_t& plane) noexcept {
+    //--------------------------
+    if (plane >= m_planes) {
+        return false;
+    }// end if (plane >= m_planes)
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Empty:
+            return false;
+        //--------------------------
+        case Mode::SingleWord: {
+            const uint64_t mask = (m_leaf_bits == C_WORD_BITS) ? ~0ULL : ((1ULL << m_leaf_bits) - 1ULL);
+            m_single[plane].store(mask, std::memory_order_relaxed);
+            return true;
+        }
+        //--------------------------
+        case Mode::Tree:
+            break; // fall through to the tree fill below
+    }// end switch (m_mode)
+    //--------------------------
+    if (!m_tree_words) {
+        return false;
+    }// end if (!m_tree_words)
+    //--------------------------
+    const size_t levels = m_levels;
+    for (size_t level = 0; level < levels; ++level) {
+        //--------------------------
+        const size_t bits       = (level == 0) ? m_leaf_bits : m_level_words[level - 1];
+        const size_t words      = m_level_words[level];
+        const size_t full_words = bits / C_WORD_BITS;
+        const size_t rem_bits   = bits % C_WORD_BITS;
+        //--------------------------
+        for (size_t i = 0; i < full_words; ++i) {
+            word_data(plane, level, i).store(~0ULL, std::memory_order_relaxed);
+        }// end for (size_t i = 0; i < full_words; ++i)
+        //--------------------------
+        if (rem_bits) {
+            word_data(plane, level, full_words).store((1ULL << rem_bits) - 1ULL, std::memory_order_relaxed);
+        }// end if (rem_bits)
+        else if (full_words < words) {
+            word_data(plane, level, full_words).store(~0ULL, std::memory_order_relaxed);
+        }// end else if (full_words < words)
+        //--------------------------
+    }// end for (size_t level = 0; level < levels; ++level)
+    //--------------------------
+    return true;
+}// end bool HazardSystem::BitmapTree::reset_all_set(const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::reset_all_clear(const size_t& plane) noexcept {
+    //--------------------------
+    if (plane >= m_planes) {
+        return false;
+    }// end if (plane >= m_planes)
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Empty:
+            return false;
+        //--------------------------
+        case Mode::SingleWord:
+            m_single[plane].store(0ULL, std::memory_order_relaxed);
+            return true;
+        //--------------------------
+        case Mode::Tree:
+            break; // fall through to the tree zero-fill below
+    }// end switch (m_mode)
+    //--------------------------
+    if (!m_tree_words) {
+        return false;
+    }// end if (!m_tree_words)
+    //--------------------------
+    const size_t base = plane * m_words_per_plane;
+    for (size_t i = 0; i < m_words_per_plane; ++i) {
+        m_tree_words[base + i].store(0ULL, std::memory_order_relaxed);
+    }// end for (size_t i = 0; i < m_words_per_plane; ++i)
+    //--------------------------
+    return true;
+}// end bool HazardSystem::BitmapTree::reset_all_clear(const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::set_data(const size_t& bit_index, const size_t& plane) noexcept {
+    //--------------------------
+    // Bounds first: cheapest rejection. Then dispatch on m_mode via a switch, so
+    // adding a new Mode enumerator becomes a -Wswitch compile error at every
+    // dispatcher that forgot to handle it — the compiler is our safety net.
+    if (!in_bounds(bit_index, plane)) {
+        return false;
+    }// end if (!in_bounds(bit_index, plane))
+    //--------------------------
+    switch (m_mode) {
+        case Mode::SingleWord:  return set_single_word(bit_index, plane);
+        case Mode::Tree:        return set_bit(plane, 0UL, bit_index);
+        case Mode::Empty:       return false;
+    }// end switch (m_mode)
+    //--------------------------
+    return false; // unreachable; keeps -Wreturn-type quiet.
+}// end bool HazardSystem::BitmapTree::set_data(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::clear_data(const size_t& bit_index, const size_t& plane) noexcept {
+    //--------------------------
+    if (!in_bounds(bit_index, plane)) {
+        return false;
+    }// end if (!in_bounds(bit_index, plane))
+    //--------------------------
+    switch (m_mode) {
+        case Mode::SingleWord:  return clear_single_word(bit_index, plane);
+        case Mode::Tree:        return clear_bit(plane, 0UL, bit_index);
+        case Mode::Empty:       return false;
+    }// end switch (m_mode)
+    //--------------------------
+    return false; // unreachable
+}// end bool HazardSystem::BitmapTree::clear_data(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_data(const size_t& hint, const size_t& plane) const noexcept {
+    //--------------------------
+    if ((plane >= m_planes) or !m_leaf_bits) {
+        return std::nullopt;
+    }// end if ((plane >= m_planes) or !m_leaf_bits)
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Empty:
+            return std::nullopt;
+        //--------------------------
+        case Mode::SingleWord:
+            return find_single_word(hint, plane);
+        //--------------------------
+        case Mode::Tree: {
+            const size_t start_leaf = hint % m_leaf_bits;
+            if (!start_leaf) {
+                return find_from_root(plane);
+            }// end if (!start_leaf)
+            //--------------------------
+            // Wrap-around: [start_leaf, leaf_bits) first, then the full tree from 0.
+            if (auto r = find_from_leaf(plane, start_leaf)) {
+                return r;
+            }// end if (auto r = find_from_leaf(plane, start_leaf))
+            //--------------------------
+            return find_from_root(plane);
+        }// end case Mode::Tree
+    }// end switch (m_mode)
+    //--------------------------
+    return std::nullopt; // unreachable
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_data(const size_t& hint, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_next_data(const size_t& start, const size_t& plane) const noexcept {
+    //--------------------------
+    if ((plane >= m_planes) or !m_leaf_bits or (start >= m_leaf_bits)) {
+        return std::nullopt;
+    }// end if ((plane >= m_planes) or !m_leaf_bits or (start >= m_leaf_bits))
+    //--------------------------
+    switch (m_mode) {
+        case Mode::Empty:       return std::nullopt;
+        case Mode::SingleWord:  return find_next_single_word(start, plane);
+        case Mode::Tree:        return find_from_leaf(plane, start);
+    }// end switch (m_mode)
+    //--------------------------
+    return std::nullopt; // unreachable
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_next_data(const size_t& start, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::set_single_word(const size_t& bit_index, const size_t& plane) noexcept {
+    const uint64_t flag = 1ULL << bit_index;
+    const uint64_t old  = m_single[plane].fetch_or(flag, std::memory_order_relaxed);
+    return (old & flag) == 0;
+}// end bool HazardSystem::BitmapTree::set_single_word(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::clear_single_word(const size_t& bit_index, const size_t& plane) noexcept {
+    const uint64_t flag = 1ULL << bit_index;
+    const uint64_t old  = m_single[plane].fetch_and(~flag, std::memory_order_relaxed);
+    return (old & flag) != 0;
+}// end bool HazardSystem::BitmapTree::clear_single_word(const size_t& bit_index, const size_t& plane) noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_single_word(const size_t& hint, const size_t& plane) const noexcept {
+    const uint64_t word = m_single[plane].load(std::memory_order_acquire);
+    if (!word) {
+        return std::nullopt;
+    }// end if (!word)
+    //--------------------------
+    // Wrap-around search inside the one leaf word.
+    const size_t start  = hint % m_leaf_bits;
+    const uint64_t tail = word & (~0ULL << start);
+    return static_cast<size_t>(std::countr_zero(tail ? tail : word));
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_single_word(const size_t& hint, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_next_single_word(const size_t& start, const size_t& plane) const noexcept {
+    const uint64_t word   = m_single[plane].load(std::memory_order_acquire);
+    const uint64_t masked = word & (~0ULL << start);
+    if (!masked) {
+        return std::nullopt;
+    }// end if (!masked)
+    return static_cast<size_t>(std::countr_zero(masked));
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_next_single_word(const size_t& start, const size_t& plane) const noexcept
+//--------------------------------------------------------------
+size_t HazardSystem::BitmapTree::leaf_bits_data(void) const noexcept {
+    return m_leaf_bits;
+}// end size_t HazardSystem::BitmapTree::leaf_bits_data(void) const noexcept
+//----------------------------------------------------------
+size_t HazardSystem::BitmapTree::planes_data(void) const noexcept {
+    return m_planes;
+}// end size_t HazardSystem::BitmapTree::planes_data(void) const noexcept
+//----------------------------------------------------------
+void HazardSystem::BitmapTree::reset_data(void) noexcept {
+    //--------------------------
+    m_mode              = Mode::Empty;
+    m_leaf_bits         = 0;
+    m_planes            = 0;
+    m_levels            = 0;
+    m_words_per_plane   = 0;
+    //--------------------------
+    for (auto& w : m_single) {
+        w.store(0ULL, std::memory_order_relaxed);
+    }// for (auto& w : m_single)
+    //--------------------------
+    m_level_words.fill(0);
+    m_level_offsets.fill(0);
+    m_tree_words.reset();
+    //--------------------------
+}// end void HazardSystem::BitmapTree::reset_data(void) noexcept
+//--------------------------------------------------------------
+void HazardSystem::BitmapTree::build_layout(void) {
+    //--------------------------
+    size_t level_bits   = m_leaf_bits;
+    size_t levels       = 0;
+    //--------------------------
+    while (levels < C_MAX_LEVELS) {
+        const size_t word_count = (level_bits + C_WORD_BITS - 1) / C_WORD_BITS;
+        m_level_words[levels] = word_count;
+        ++levels;
+        if (word_count == 1) {
+            break;
+        }// end if (word_count == 1)
+        level_bits = word_count;
+    }// end while (levels < C_MAX_LEVELS)
+    //--------------------------
+    m_levels          = levels;
+    size_t offset     = 0;
+    for (size_t level = 0; level < m_levels; ++level) {
+        m_level_offsets[level] = offset;
+        offset += m_level_words[level];
+    }// end for (size_t level = 0; level < m_levels; ++level)
+    //--------------------------
+    m_words_per_plane        = offset;
+    const size_t total_words = m_words_per_plane * m_planes;
+    m_tree_words             = std::make_unique<std::atomic<uint64_t>[]>(total_words);
+    //--------------------------
+    for (size_t i = 0; i < total_words; ++i) {
+        m_tree_words[i].store(0ULL, std::memory_order_relaxed);
+    }// end for (size_t i = 0; i < total_words; ++i)
+}// end void HazardSystem::BitmapTree::build_layout(void)
+//--------------------------------------------------------------
+std::atomic<uint64_t>& HazardSystem::BitmapTree::word_data(const size_t& plane, const size_t& level, const size_t& word_index) noexcept {
+    return m_tree_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
+}// end std::atomic<uint64_t>& HazardSystem::BitmapTree::word_data(const size_t& plane, const size_t& level, const size_t& word_index) noexcept
+//--------------------------------------------------------------
+const std::atomic<uint64_t>& HazardSystem::BitmapTree::word_data(const size_t& plane, const size_t& level, const size_t& word_index) const noexcept {
+    return m_tree_words[(plane * m_words_per_plane) + m_level_offsets[level] + word_index];
+}// end const std::atomic<uint64_t>& HazardSystem::BitmapTree::word_data(const size_t& plane, const size_t& level, const size_t& word_index) const noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::set_bit(const size_t& plane, const size_t& level, const size_t& bit_index) noexcept {
+    //--------------------------
+    const size_t word_index = bit_index / C_WORD_BITS;
+    const uint64_t flag     = 1ULL << (bit_index % C_WORD_BITS);
+    const uint64_t old      = word_data(plane, level, word_index).fetch_or(flag, std::memory_order_relaxed);
+    //--------------------------
+	if (old & flag) {
+	    return false;
+	}// end if (old & flag)
+	//--------------------------
+	if (!old and (level + 1 < m_levels)) {
+	    static_cast<void>(set_bit(plane, level + 1, word_index));
+	}// if (!old and (level + 1 < m_levels))
+    //--------------------------
+	return true;
+}// end bool HazardSystem::BitmapTree::set_bit(const size_t& plane, const size_t& level, const size_t& bit_index) noexcept
+//--------------------------------------------------------------
+bool HazardSystem::BitmapTree::clear_bit(const size_t& plane, const size_t& level, const size_t& bit_index) noexcept {
+    //--------------------------
+    const size_t word_index = bit_index / C_WORD_BITS;
+    const uint64_t flag     = 1ULL << (bit_index % C_WORD_BITS);
+    const uint64_t old      = word_data(plane, level, word_index).fetch_and(~flag, std::memory_order_relaxed);
+    //--------------------------
+    if (!(old & flag)) {
+	    return false;
+	}// end if (!(old & flag))
+    //--------------------------
+	if (((old & ~flag) == 0) and (level + 1 < m_levels)) {
+	    static_cast<void>(clear_bit(plane, level + 1, word_index));
+	}// end if (((old & ~flag) == 0) and (level + 1 < m_levels))
+    //--------------------------
+	return true;
+}// bool HazardSystem::BitmapTree::clear_bit(const size_t& plane, const size_t& level, const size_t& bit_index) noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_from_leaf(const size_t& plane, const size_t& start_leaf_bit) const noexcept {
+    if (!m_leaf_bits or !m_tree_words) {
+        return std::nullopt;
+    }// end if (!m_leaf_bits or !m_tree_words)
+    //--------------------------
+    size_t   _word         = start_leaf_bit / C_WORD_BITS;
+    uint64_t _bit_mask     = (~0ULL << (start_leaf_bit % C_WORD_BITS));
+    uint64_t _level_word   = 0;
+    size_t   _hit_level    = m_levels; // sentinel: no hit until set inside the ascent loop.
+    //--------------------------
+    for (size_t _level = 0; _level < m_levels; ++_level) {
+        const size_t _level_bit_count = (_level == 0) ? m_leaf_bits : m_level_words[_level - 1];
+        if ((_word * C_WORD_BITS) >= _level_bit_count) {
+            return std::nullopt;
+        }// end if ((_word * C_WORD_BITS) >= _level_bit_count)
+        //--------------------------
+        _level_word = word_data(plane, _level, _word).load(std::memory_order_acquire) & _bit_mask;
+        if (_level_word) {
+            _hit_level = _level;
+            break;
+        }// end if (_level_word)
+        //--------------------------
+        const size_t _next_child = _word + 1;
+        _word     = _next_child / C_WORD_BITS;
+        _bit_mask = (~0ULL << (_next_child % C_WORD_BITS));
+    }// end for (size_t _level = 0; _level < m_levels; ++_level)
+    //--------------------------
+    if (_hit_level >= m_levels) {
+        return std::nullopt;
+    }// end if (_hit_level >= m_levels)
+    //--------------------------
+    for (size_t _level = _hit_level; _level > 0; --_level) {
+        const size_t _child_bit_in_word = static_cast<size_t>(std::countr_zero(_level_word));
+        _word        = (_word * C_WORD_BITS) + _child_bit_in_word;
+        _level_word  = word_data(plane, _level - 1, _word).load(std::memory_order_acquire);
+    }// end for (size_t _level = _hit_level; _level > 0; --_level)
+    //--------------------------
+    const size_t _result = (_word * C_WORD_BITS) + static_cast<size_t>(std::countr_zero(_level_word));
+    if (_result >= m_leaf_bits) {
+        return std::nullopt;
+    }// end if (_result >= m_leaf_bits)
+    //--------------------------
+    return _result;
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_from_leaf(const size_t& plane, const size_t& start_leaf_bit) const noexcept
+//--------------------------------------------------------------
+std::optional<size_t> HazardSystem::BitmapTree::find_from_root(const size_t& plane) const noexcept {
+    if (!m_tree_words or !m_levels or (plane >= m_planes)) {
+        return std::nullopt;
+    }// end if (!m_tree_words or !m_levels or (plane >= m_planes))
+    //--------------------------
+    // Root load. If the root has no bits set, no leaf can — bail out immediately.
+    size_t   _word       = 0UL;
+    uint64_t _level_word = word_data(plane, m_levels - 1UL, 0UL).load(std::memory_order_acquire);
+    if (!_level_word) {
+        return std::nullopt;
+    }// end if (!_level_word)
+    //--------------------------
+    for (size_t _step = 0UL; _step < m_levels - 1UL; ++_step) {
+        const size_t _child_level = m_levels - 2UL - _step;
+        _word       = (_word * C_WORD_BITS) + static_cast<size_t>(std::countr_zero(_level_word));
+        _level_word = word_data(plane, _child_level, _word).load(std::memory_order_acquire);
+    }// end for (size_t _step = 0UL; _step < m_levels - 1UL; ++_step)
+    //--------------------------
+    const size_t _result = (_word * C_WORD_BITS) + static_cast<size_t>(std::countr_zero(_level_word));
+    if (_result >= m_leaf_bits) {
+        return std::nullopt;
+    }// end if (_result >= m_leaf_bits)
+    //--------------------------
+    return _result;
+}// end std::optional<size_t> HazardSystem::BitmapTree::find_from_root(const size_t& plane) const noexcept
+//--------------------------------------------------------------

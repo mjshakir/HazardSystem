@@ -1,19 +1,19 @@
 #pragma once
 
 //--------------------------------------------------------------
-// Standard cpp library
+// Standard Cpp Libraries
 //--------------------------------------------------------------
 #include <cstdint>
 #include <cstdbool>
 #include <thread>
 //--------------------------------------------------------------
-// User Defined libraries
+// User Defined Headers
 //--------------------------------------------------------------
-#include "HashSet.hpp"
+#include "HazardSystemAPI.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
     //--------------------------------------------------------------
-    class ThreadRegistry {
+    class HAZARDSYSTEM_API ThreadRegistry {
         //--------------------------------------------------------------
         public:
             //--------------------------------------------------------------
@@ -29,6 +29,8 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             ThreadRegistry(void);
             //--------------------------
+            ~ThreadRegistry(void) = default;
+            //--------------------------
             bool register_thread(void);
             //--------------------------
             bool unregister_thread(void);
@@ -42,7 +44,9 @@ namespace HazardSystem {
             ThreadRegistry(ThreadRegistry&&)                    = delete;
             ThreadRegistry& operator=(ThreadRegistry&&)         = delete;
             //--------------------------
-            HashSet<std::thread::id> m_thread_table;
+            // One ThreadRegistry per thread (instance() is thread_local). Holds
+            // this thread's id while registered, default ("no thread") otherwise.
+            std::thread::id m_registered_id{};
         //--------------------------------------------------------------
     };// end class ThreadRegistry
     //--------------------------------------------------------------

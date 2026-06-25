@@ -40,7 +40,7 @@ void update_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>
 }
 
 template <typename Manager>
-void read_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, int thread_id) {
+void read_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, size_t thread_id) {
     for (int i = 0; i < 15; ++i) {
         auto protected_node = manager.protect(shared_node);
         if (protected_node) {
@@ -53,7 +53,7 @@ void read_shared_node(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& 
 }
 
 template <typename Manager>
-void read_shared_node_with_retries(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, int thread_id) {
+void read_shared_node_with_retries(Manager& manager, std::atomic<std::shared_ptr<TestNode>>& shared_node, size_t thread_id) {
     for (int i = 0; i < 15; ++i) {
         auto protected_node = manager.try_protect(shared_node, 50);
         if (protected_node) {
@@ -123,11 +123,13 @@ void run_hazard_pointer_test(Manager& manager, const std::string& label) {
 
     std::thread updater(update_shared_node<Manager>, std::ref(manager), std::ref(shared_node));
 
-    const size_t threads_size = std::thread::hardware_concurrency() - 1;
+    const auto hardware_threads = std::thread::hardware_concurrency();
+    const size_t threads_size =
+        hardware_threads > 0U ? static_cast<size_t>(hardware_threads - 1U) : 0U;
     std::vector<std::thread> readers;
     readers.reserve(threads_size);
 
-    for (int i = 0; i < threads_size; ++i)
+    for (size_t i = 0; i < threads_size; ++i)
         readers.emplace_back(read_shared_node<Manager>, std::ref(manager), std::ref(shared_node), i);
 
     updater.join();
@@ -167,7 +169,7 @@ void run_baseline_overhead_test(const std::string& label) {
     };
 
     // Reader (no protection)
-    auto reader = [&shared_node](int thread_id) {
+    auto reader = [&shared_node](size_t thread_id) {
         for (int i = 0; i < 15; ++i) {
             auto current = shared_node.load();
             if (current) {
@@ -179,12 +181,14 @@ void run_baseline_overhead_test(const std::string& label) {
         }
     };
 
-    const size_t threads_size = std::thread::hardware_concurrency() - 1;
+    const auto hardware_threads = std::thread::hardware_concurrency();
+    const size_t threads_size =
+        hardware_threads > 0U ? static_cast<size_t>(hardware_threads - 1U) : 0U;
     std::vector<std::thread> readers;
     readers.reserve(threads_size);
 
     std::thread updater_thread(updater);
-    for (int i = 0; i < threads_size; ++i)
+    for (size_t i = 0; i < threads_size; ++i)
         readers.emplace_back(reader, i);
 
     updater_thread.join();

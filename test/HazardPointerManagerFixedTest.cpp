@@ -498,7 +498,8 @@ TEST_F(FixedHazardPointerManagerTest, ProtectedPointerSelfAssignment) {
     EXPECT_TRUE(static_cast<bool>(protected_ptr));
     
     // Self-assignment should be safe
-    protected_ptr = std::move(protected_ptr);
+    auto& self = protected_ptr;
+    protected_ptr = std::move(self);
     EXPECT_TRUE(static_cast<bool>(protected_ptr));
     EXPECT_EQ(protected_ptr->value, 42);
 }
@@ -765,7 +766,7 @@ TEST_F(FixedHazardPointerManagerTest, ABASimulation) {
 // ============================================================================
 
 TEST_F(FixedHazardPointerManagerTest, MemoryLeakPrevention) {
-    auto& manager = HazardPointerManager<TestData, 64>::instance(10); // Small retire threshold
+    static_cast<void>(HazardPointerManager<TestData, 64>::instance(10)); // Small retire threshold
     
     std::atomic<int> objects_created{0};
     std::atomic<int> objects_destroyed{0};
@@ -832,7 +833,7 @@ TEST_F(FixedHazardPointerManagerTest, RetireThresholdBehavior) {
 // ============================================================================
 
 TEST_F(FixedHazardPointerManagerTest, ExceptionDuringProtection) {
-    auto& manager = HazardPointerManager<TestData, 64>::instance();
+    static_cast<void>(HazardPointerManager<TestData, 64>::instance());
     
     struct ThrowingTestData {
         int value;
@@ -938,7 +939,8 @@ TEST_F(FixedHazardPointerManagerTest, ConcurrentProtectSharedPtr) {
     auto& mgr = FixedManagerType::instance();
     // Shared plain shared_ptr – never changes during the test
     auto  data = std::make_shared<TestData>(0);
-    const int numThreads        = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int numThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     constexpr int opsPerThread  = 10000;
 
     // Each TestData tracks how many times it's been "access"ed
@@ -946,7 +948,7 @@ TEST_F(FixedHazardPointerManagerTest, ConcurrentProtectSharedPtr) {
 
     // Launch threads
     std::vector<std::thread> threads;
-    threads.reserve(numThreads);
+    threads.reserve(static_cast<size_t>(numThreads));
     for (int t = 0; t < numThreads; ++t) {
         threads.emplace_back([&]() {
             // Every thread must register itself
@@ -980,13 +982,14 @@ TEST_F(FixedHazardPointerManagerTest, ConcurrentProtectAtomicSharedPtr) {
     std::atomic<std::shared_ptr<TestData>> atomic_data;
     atomic_data.store(std::make_shared<TestData>(0));
 
-    const int numThreads        = std::thread::hardware_concurrency();
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int numThreads = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
     constexpr int opsPerThread  = 5000;
     std::atomic<int> writers{0};
     std::atomic<int> readers{0};
 
     std::vector<std::thread> threads;
-    threads.reserve(numThreads);
+    threads.reserve(static_cast<size_t>(numThreads));
     for (int t = 0; t < numThreads; ++t) {
         threads.emplace_back([&, t]() {
             ThreadRegistry::instance().register_id();
@@ -1060,18 +1063,19 @@ TEST_F(FixedHazardPointerManagerTest, RealWorldMixedStressTest) {
       std::memory_order_relaxed
     );
 
-    const int N_THREADS             = std::thread::hardware_concurrency(); //16;
+    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+    const int N_THREADS = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U); //16;
     constexpr int OPS_PER_THREAD    = 20000;
 
     // 4) Launch a mix of readers, writers, bulk retires, reclaim, clear
     std::vector<std::thread> threads;
-    threads.reserve(N_THREADS);
+    threads.reserve(static_cast<size_t>(N_THREADS));
     for (int t = 0; t < N_THREADS; ++t) {
         threads.emplace_back([&, t]() {
             // Every thread must register itself
             ThreadRegistry::instance().register_id();
 
-            std::mt19937_64 rnd{static_cast<uint64_t>(12345u + t)};
+            std::mt19937_64 rnd{static_cast<uint64_t>(12345u) + static_cast<uint64_t>(t)};
             std::uniform_int_distribution<int> action(0, 5);
             for (int i = 0; i < OPS_PER_THREAD; ++i) {
                 switch (action(rnd)) {

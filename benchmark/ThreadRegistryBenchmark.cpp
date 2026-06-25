@@ -12,10 +12,10 @@ static void BM_RegisterUnregister(benchmark::State& state) {
     registry.unregister();
 
     for (auto _ : state) {
-        const bool registered = registry.register_id();
+        bool registered = registry.register_id();
         benchmark::DoNotOptimize(registered);
         benchmark::DoNotOptimize(registry.registered());
-        const bool unregistered = registry.unregister();
+        bool unregistered = registry.unregister();
         benchmark::DoNotOptimize(unregistered);
     }
 
@@ -28,9 +28,9 @@ static void BM_RegisterContention(benchmark::State& state) {
     registry.unregister();
 
     for (auto _ : state) {
-        const bool registered = registry.register_id();
+        bool registered = registry.register_id();
         benchmark::DoNotOptimize(registered);
-        const bool unregistered = registry.unregister();
+        bool unregistered = registry.unregister();
         benchmark::DoNotOptimize(unregistered);
     }
 
@@ -52,7 +52,7 @@ static void BM_RegisteredCheck(benchmark::State& state) {
 
 BENCHMARK(BM_RegisterUnregister);
 BENCHMARK(BM_RegisterContention)
-    ->ThreadRange(1, std::max(2u, std::thread::hardware_concurrency()));
+    ->ThreadRange(1, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())));
 BENCHMARK(BM_RegisteredCheck);
 
 int main(int argc, char** argv) {

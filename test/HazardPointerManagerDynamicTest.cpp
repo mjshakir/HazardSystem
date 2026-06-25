@@ -186,6 +186,93 @@ TEST(DynamicHazardPointerManager, RetireAndReclaim) {
 }
 
 // -----------------------------------------------------------------------------
+// 8b) Reclamation safety is independent of ThreadRegistry.
+//     The memory-safety guarantee flows through m_registry (hazard addresses) +
+//     RetireMap, never through ThreadRegistry. We prove it by driving
+//     retire/reclaim/release while the calling thread is demonstrably NOT
+//     registered: a live hazard still blocks reclamation, a released one is
+//     reclaimed, and registered() stays false across every step (so none of
+//     these paths consult or mutate ThreadRegistry). Would fail loudly if
+//     registration were ever wired into reclamation.
+//     Note: the first touch of ThreadRegistry auto-registers the thread, so we
+//     drop registration up front and show protect/retire/reclaim/release all run
+//     while registered() stays false.
+// -----------------------------------------------------------------------------
+TEST(DynamicHazardPointerManager, ReclamationSafeWhenThreadUnregistered) {
+  struct Tracked {
+    std::atomic<int>* destroyed;
+    int value;
+    Tracked(std::atomic<int>* d, int v) : destroyed(d), value(v) {}
+    ~Tracked() { destroyed->fetch_add(1); }
+  };
+
+  std::atomic<int> destroyed{0};
+  // High retire threshold so a single retire() does not auto-reclaim; we drive
+  // reclaim() explicitly to make the assertions deterministic.
+  auto& mgr = HazardPointerManager<Tracked, 0>::instance(8, 64);
+  mgr.clear();
+
+  // Run on a worker thread so this register/unregister churn never touches the
+  // main thread's registration.
+  std::thread worker([&] {
+    auto& registry = ThreadRegistry::instance(); // first touch auto-registers this worker
+    registry.unregister();                        // everything below runs unregistered
+    ASSERT_FALSE(registry.registered());
+
+    auto* p = new Tracked(&destroyed, 42);
+
+    auto pp = mgr.protect(p);                 // adds p to the hazard set; does NOT re-register
+    ASSERT_TRUE(static_cast<bool>(pp));
+    ASSERT_EQ(pp.get(), p);
+    EXPECT_FALSE(registry.registered());      // protect() did not re-register
+
+    EXPECT_TRUE(mgr.retire(p));
+    EXPECT_FALSE(registry.registered());
+
+    // Hazarded => survives reclamation; reclaim() does not touch ThreadRegistry.
+    mgr.reclaim();
+    EXPECT_EQ(destroyed.load(), 0);
+    EXPECT_EQ(pp.get()->value, 42);
+    EXPECT_FALSE(registry.registered());
+
+    pp.reset();                               // drop the hazard (does not re-register)
+    EXPECT_FALSE(registry.registered());
+
+    // No longer hazarded => reclaim now frees it; still unregistered.
+    mgr.reclaim();
+    EXPECT_EQ(destroyed.load(), 1);
+    EXPECT_FALSE(registry.registered());
+  });
+  worker.join();
+
+  mgr.clear();
+}
+
+// -----------------------------------------------------------------------------
+// 8c) Auto-registration on first hazard use (migrated from HazardThreadManager).
+//     A fresh thread becomes registered simply by calling protect(): the first
+//     touch of ThreadRegistry happens inside acquire_data_iterator(), and the
+//     thread_local ThreadRegistry ctor registers the thread. Registration is
+//     bound to the FIRST touch, so protect() must be this thread's first
+//     ThreadRegistry interaction for it to be the trigger.
+// -----------------------------------------------------------------------------
+TEST(DynamicHazardPointerManager, ProtectRegistersCallingThread) {
+  using TestData = int;
+  auto& mgr = HazardPointerManager<TestData, 0>::instance(8, 8);
+
+  bool registered_after = false;
+
+  std::thread worker([&] {
+    TestData value = 7;
+    auto pp = mgr.protect(&value);                            // first ThreadRegistry touch -> registers
+    registered_after = ThreadRegistry::instance().registered();
+  });
+  worker.join();
+
+  EXPECT_TRUE(registered_after);
+}
+
+// -----------------------------------------------------------------------------
 // 9) Protect null pointers
 // -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(ProtectNullptr);
@@ -369,7 +456,8 @@ TEST(DynamicHazardPointerManager, ProtectedPointerSelfAssign) {
 
   auto p = mgr.protect(std::make_shared<TestData>(9));
   EXPECT_TRUE(static_cast<bool>(p));
-  p = std::move(p);
+  auto& self = p;
+  p = std::move(self);
   EXPECT_TRUE(static_cast<bool>(p));
 
   mgr.clear();
@@ -436,15 +524,16 @@ TEST(DynamicHazardPointerManager, RealWorldDynamicProtectStressTest) {
   shared.store(std::make_shared<Tracked>(0,&created,&destroyed),
                std::memory_order_relaxed);
 
-  const int THREADS = std::thread::hardware_concurrency();
+  const unsigned int hardware_threads = std::thread::hardware_concurrency();
+  const int THREADS = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
   constexpr int OPS = 5000;
   std::vector<std::thread> ths;
-  ths.reserve(THREADS);
+  ths.reserve(static_cast<size_t>(THREADS));
 
   for(int t=0;t<THREADS;++t){
     ths.emplace_back([&, t](){
       ThreadRegistry::instance().register_id();
-      std::mt19937_64 rnd{static_cast<uint64_t>(12345u + t)};
+      std::mt19937_64 rnd{static_cast<uint64_t>(12345u) + static_cast<uint64_t>(t)};
       std::uniform_int_distribution<int> act(0,4);
       for(int i=0;i<OPS;++i){
         switch(act(rnd)){
@@ -489,7 +578,6 @@ TEST(DynamicHazardPointerManager, RealWorldDynamicProtectStressTest) {
 // -----------------------------------------------------------------------------
 DEFINE_TESTDATA_TYPE(MemoryLeakPrevention);
 TEST(DynamicHazardPointerManager, MemoryLeakPrevention) {
-  using TestData = MemoryLeakPrevention_TestData;
   struct Tracked2 {
     std::atomic<int>* c; std::atomic<int>* d;
     Tracked2(std::atomic<int>* cc,std::atomic<int>* dd): c(cc),d(dd){c->fetch_add(1);}
@@ -552,18 +640,19 @@ TEST(DynamicHazardPointerManager, RealWorldMixedConcurrency) {
     shared.store(std::make_shared<Tracked>(0, &created, &destroyed),
                  std::memory_order_relaxed);
 
-    const int THREADS = std::thread::hardware_concurrency();
-    constexpr int OPS = 25000;
+	    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+	    const int THREADS = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
+	    constexpr int OPS = 25000;
 
-    std::vector<std::thread> ths;
-    ths.reserve(THREADS);
-    for (int t = 0; t < THREADS; ++t) {
-        ths.emplace_back([&, t]() {
-            ThreadRegistry::instance().register_id();
-            std::mt19937_64 rnd{static_cast<uint64_t>(123456u + t)};
-            std::uniform_int_distribution<int> action(0,5);
-            for (int i = 0; i < OPS; ++i) {
-                switch (action(rnd)) {
+	    std::vector<std::thread> ths;
+	    ths.reserve(static_cast<size_t>(THREADS));
+	    for (int t = 0; t < THREADS; ++t) {
+	        ths.emplace_back([&, t]() {
+	            ThreadRegistry::instance().register_id();
+	            std::mt19937_64 rnd{static_cast<uint64_t>(123456u) + static_cast<uint64_t>(t)};
+	            std::uniform_int_distribution<int> action(0,5);
+	            for (int i = 0; i < OPS; ++i) {
+	                switch (action(rnd)) {
                   case 0: { // swap writer + retire
                     auto node = std::make_shared<Tracked>(i, &created, &destroyed);
                     auto old  = shared.exchange(node, std::memory_order_acq_rel);
@@ -633,15 +722,16 @@ TEST(DynamicHazardPointerManager, ABASimulation) {
     atom.store(std::make_shared<Node>(1, &created, &destroyed),
                std::memory_order_relaxed);
 
-    const int THREADS = std::thread::hardware_concurrency();
-    constexpr int OPS = 30000;
-    std::mt19937_64 rnd{98765};
+	    const unsigned int hardware_threads = std::thread::hardware_concurrency();
+	    const int THREADS = static_cast<int>(hardware_threads > 0U ? hardware_threads : 1U);
+	    constexpr int OPS = 30000;
+	    std::mt19937_64 rnd{98765};
 
-    std::vector<std::thread> ths;
-    ths.reserve(THREADS);
-    for (int t = 0; t < THREADS; ++t) {
-        ths.emplace_back([&](){
-            ThreadRegistry::instance().register_id();
+	    std::vector<std::thread> ths;
+	    ths.reserve(static_cast<size_t>(THREADS));
+	    for (int t = 0; t < THREADS; ++t) {
+	        ths.emplace_back([&](){
+	            ThreadRegistry::instance().register_id();
             std::uniform_int_distribution<int> op(0,9);
             for (int i = 0; i < OPS; ++i) {
                 if (i % 25 == 0) {
