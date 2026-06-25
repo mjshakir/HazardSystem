@@ -61,27 +61,35 @@ hs_genmc_test(NAME verify_smr_reclaim_fence  EXPECT viol  MODEL rc11 SOURCE smr_
 hs_genmc_test(NAME verify_smr_downgrade      EXPECT viol  MODEL rc11 SOURCE smr_safety.c
               DEFS -DCONFIG_A=1 -DDOWNGRADE_FENCE=1 LABELS verify_evidence)
 
-#-- Harness #2: HazardRegistry correctness -------------------------------------------------
+#-- Harness #2: (historical) HazardRegistry correctness ------------------------------------
 hs_genmc_test(NAME verify_reg_hb_contains    EXPECT clean MODEL rc11 SOURCE registry_lin.c
-              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=1 LABELS verify_safe)
+              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=1 LABELS verify_historical)
 hs_genmc_test(NAME verify_reg_double_add      EXPECT clean MODEL rc11 SOURCE registry_lin.c
-              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=2 LABELS verify_safe)
+              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=2 LABELS verify_historical)
 hs_genmc_test(NAME verify_reg_tombstone       EXPECT clean MODEL rc11 SOURCE registry_lin.c
-              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=3 LABELS verify_safe)
-# KNOWN BUG (see README §"Weakness found"): contains() false-negative under a
-# concurrent same-pointer add/remove refcount race.  Becomes "clean" once fixed.
+              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=3 LABELS verify_historical)
+# The bug that justified the removal: contains() false-negative under a concurrent
+# same-pointer add/remove refcount race.
 hs_genmc_test(NAME verify_reg_refcount_bug    EXPECT viol  MODEL rc11 SOURCE registry_lin.c
-              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=4 LABELS verify_knownbug)
+              GENMC_FLAGS --unroll=6 DEFS -DVARIANT=4 LABELS verify_historical)
 
-#-- Harness #1b: end-to-end use-after-free driven by the registry bug ----------------------
+#-- Harness #1b: (historical) end-to-end UAF from the removed registry ---------------------
 hs_genmc_test(NAME verify_registry_uaf_sc     EXPECT viol  MODEL sc   SOURCE smr_registry_uaf.c
-              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_knownbug)
+              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_historical)
 hs_genmc_test(NAME verify_registry_uaf_rc11   EXPECT viol  MODEL rc11 SOURCE smr_registry_uaf.c
-              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_knownbug)
+              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_historical)
+
+#-- CURRENT design: reclaimer scans per-thread hazard slots (the shipping fix) -------------
 hs_genmc_test(NAME verify_slots_fix_sc        EXPECT clean MODEL sc   SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 LABELS verify_safe)
 hs_genmc_test(NAME verify_slots_fix_rc11      EXPECT clean MODEL rc11 SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 LABELS verify_safe)
+# Bit-gated scan: mirrors the shipping HazardPointerManager::is_hazard, which uses
+# BitmaskTable::for_each (read the slot's active bit, then its pointer).
+hs_genmc_test(NAME verify_slots_bitgated_sc   EXPECT clean MODEL sc   SOURCE smr_registry_uaf.c
+              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 LABELS verify_safe)
+hs_genmc_test(NAME verify_slots_bitgated_rc11 EXPECT clean MODEL rc11 SOURCE smr_registry_uaf.c
+              GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 LABELS verify_safe)
 
 #-- Harness #3: BitmaskTable slot mutual exclusion -----------------------------------------
 hs_genmc_test(NAME verify_bitmask_distinct    EXPECT clean MODEL rc11 SOURCE bitmask_excl.c

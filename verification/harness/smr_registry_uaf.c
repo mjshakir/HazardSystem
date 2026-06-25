@@ -32,6 +32,11 @@
 #ifndef USE_REGISTRY
 #define USE_REGISTRY 1   /* 1 = refcounted HazardRegistry (buggy); 0 = per-thread slots */
 #endif
+#ifndef SCAN_BITGATED
+#define SCAN_BITGATED 0  /* (slots only) 1 = reclaimer reads the per-slot "active" bit
+                            BEFORE the pointer, mirroring the shipping BitmaskTable
+                            for_each (bit-then-pointer); 0 = direct slot read. */
+#endif
 
 #define CAP  4u
 #define MASK (CAP - 1u)
@@ -43,6 +48,9 @@ static size_t reg_hash(const void *p) { (void)p; return 0; }   /* force collisio
 
 /* per-thread hazard slots (textbook HP): one dedicated slot per reader */
 static _Atomic(void *) hp_slot[2];
+/* per-slot "active" bit, mirroring the BitmaskTable bitmask. Set at acquire
+ * (before the pointer) and cleared at release (after the pointer is zeroed). */
+static _Atomic(int) hp_active[2];
 
 /* ---- faithful ports (identical to registry_lin.c) ------------------------ */
 static int reg_add(void *ptr) {
@@ -117,22 +125,34 @@ static int  publish(int reader, void *p) {
 #if USE_REGISTRY
     (void)reader; return reg_add(p);
 #else
-    atomic_store_explicit(&hp_slot[reader], p, memory_order_release); return 1;
+    /* acquire sets the active bit BEFORE the pointer is stored (as acquire_data
+     * sets the bitmask bit before store_safe). */
+    atomic_store_explicit(&hp_active[reader], 1, memory_order_release);
+    atomic_store_explicit(&hp_slot[reader], p, memory_order_release);
+    return 1;
 #endif
 }
 static void unpublish(int reader, void *p) {
 #if USE_REGISTRY
     (void)reader; reg_remove(p);
 #else
-    (void)p; atomic_store_explicit(&hp_slot[reader], NULL, memory_order_release);
+    /* release zeroes the pointer BEFORE clearing the bit (as release_data does). */
+    (void)p;
+    atomic_store_explicit(&hp_slot[reader], NULL, memory_order_release);
+    atomic_store_explicit(&hp_active[reader], 0, memory_order_release);
 #endif
 }
 static int  protected_now(void *p) {
 #if USE_REGISTRY
     return reg_contains(p);
 #else
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 2; ++i) {
+#if SCAN_BITGATED
+        /* mirror for_each_active: read the bit, and only then the pointer */
+        if (!atomic_load_explicit(&hp_active[i], memory_order_acquire)) continue;
+#endif
         if (atomic_load_explicit(&hp_slot[i], memory_order_acquire) == p) return 1;
+    }
     return 0;
 #endif
 }
@@ -180,6 +200,7 @@ static void *reclaimer(void *a) {
 int main(void) {
     for (size_t i = 0; i < CAP; ++i) { atomic_init(&slots[i], NULL); atomic_init(&counts[i], 0u); }
     atomic_init(&hp_slot[0], NULL); atomic_init(&hp_slot[1], NULL);
+    atomic_init(&hp_active[0], 0); atomic_init(&hp_active[1], 0);
     atomic_init(&n0.freed, 0); n0.data = 7;
     atomic_init(&source, &n0);
 

@@ -70,18 +70,20 @@ expect_viol  "reclaimer seq_cst fence removed"             rc11                 
 expect_viol  "seq_cst downgraded to acq_rel"               rc11                  -- -DCONFIG_A=1 -DDOWNGRADE_FENCE=1      "$H/smr_safety.c"
 echo
 
-echo "-- Harness #2: HazardRegistry correctness --"
+echo "-- Harness #2 (HISTORICAL): the registry refcount bug that motivated its removal --"
 expect_clean "V1 happens-before add->contains"             rc11 --unroll=6 -- -DVARIANT=1 "$H/registry_lin.c"
 expect_clean "V2 concurrent double-add"                    rc11 --unroll=6 -- -DVARIANT=2 "$H/registry_lin.c"
 expect_clean "V3 tombstone reuse / no resurrection"        rc11 --unroll=6 -- -DVARIANT=3 "$H/registry_lin.c"
 expect_viol  "V4 refcount race -> contains() false-neg [BUG]" rc11 --unroll=6 -- -DVARIANT=4 "$H/registry_lin.c"
 echo
 
-echo "-- Harness #1b: end-to-end UAF from the registry bug (both fences present) --"
-expect_viol  "refcounted registry -> use-after-free [BUG]" sc   --unroll=6 -- -DUSE_REGISTRY=1 "$H/smr_registry_uaf.c"
-expect_viol  "  (same, RC11)"                              rc11 --unroll=6 -- -DUSE_REGISTRY=1 "$H/smr_registry_uaf.c"
-expect_clean "per-thread slots -> safe (the fix)"          sc   --unroll=6 -- -DUSE_REGISTRY=0 "$H/smr_registry_uaf.c"
-expect_clean "  (same, RC11)"                              rc11 --unroll=6 -- -DUSE_REGISTRY=0 "$H/smr_registry_uaf.c"
+echo "-- Harness #1b: removed registry (UAF) vs CURRENT slots design (safe) --"
+expect_viol  "[historical] refcounted registry -> use-after-free" sc   --unroll=6 -- -DUSE_REGISTRY=1 "$H/smr_registry_uaf.c"
+expect_viol  "[historical]   (same, RC11)"                        rc11 --unroll=6 -- -DUSE_REGISTRY=1 "$H/smr_registry_uaf.c"
+expect_clean "CURRENT: per-thread slots scan -> safe"             sc   --unroll=6 -- -DUSE_REGISTRY=0 "$H/smr_registry_uaf.c"
+expect_clean "  (same, RC11)"                                     rc11 --unroll=6 -- -DUSE_REGISTRY=0 "$H/smr_registry_uaf.c"
+expect_clean "CURRENT: bit-gated scan (mirrors for_each) -> safe" sc   --unroll=6 -- -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 "$H/smr_registry_uaf.c"
+expect_clean "  (same, RC11)"                                     rc11 --unroll=6 -- -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 "$H/smr_registry_uaf.c"
 echo
 
 echo "-- Harness #3: BitmaskTable slot mutual exclusion --"
