@@ -418,8 +418,6 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         const size_t m_retired_threshold;
         BitmaskType m_hazard_pointers;
-        // Built once in the constructor and shared with every per-thread RetireMap.
-        // The captured `this` means the manager must outlive any thread that called retired_nodes().
         std::shared_ptr<std::function<bool(const T*)>> m_is_hazard_fn;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
