@@ -92,6 +92,13 @@ namespace HazardSystem {
                 return scan_and_reclaim(std::forward<Pred>(hazard_view));
             }// end size_t reclaim_with(Pred&&)
             //--------------------------
+            // Monotonic per-thread reclaim-pass counter (bumped after the fence in
+            // scan_and_reclaim). A snapshotting hazard predicate uses it to rebuild
+            // its one-shot snapshot exactly once per pass.
+            static size_t reclaim_epoch(void) noexcept {
+                return epoch_ref();
+            }// end static size_t reclaim_epoch(void)
+            //--------------------------
             std::expected<void, RetireError> resize(const size_t& requested_size) {
                 return resize_retired(requested_size);
             }// end std::expected<void, RetireError> resize(const size_t& requested_size)
@@ -151,6 +158,12 @@ namespace HazardSystem {
                 //--------------------------
                 std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
+                // New reclaim pass (post-fence): a snapshotting predicate keys its
+                // one-shot hazard snapshot off this per-thread epoch so it scans the
+                // hazard slots once per pass instead of once per retired node. Plain
+                // per-node predicates simply ignore it.
+                ++epoch_ref();
+                //--------------------------
                 return std::erase_if(static_cast<Base&>(*this),
                     [&hazard_view](const auto& entry){ return !hazard_view(entry.first); });
                 //--------------------------
@@ -176,6 +189,11 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
+            static size_t& epoch_ref(void) noexcept {
+                static thread_local size_t s_epoch = 0UL;
+                return s_epoch;
+            }// end static size_t& epoch_ref(void)
+            //--------------------------
             size_t m_threshold;
             std::shared_ptr<std::function<bool(const T*)>> m_hazard;
         //--------------------------------------------------------------

@@ -138,7 +138,7 @@ class HazardPointerManager {
         HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
                                                           m_hazard_pointers(),
                                                           m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
-                                                              [this](const T* p){ return is_hazard(p); })) {
+                                                              [this](const T* p){ return hazard_membership(p); })) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -148,7 +148,7 @@ class HazardPointerManager {
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
                                                                 m_hazard_pointers(hazard_limiter(hazards_size)),
                                                                 m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
-                                                                    [this](const T* p){ return is_hazard(p); })) {
+                                                                    [this](const T* p){ return hazard_membership(p); })) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -323,7 +323,13 @@ class HazardPointerManager {
         ProtectedPointer<T> create_protected_pointer(typename BitmaskType::iterator it,
                                                     T* protected_obj,
                                                     std::shared_ptr<T> owner = nullptr) {
-            return ProtectedPointer<T>(protected_obj, std::bind(&HazardPointerManager::release_data_iterator, this, std::move(it)), std::move(owner));
+            // A small [this, it] capture (a pointer + a slot iterator = 16 bytes,
+            // trivially copyable) fits std::function's small-buffer optimization, so
+            // no heap allocation per protect — unlike std::bind on a member function
+            // pointer, whose 32-byte object overflows the SBO and allocates.
+            return ProtectedPointer<T>(protected_obj,
+                                       [this, it]() noexcept { return release_data_iterator(it); },
+                                       std::move(owner));
         }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
         ProtectedPointer<T> protect_with_owner(T* ptr, std::shared_ptr<T> owner) {
@@ -371,25 +377,43 @@ class HazardPointerManager {
             return retired_nodes().retire(std::move(node));
         }// end std::expected<void, RetireError> retire_node(std::shared_ptr<T> node)
         //--------------------------
-        bool is_hazard(const T* node) const {
+        // Collect every currently-published hazard pointer in one O(capacity) scan
+        // of the global hazard-slot table.
+        void collect_hazards(std::vector<const T*>& out) const {
             //--------------------------
-            if (!node) {
-                return false;
-            }// end if (!node)
-            //--------------------------
-            bool found = false;
-            m_hazard_pointers.for_each([&found, node](auto, T* ptr) {
-                if (ptr == node) {
-                    found = true;
-                }// end if (ptr == node)
+            out.clear();
+            m_hazard_pointers.for_each([&out](auto, T* ptr) {
+                if (ptr) {
+                    out.push_back(ptr);
+                }// end if (ptr)
             });
-            return found;
-        } // end bool is_hazard(const T* node)
+            //--------------------------
+        } // end void collect_hazards(std::vector<const T*>& out) const
+        //--------------------------
+        // Reclaim predicate backed by a one-shot, per-pass hazard snapshot: the
+        // slots are scanned once per reclaim pass (keyed on RetireMap's epoch) and
+        // each retired node is then an O(log capacity) membership test — restoring
+        // ~O(capacity + R) reclaim instead of the naive O(R * capacity) per-node
+        // rescan. The snapshot/epoch are thread_local, so each reclaiming thread
+        // keeps its own (it scans all threads' published hazards).
+        bool hazard_membership(const T* node) const {
+            //--------------------------
+            static thread_local std::vector<const T*> snapshot;
+            static thread_local size_t built_epoch = static_cast<size_t>(-1);
+            //--------------------------
+            const size_t current_epoch = RetireMap<T>::reclaim_epoch();
+            if (built_epoch != current_epoch) {
+                collect_hazards(snapshot);
+                std::sort(snapshot.begin(), snapshot.end());
+                built_epoch = current_epoch;
+            }// end if (built_epoch != current_epoch)
+            //--------------------------
+            return std::binary_search(snapshot.begin(), snapshot.end(), node);
+            //--------------------------
+        } // end bool hazard_membership(const T* node) const
         //--------------------------
         void scan_and_reclaim(void) {
-            retired_nodes().reclaim_with([this](const T* ptr) {
-                return is_hazard(ptr);
-            });
+            static_cast<void>(retired_nodes().reclaim());
         } // end void scan_and_reclaim(void)
         //--------------------------
         void scan_and_reclaim_all(void) {
