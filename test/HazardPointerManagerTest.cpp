@@ -266,6 +266,66 @@ TEST_F(ProtectOnlyHazardPointerManagerTest, RealWorldMixedStressTest) {
 }
 
 //-----------------------------------------------------------------------------
+// Regression: concurrent protect() of the SAME pointer while a writer retires
+// and reclaims it. This is the exact scenario the removed HazardRegistry's
+// refcount race turned into a use-after-free (proved in verification/). With
+// the reclaimer scanning per-thread hazard slots it must be safe; best run
+// under ASan, which traps any premature free directly.
+//-----------------------------------------------------------------------------
+namespace {
+struct SamePtrNode {
+    int value;
+    std::atomic<bool> destroyed{false};
+    explicit SamePtrNode(int v = 0) : value(v) {}
+    ~SamePtrNode() { destroyed.store(true, std::memory_order_release); }
+};
+} // namespace
+
+TEST(HazardPointerManagerRegression, ConcurrentSamePointerProtectReclaimNoUAF) {
+    auto& mgr = HazardPointerManager<SamePtrNode, 0>::instance(64, 4);
+    std::atomic<SamePtrNode*> source{ new SamePtrNode(0) };
+    std::atomic<bool> stop{false};
+    std::atomic<int>  uaf{0};
+
+    const unsigned readers = std::max(2u, std::thread::hardware_concurrency());
+    std::vector<std::thread> rs;
+    for (unsigned r = 0; r < readers; ++r) {
+        rs.emplace_back([&]{
+            while (!stop.load(std::memory_order_relaxed)) {
+                auto p = mgr.protect(source);                 // atomic<T*> overload
+                if (p) {
+                    // A validated protection must keep the node alive.
+                    if (p->destroyed.load(std::memory_order_acquire)) {
+                        uaf.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    (void)p->value;
+                    p.reset();
+                }
+            }
+        });
+    }
+
+    // This thread is the writer/reclaimer: swap in a fresh node, retire the old,
+    // and reclaim (which scans the live hazard slots).
+    for (int i = 1; i <= 10000; ++i) {
+        auto* fresh = new SamePtrNode(i);
+        auto* old   = source.exchange(fresh, std::memory_order_acq_rel);
+        (void)mgr.retire(old);
+        mgr.reclaim();
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : rs) t.join();                              // all hazards released
+
+    // Teardown after readers have stopped: free whatever is left.
+    auto* last = source.exchange(nullptr, std::memory_order_acq_rel);
+    (void)mgr.retire(last);
+    mgr.reclaim_all();
+
+    EXPECT_EQ(uaf.load(), 0) << "a reader observed a destroyed node — use-after-free";
+}
+
+//-----------------------------------------------------------------------------
 // 6) TimingProtect
 //-----------------------------------------------------------------------------
 TEST_F(ProtectOnlyHazardPointerManagerTest, TimingProtect) {
