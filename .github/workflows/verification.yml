@@ -1,0 +1,75 @@
+name: Formal Verification (GenMC)
+
+# Exhaustively model-checks the core lock-free algorithm with GenMC (RC11/SC).
+# Kept separate from the main build matrix so the one-off GenMC source build
+# never gates normal CI; still runs on every push/PR as a regression guard.
+on: [push, pull_request]
+
+jobs:
+  genmc:
+    runs-on: ubuntu-latest
+    env:
+      GENMC_VERSION: v0.11.0     # pin: GenMC release tag (must match the local toolchain)
+      LLVM_VERSION: "19"         # GenMC v0.11.0 builds against LLVM 19
+      GENMC_PREFIX: ${{ github.workspace }}/.genmc-install
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache GenMC build
+        id: cache-genmc
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GENMC_PREFIX }}
+          # Rebuild only when the pinned GenMC/LLVM versions change.
+          key: genmc-${{ env.GENMC_VERSION }}-llvm${{ env.LLVM_VERSION }}-${{ runner.os }}
+
+      - name: Install LLVM/Clang ${{ env.LLVM_VERSION }} + build deps
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${LLVM_VERSION}
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev libclang-${LLVM_VERSION}-dev \
+            libffi-dev libxml2-dev zlib1g-dev build-essential \
+            autoconf automake libtool flex bison pkg-config
+          # Put the versioned LLVM toolchain (llvm-config, clang) first on PATH so
+          # GenMC's configure auto-detects LLVM 19.
+          echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Build GenMC ${{ env.GENMC_VERSION }} (cache miss only)
+        if: steps.cache-genmc.outputs.cache-hit != 'true'
+        run: |
+          export PATH="/usr/lib/llvm-${LLVM_VERSION}/bin:$PATH"
+          git clone --depth 1 --branch "${GENMC_VERSION}" https://github.com/MPI-SWS/genmc.git
+          cd genmc
+          autoreconf --install
+          ./configure --prefix="${GENMC_PREFIX}" CXX=clang++-${LLVM_VERSION}
+          make -j"$(nproc)"
+          make install
+
+      - name: Put GenMC on PATH
+        run: echo "${GENMC_PREFIX}/bin" >> "$GITHUB_PATH"
+
+      - name: Sanity-check toolchain
+        run: |
+          genmc --version
+          clang-${LLVM_VERSION} --version | head -1
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@v4.2.0
+
+      - name: Configure (verification only)
+        run: |
+          cmake -S . -B build \
+            -DBUILD_HAZARDSYSTEM_VERIFICATION=ON \
+            -DBUILD_HAZARDSYSTEM_TESTS=OFF \
+            -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF \
+            -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
+
+      - name: Run formal-verification harnesses
+        env:
+          CLANG: clang-19
+        run: ctest --test-dir build -L verify --output-on-failure
