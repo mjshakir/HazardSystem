@@ -3,6 +3,7 @@
 //--------------------------------------------------------------
 // Standard Cpp Libraries
 //--------------------------------------------------------------
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <expected>
@@ -147,6 +148,8 @@ namespace HazardSystem {
             // frees the object). 0 is a valid result and no longer ambiguous.
             template<class Pred>
             size_t scan_and_reclaim(Pred&& hazard_view) {
+                //--------------------------
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
                 return std::erase_if(static_cast<Base&>(*this),
                     [&hazard_view](const auto& entry){ return !hazard_view(entry.first); });

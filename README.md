@@ -5,7 +5,7 @@ A header-first hazard-pointer library with fixed-size and dynamic hazard tables,
 ## Features
 - HazardPointerManager with fixed (`HAZARD_POINTERS > 0`) or dynamic (`HAZARD_POINTERS == 0`) capacity.
 - Lock-free BitmaskTable for slot allocation (array-backed up to 1024, dynamic vector beyond).
-- ThreadRegistry + HazardThreadManager for per-thread registration.
+- ThreadRegistry (per-thread, thread_local) auto-registers a thread on first hazard use.
 - RetireSet for deferred reclamation with threshold-based sweeping.
 - Benchmarks covering protect/try_protect, retire/reclaim, and contended scenarios.
 
@@ -119,7 +119,7 @@ cmake --build build --target HazardSystem_example
 ## Design Notes
 - BitmaskTable uses atomic 64-bit masks to find/free slots with `std::countr_zero`/`std::popcount`.
 - Size accounting increments only on 0→1 bit transitions and decrements on 1→0 to avoid double-counting.
-- HazardThreadManager auto-registers threads on first use.
+- ThreadRegistry is a per-thread (`thread_local`) instance whose constructor auto-registers the thread on first hazard use; its state is a single `std::thread::id` in thread-local storage.
 - RetireSet triggers reclamation when its threshold is exceeded; `reclaim_all()` forces a sweep.
 
 ### Fixed vs Dynamic

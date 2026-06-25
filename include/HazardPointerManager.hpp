@@ -216,6 +216,8 @@ class HazardPointerManager {
             }
             it_opt.value()->store_safe(protected_obj);
             //--------------------------
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            //--------------------------
             if (a_data.load(std::memory_order_acquire) == protected_obj) {
                 return create_protected_pointer(it_opt.value(), protected_obj);
             }// end if (a_data.load(std::memory_order_acquire) == protected_obj)
@@ -243,6 +245,11 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }
             it_opt.value()->store_safe(protected_obj.get());
+            //--------------------------
+            // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
+            // published hazard is globally visible before we re-read the source.
+            // Pairs with the reclaimer-side fence in RetireMap::scan_and_reclaim.
+            std::atomic_thread_fence(std::memory_order_seq_cst);
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                 T* ptr = protected_obj.get();
@@ -275,6 +282,12 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }
                 it_opt.value()->store(protected_obj, std::memory_order_release);
+                //--------------------------
+                // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
+                // published hazard is globally visible before we re-read the source.
+                // The plain release store above is not even an RMW, so this fence is
+                // what makes the retry path correct. Pairs with the reclaimer fence.
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
                 if (a_data.load(std::memory_order_acquire) == protected_obj) {
                     return create_protected_pointer(it_opt.value(), protected_obj);
@@ -311,6 +324,12 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }
                 it_opt.value()->store(protected_obj.get(), std::memory_order_release);
+                //--------------------------
+                // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
+                // published hazard is globally visible before we re-read the source.
+                // The plain release store above is not even an RMW, so this fence is
+                // what makes the retry path correct. Pairs with the reclaimer fence.
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
                     T* ptr = protected_obj.get();
