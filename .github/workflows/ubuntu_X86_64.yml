@@ -13,6 +13,8 @@ jobs:
 
     env:
       TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
+      ASAN_OPTIONS: detect_leaks=1
+      LSAN_OPTIONS: ""
 
     steps:
     - name: Checkout code
@@ -95,6 +97,6 @@ jobs:
       if: matrix.variant == 'release'
       run: ./build/benchmarkbin/HazardSystem_ProtectedPointer_Benchmark
 
-    - name: Run Hazard Registry Benchmarks
+    - name: Run RetireMap Benchmarks
       if: matrix.variant == 'release'
-      run: ./build/benchmarkbin/HazardSystem_HazardRegistry_Benchmark
+      run: ./build/benchmarkbin/HazardSystem_RetireMap_Benchmark
