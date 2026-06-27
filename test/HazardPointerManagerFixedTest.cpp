@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <thread>
 #include <vector>
 #include <atomic>
@@ -7,9 +6,7 @@
 #include <memory>
 #include <random>
 #include <algorithm>
-#include <future>
 #include <array>
-#include <numeric>
 #include <iostream>
 
 // Include the headers under test

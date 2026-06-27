@@ -128,37 +128,6 @@ TEST(BitmaskTableTest, MultiThreadedAcquireRelease) {
     }
 }
 
-// #if defined(__GNUC__) || defined(__clang__)
-// #pragma GCC diagnostic push
-// #pragma GCC diagnostic ignored "-Wconversion"
-// #pragma GCC diagnostic ignored "-Woverflow"
-// #endif
-
-// // Test: Out-of-bounds release and set
-// TEST(BitmaskTableTest, OutOfBoundsReleaseSet) {
-//     constexpr size_t N = 16;
-//     BitmaskTable<int, N> table;
-
-//     // Out-of-bounds: index == N (just beyond last valid)
-//     ASSERT_FALSE(table.release(N));
-//     ASSERT_FALSE(table.set(N, std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(N));
-//     ASSERT_FALSE(table.at(N).has_value());
-
-//     // Out-of-bounds: index way beyond
-//     ASSERT_FALSE(table.release(1000));
-//     ASSERT_FALSE(table.set(1000, std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(1000));
-//     ASSERT_FALSE(table.at(1000).has_value());
-
-//     // Out-of-bounds: negative numbers (if public API is size_t, static_cast will make these large values)
-//     ASSERT_FALSE(table.release(static_cast<size_t>(-1)));
-//     ASSERT_FALSE(table.set(static_cast<size_t>(-1), std::make_shared<int>(5)));
-//     ASSERT_FALSE(table.active(static_cast<size_t>(-1)));
-//     ASSERT_FALSE(table.at(static_cast<size_t>(-1)).has_value());
-// }
-
-
 // Test: Releasing already released slot
 TEST(BitmaskTableTest, DoubleRelease) {
     constexpr size_t N = 8;
@@ -630,71 +599,6 @@ TEST(BitmaskTableTest, SetEmplaceArrayMultiThread) {
         ASSERT_FALSE(table.at(idx));
     }
 }
-
-
-// TEST(BitmaskTableTest, RealWorldMixedOperations) {
-//     constexpr size_t N = 256;
-//     BitmaskTable<int, N> table;
-//     constexpr int threads = 32;
-//     constexpr int ops_per_thread = 500;
-//     std::vector<std::atomic<bool>> slot_in_use(N);
-
-//     // Make sure flags are initialized
-//     for (auto& flag : slot_in_use) flag = false;
-
-//     auto worker = [&](int tid) {
-//         thread_local std::mt19937 gen(std::random_device{}());
-//         std::uniform_int_distribution<int> op_dist(0, 2);
-//         std::vector<int> my_slots;
-
-//         for (int i = 0; i < ops_per_thread; ++i) {
-//             int op = op_dist(gen);
-
-//             if (op == 0 or my_slots.empty()) {
-//                 // Try to acquire
-//                 auto idx = table.acquire();
-//                 if (idx) {
-//                     if (slot_in_use[*idx].exchange(true)) {
-//                         ADD_FAILURE() << "Double allocation of slot " << *idx;
-//                     }
-//                     table.set(*idx, std::make_shared<int>(tid * 1000 + i));
-//                     my_slots.push_back(*idx);
-//                 }
-//             } else {
-//                 // Release random held slot
-//                 std::uniform_int_distribution<size_t> sdist(0, my_slots.size() - 1);
-//                 size_t idx_pos = sdist(gen);
-//                 int idx_val = my_slots[idx_pos];
-//                 ASSERT_TRUE(table.active(idx_val));
-//                 auto v = table.at(idx_val);
-//                 ASSERT_TRUE(v);
-//                 table.release(idx_val);
-//                 slot_in_use[idx_val].store(false);
-//                 std::swap(my_slots[idx_pos], my_slots.back());
-//                 my_slots.pop_back();
-//             }
-//         }
-//         // Clean up any leftovers
-//         for (int idx : my_slots) {
-//             table.release(idx);
-//             slot_in_use[idx].store(false);
-//         }
-//     };
-
-//     std::vector<std::thread> pool;
-//     pool.reserve(threads);
-//     for (int t = 0; t < threads; ++t)
-//         pool.emplace_back(worker, t);
-
-//     for (auto& t : pool) t.join();
-
-//     // After all threads complete, check for leaks/dangling
-//     for (size_t i = 0; i < N; ++i) {
-//         ASSERT_FALSE(table.active(i));
-//         ASSERT_FALSE(table.at(i));
-//         ASSERT_FALSE(slot_in_use[i]);
-//     }
-// }
 
 TEST(BitmaskTableTest, RealWorldMixedOperations) {
     constexpr size_t N = 256;
