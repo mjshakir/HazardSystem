@@ -1,11 +1,4 @@
-#------------------------------------------------------------------------------------------
-# verification/ — GenMC formal-verification harnesses registered as ctest tests.
-#
-# These are NOT compiled by the normal build: GenMC interprets each plain-C11
-# harness directly and exhaustively model-checks it.  Run with:
-#     cmake -S . -B build -DBUILD_HAZARDSYSTEM_VERIFICATION=ON
-#     ctest --test-dir build -L verify --output-on-failure
-#------------------------------------------------------------------------------------------
+
 find_program(GENMC_EXECUTABLE genmc)
 find_program(GENMC_CLANG NAMES clang-19 clang)
 
@@ -15,9 +8,6 @@ if(NOT GENMC_EXECUTABLE OR NOT GENMC_CLANG)
     return()
 endif()
 
-# GenMC auto-adds its own bundled headers; we suppress the host glibc headers
-# (whose aarch64 bits/types.h collides with GenMC's) and re-add clang's builtin
-# headers (stddef/stdint/stdbool) via the resource directory.
 execute_process(
     COMMAND ${GENMC_CLANG} -print-resource-dir
     OUTPUT_VARIABLE GENMC_CLANG_RESDIR
@@ -26,8 +16,6 @@ set(GENMC_CFLAGS -nostdinc -isystem "${GENMC_CLANG_RESDIR}/include")
 
 message(STATUS "HazardSystem verification: ${GENMC_EXECUTABLE} (clang ${GENMC_CLANG})")
 
-# hs_genmc_test(NAME <name> EXPECT <clean|viol> MODEL <rc11|sc|...> SOURCE <file>
-#               [GENMC_FLAGS ...] [DEFS ...] [LABELS ...])
 function(hs_genmc_test)
     cmake_parse_arguments(T "" "NAME;EXPECT;MODEL;SOURCE" "GENMC_FLAGS;DEFS;LABELS" ${ARGN})
     add_test(NAME ${T_NAME}
@@ -37,17 +25,13 @@ function(hs_genmc_test)
         # passes iff GenMC explored the whole state space with no error
         set_tests_properties(${T_NAME} PROPERTIES PASS_REGULAR_EXPRESSION "No errors were detected")
     else()
-        # "expected violation": a model-checked demonstration (fence necessity or
-        # the known registry bug).  Passes iff GenMC reports the violation; if the
-        # underlying code is changed so the violation disappears, this test FAILS,
-        # flagging that the documented property/bug status changed.
+
         set_tests_properties(${T_NAME} PROPERTIES
             PASS_REGULAR_EXPRESSION "Safety violation|Assertion violation|Liveness violation")
     endif()
     set_tests_properties(${T_NAME} PROPERTIES LABELS "verify;${T_LABELS}" TIMEOUT 300)
 endfunction()
 
-#-- Harness #1: core SMR safety (thread-safety + lock-freedom) -----------------------------
 hs_genmc_test(NAME verify_smr_baseline       EXPECT clean MODEL rc11 SOURCE smr_safety.c
               GENMC_FLAGS --check-liveness DEFS -DCONFIG_A=1 LABELS verify_safe)
 hs_genmc_test(NAME verify_smr_baseline_sc    EXPECT clean MODEL sc   SOURCE smr_safety.c
@@ -61,37 +45,93 @@ hs_genmc_test(NAME verify_smr_reclaim_fence  EXPECT viol  MODEL rc11 SOURCE smr_
 hs_genmc_test(NAME verify_smr_downgrade      EXPECT viol  MODEL rc11 SOURCE smr_safety.c
               DEFS -DCONFIG_A=1 -DDOWNGRADE_FENCE=1 LABELS verify_evidence)
 
-#-- Harness #2: (historical) HazardRegistry correctness ------------------------------------
+hs_genmc_test(NAME verify_inverted_baseline      EXPECT clean MODEL rc11 SOURCE smr_inverted.c
+              GENMC_FLAGS --check-liveness DEFS -DNNODES=1 LABELS verify_safe)
+hs_genmc_test(NAME verify_inverted_baseline_sc   EXPECT clean MODEL sc   SOURCE smr_inverted.c
+              DEFS -DNNODES=1 LABELS verify_safe)
+hs_genmc_test(NAME verify_inverted_multi         EXPECT clean MODEL rc11 SOURCE smr_inverted.c
+              GENMC_FLAGS --check-liveness DEFS -DNNODES=2 LABELS verify_safe)
+hs_genmc_test(NAME verify_inverted_multi_sc      EXPECT clean MODEL sc   SOURCE smr_inverted.c
+              DEFS -DNNODES=2 LABELS verify_safe)
+# Evidence: both seq_cst fences are load-bearing for the inverted predicate too.
+hs_genmc_test(NAME verify_inverted_reader_fence  EXPECT viol  MODEL rc11 SOURCE smr_inverted.c
+              DEFS -DNNODES=1 -DWITH_READER_FENCE=0 LABELS verify_evidence)
+hs_genmc_test(NAME verify_inverted_reclaim_fence EXPECT viol  MODEL rc11 SOURCE smr_inverted.c
+              DEFS -DNNODES=1 -DWITH_RECLAIMER_FENCE=0 LABELS verify_evidence)
+hs_genmc_test(NAME verify_inverted_downgrade     EXPECT viol  MODEL rc11 SOURCE smr_inverted.c
+              DEFS -DNNODES=1 -DDOWNGRADE_FENCE=1 LABELS verify_evidence)
+
+hs_genmc_test(NAME verify_slot_reuse           EXPECT clean MODEL rc11 SOURCE smr_slot_reuse.c
+              GENMC_FLAGS --check-liveness DEFS -DNNODES=2 LABELS verify_safe)
+hs_genmc_test(NAME verify_slot_reuse_sc        EXPECT clean MODEL sc   SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 LABELS verify_safe)
+hs_genmc_test(NAME verify_slot_reuse_reader_fence  EXPECT viol MODEL rc11 SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 -DWITH_READER_FENCE=0 LABELS verify_evidence)
+hs_genmc_test(NAME verify_slot_reuse_reclaim_fence EXPECT viol MODEL rc11 SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 -DWITH_RECLAIMER_FENCE=0 LABELS verify_evidence)
+hs_genmc_test(NAME verify_slot_reuse_downgrade     EXPECT viol MODEL rc11 SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 -DDOWNGRADE_FENCE=1 LABELS verify_evidence)
+hs_genmc_test(NAME verify_slot_reuse_no_exclusion  EXPECT viol MODEL rc11 SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 -DNO_REUSE_EXCLUSION=1 LABELS verify_evidence)
+
+hs_genmc_test(NAME verify_reacquire_live       EXPECT clean MODEL rc11 SOURCE reacquire_live.c
+              GENMC_FLAGS --check-liveness --unroll=4 LABELS verify_safe)
+
+hs_genmc_test(NAME verify_bitmask_largeN_scan       EXPECT clean MODEL rc11 SOURCE bitmask_largeN_scan.c
+              LABELS verify_safe)
+hs_genmc_test(NAME verify_bitmask_largeN_scan_sc    EXPECT clean MODEL sc   SOURCE bitmask_largeN_scan.c
+              LABELS verify_safe)
+hs_genmc_test(NAME verify_bitmask_largeN_wrongorder EXPECT viol  MODEL rc11 SOURCE bitmask_largeN_scan.c
+              DEFS -DWRONG_ORDER=1 LABELS verify_evidence)
+
 hs_genmc_test(NAME verify_reg_hb_contains    EXPECT clean MODEL rc11 SOURCE registry_lin.c
               GENMC_FLAGS --unroll=6 DEFS -DVARIANT=1 LABELS verify_historical)
 hs_genmc_test(NAME verify_reg_double_add      EXPECT clean MODEL rc11 SOURCE registry_lin.c
               GENMC_FLAGS --unroll=6 DEFS -DVARIANT=2 LABELS verify_historical)
 hs_genmc_test(NAME verify_reg_tombstone       EXPECT clean MODEL rc11 SOURCE registry_lin.c
               GENMC_FLAGS --unroll=6 DEFS -DVARIANT=3 LABELS verify_historical)
-# The bug that justified the removal: contains() false-negative under a concurrent
-# same-pointer add/remove refcount race.
 hs_genmc_test(NAME verify_reg_refcount_bug    EXPECT viol  MODEL rc11 SOURCE registry_lin.c
               GENMC_FLAGS --unroll=6 DEFS -DVARIANT=4 LABELS verify_historical)
 
-#-- Harness #1b: (historical) end-to-end UAF from the removed registry ---------------------
 hs_genmc_test(NAME verify_registry_uaf_sc     EXPECT viol  MODEL sc   SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_historical)
 hs_genmc_test(NAME verify_registry_uaf_rc11   EXPECT viol  MODEL rc11 SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=1 LABELS verify_historical)
 
-#-- CURRENT design: reclaimer scans per-thread hazard slots (the shipping fix) -------------
+
+hs_genmc_test(NAME verify_reduce_store_safe_release  EXPECT clean MODEL rc11 SOURCE smr_safety.c
+              GENMC_FLAGS --check-liveness DEFS -DCONFIG_A=0 -DWEAKEN_STORE_SAFE_CAS=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_reduce_publish_bit_release EXPECT clean MODEL rc11 SOURCE bitmask_largeN_scan.c
+              DEFS -DWEAKEN_PUBLISH_BIT=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_reduce_clear_bit_release   EXPECT clean MODEL rc11 SOURCE smr_slot_reuse.c
+              GENMC_FLAGS --check-liveness DEFS -DNNODES=2 -DWEAKEN_CLEAR_BIT=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_reduce_scan_relaxed_fenced EXPECT clean MODEL rc11 SOURCE smr_inverted.c
+              GENMC_FLAGS --check-liveness DEFS -DNNODES=2 -DWEAKEN_SCAN_LOADS=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_reduce_revalidate_relaxed  EXPECT clean MODEL rc11 SOURCE smr_safety.c
+              GENMC_FLAGS --check-liveness DEFS -DCONFIG_A=0 -DWEAKEN_REVALIDATE_LOAD=1 LABELS verify_reduction)
+
+
+hs_genmc_test(NAME verify_floor_acquire_cas    EXPECT viol MODEL rc11 SOURCE bitmask_excl.c
+              GENMC_FLAGS --check-liveness --unroll=4 DEFS -DVARIANT=1 -DWEAKEN_ACQUIRE_CAS=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_floor_publish_bit    EXPECT viol MODEL rc11 SOURCE bitmask_largeN_scan.c
+              DEFS -DWEAKEN_PUBLISH_BIT=2 LABELS verify_reduction)
+hs_genmc_test(NAME verify_floor_clear_bit      EXPECT viol MODEL rc11 SOURCE smr_slot_reuse.c
+              DEFS -DNNODES=2 -DWEAKEN_CLEAR_BIT=2 LABELS verify_reduction)
+hs_genmc_test(NAME verify_floor_scan_unfenced  EXPECT viol MODEL rc11 SOURCE bitmask_largeN_scan.c
+              DEFS -DWEAKEN_SCAN_LOADS=1 LABELS verify_reduction)
+hs_genmc_test(NAME verify_floor_reacquire_cas  EXPECT viol MODEL rc11 SOURCE reacquire_live.c
+              GENMC_FLAGS --check-liveness --unroll=4 DEFS -DWEAKEN_REACQUIRE_CAS=1 LABELS verify_reduction)
+
 hs_genmc_test(NAME verify_slots_fix_sc        EXPECT clean MODEL sc   SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 LABELS verify_safe)
 hs_genmc_test(NAME verify_slots_fix_rc11      EXPECT clean MODEL rc11 SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 LABELS verify_safe)
-# Bit-gated scan: mirrors the shipping HazardPointerManager::is_hazard, which uses
-# BitmaskTable::for_each (read the slot's active bit, then its pointer).
+
 hs_genmc_test(NAME verify_slots_bitgated_sc   EXPECT clean MODEL sc   SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 LABELS verify_safe)
 hs_genmc_test(NAME verify_slots_bitgated_rc11 EXPECT clean MODEL rc11 SOURCE smr_registry_uaf.c
               GENMC_FLAGS --unroll=6 DEFS -DUSE_REGISTRY=0 -DSCAN_BITGATED=1 LABELS verify_safe)
 
-#-- Harness #3: BitmaskTable slot mutual exclusion -----------------------------------------
 hs_genmc_test(NAME verify_bitmask_distinct    EXPECT clean MODEL rc11 SOURCE bitmask_excl.c
               GENMC_FLAGS --check-liveness --unroll=4 DEFS -DVARIANT=1 LABELS verify_safe)
 hs_genmc_test(NAME verify_bitmask_full        EXPECT clean MODEL rc11 SOURCE bitmask_excl.c
