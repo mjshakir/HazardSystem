@@ -45,9 +45,9 @@ public:
 
 protected:
     void rebuild(void) {
-        auto always = std::make_shared<std::function<bool(const Node*)>>(
-            [](const Node*) { return true; });
-        m_map = std::make_unique<RetireMap<Node>>(m_n * 2UL, always);
+        auto no_hazards = std::make_shared<RetireMap<Node>::HazardScan>(
+            [](const RetireMap<Node>::HazardVisit&) {});
+        m_map = std::make_unique<RetireMap<Node>>(m_n * 2UL, no_hazards);
         m_raws.clear();
         m_raws.reserve(m_n);
         for (size_t i = 0; i < m_n; ++i) {
@@ -105,9 +105,9 @@ BENCHMARK_DEFINE_F(RetireMapScanFixture, Scan)(benchmark::State& state) {
     uint64_t lcg = 0x9E3779B97F4A7C15ULL;
     for (auto _ : state) {
         state.PauseTiming();
-        auto always = std::make_shared<std::function<bool(const Node*)>>(
-            [](const Node*) { return true; });
-        RetireMap<Node> m(m_n * 2UL, always);
+        auto no_hazards = std::make_shared<RetireMap<Node>::HazardScan>(
+            [](const RetireMap<Node>::HazardVisit&) {});
+        RetireMap<Node> m(m_n * 2UL, no_hazards);
         for (size_t i = 0; i < m_n; ++i) {
             m.retire(new Node(static_cast<int>(i)));
         }
@@ -139,11 +139,15 @@ public:
     void SetUp(const ::benchmark::State& state) override {
         m_threshold = static_cast<size_t>(state.range(0));
         m_lcg = 0x9E3779B97F4A7C15ULL;
-        // Hazard predicate keeps ~50% so reclaim succeeds and retire can keep flowing.
-        auto half = std::make_shared<std::function<bool(const Node*)>>(
-            [this](const Node*) {
-                m_lcg = m_lcg * 6364136223846793005ULL + 1442695040888963407ULL;
-                return (m_lcg & 1ULL) != 0;
+        auto half = std::make_shared<RetireMap<Node>::HazardScan>(
+            [this](const RetireMap<Node>::HazardVisit& visit) {
+                for (const auto& [ptr, owner] : *m_map) {
+                    static_cast<void>(owner);
+                    m_lcg = m_lcg * 6364136223846793005ULL + 1442695040888963407ULL;
+                    if ((m_lcg & 1ULL) != 0) {
+                        visit(ptr);
+                    }
+                }
             });
         m_map = std::make_unique<RetireMap<Node>>(m_threshold, half);
     }
