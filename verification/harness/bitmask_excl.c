@@ -18,6 +18,30 @@
 #define VARIANT 1
 #endif
 
+/* atomic-reduction sweep toggles (exclusion/release context only — no scanner consumes
+ * the slot pointer here, so a 'clean' verdict certifies the EXCLUSION property, not the
+ * end-to-end publish/scan edge). C2: acquire_data claim CAS; C4: release clear-bit RMW. */
+#ifndef WEAKEN_ACQUIRE_CAS
+#define WEAKEN_ACQUIRE_CAS 0
+#endif
+#if   WEAKEN_ACQUIRE_CAS==1
+#define ACQUIRE_CAS_ORDER memory_order_release
+#elif WEAKEN_ACQUIRE_CAS==2
+#define ACQUIRE_CAS_ORDER memory_order_relaxed
+#else
+#define ACQUIRE_CAS_ORDER memory_order_acq_rel
+#endif
+#ifndef WEAKEN_CLEAR_BIT
+#define WEAKEN_CLEAR_BIT 0
+#endif
+#if   WEAKEN_CLEAR_BIT==1
+#define CLEAR_BIT_ORDER memory_order_release
+#elif WEAKEN_CLEAR_BIT==2
+#define CLEAR_BIT_ORDER memory_order_relaxed
+#else
+#define CLEAR_BIT_ORDER memory_order_acq_rel
+#endif
+
 #if VARIANT == 2
 #define NSLOTS 1u
 #else
@@ -37,7 +61,7 @@ static int acquire_slot(void) {
         uint64_t flag = 1ULL << index;
         uint64_t desired = mask | flag;
         if (atomic_compare_exchange_weak_explicit(&bitmask, &mask, desired,
-                memory_order_acq_rel, memory_order_relaxed)) {
+                ACQUIRE_CAS_ORDER, memory_order_relaxed)) {       /* C2 */
             atomic_fetch_add_explicit(&m_size, 1, memory_order_relaxed);
             return index;                                    /* mask refreshed on failure */
         }
@@ -48,7 +72,7 @@ static int acquire_slot(void) {
 /* port of release_data (BitmaskTable.hpp:441-472, small case) */
 static int release_slot(int index) {
     uint64_t bit = 1ULL << index;
-    uint64_t old = atomic_fetch_and_explicit(&bitmask, ~bit, memory_order_acq_rel);
+    uint64_t old = atomic_fetch_and_explicit(&bitmask, ~bit, CLEAR_BIT_ORDER);   /* C4 */
     assert((old & bit) != 0);                                /* releasing an unset bit = bug */
     atomic_fetch_sub_explicit(&m_size, 1, memory_order_relaxed);
     return 1;
