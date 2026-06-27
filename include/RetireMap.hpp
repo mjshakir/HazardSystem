@@ -5,6 +5,7 @@
 //--------------------------------------------------------------
 #include <atomic>
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <expected>
 #include <functional>
@@ -83,6 +84,9 @@ namespace HazardSystem {
             // Caller supplies the predicate, so this can never fail; returns the
             // number of reclaimed pointers (0 valid).
             template<class Pred>
+                requires requires(Pred&& pred, const T* node) {
+                    { pred(node) } -> std::convertible_to<bool>;
+                }
             size_t reclaim_with(Pred&& hazard_view) {
                 return scan_and_reclaim(std::forward<Pred>(hazard_view));
             }// end size_t reclaim_with(Pred&&)
@@ -164,6 +168,9 @@ namespace HazardSystem {
             }// end size_t reclaim_against(const HazardScan&)
             //--------------------------
             template<class Pred>
+                requires requires(Pred&& pred, const T* node) {
+                    { pred(node) } -> std::convertible_to<bool>;
+                }
             size_t scan_and_reclaim(Pred&& hazard_view) {
                 //--------------------------
                 std::atomic_thread_fence(std::memory_order_seq_cst);
