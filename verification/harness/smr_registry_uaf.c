@@ -1,11 +1,16 @@
 /* smr_registry_uaf.c — GenMC harness #1b: end-to-end use-after-free driven by
  * the HazardRegistry refcount race that harness #2 VARIANT 4 isolates.
  *
- * This wires the *real* refcounted registry (faithful port of
- * HazardRegistry::{add,remove,contains}_local, include/HazardRegistry.hpp:62-181)
- * into the SMR reclaim path WITH BOTH seq_cst fences present (HPM:219 reader,
- * RetireMap:152 reclaimer).  The fences are deliberately included so that any
- * violation found is purely the registry *logic* bug, not a missing barrier.
+ * HISTORICAL: HazardRegistry was deleted in ce998a7; the USE_REGISTRY=1 path is
+ * retained only to document the bug that justified its removal.  The
+ * USE_REGISTRY=0 (per-thread slots) path is the shipping design.
+ *
+ * This wires the *real* refcounted registry (faithful port of the removed
+ * HazardRegistry::{add,remove,contains}_local) into the SMR reclaim path WITH
+ * BOTH seq_cst fences present (HazardPointerManager.hpp:203 reader,
+ * RetireMap.hpp:164 reclaim_against).  The fences are deliberately included so
+ * that any violation found is purely the registry *logic* bug, not a missing
+ * barrier.
  *
  * Scenario (two threads protect the SAME node, the normal HP case):
  *   Reader A : protects P and keeps it  -> must safely dereference P
@@ -163,7 +168,7 @@ static void *readerA(void *a) {
     Node *p = atomic_load_explicit(&source, memory_order_acquire);
     if (!p) return NULL;
     if (!publish(0, p)) return NULL;               /* publish hazard on p */
-    atomic_thread_fence(memory_order_seq_cst);     /* HPM:219 */
+    atomic_thread_fence(memory_order_seq_cst);     /* HazardPointerManager.hpp:203 */
     if (atomic_load_explicit(&source, memory_order_acquire) == p) {
         /* validated: A holds a live hazard on p and dereferences it */
         assert(atomic_load_explicit(&p->freed, memory_order_relaxed) == 0); /* SAFETY */
@@ -184,14 +189,14 @@ static void *readerB(void *a) {
 }
 
 /* Reclaimer: unlink the node from the shared source (so it becomes retirable),
- * then scan_and_reclaim — fence then free iff scan says unprotected.  The
+ * then reclaim_against — fence then free iff scan says unprotected.  The
  * source-swap is the protocol precondition that makes Reader A's re-validation
  * meaningful; without it a still-linked node would be freed (a harness bug, not
  * a library bug). */
 static void *reclaimer(void *a) {
     (void)a;
     atomic_store_explicit(&source, NULL, memory_order_release);  /* unlink/retire P */
-    atomic_thread_fence(memory_order_seq_cst);     /* RetireMap:152 */
+    atomic_thread_fence(memory_order_seq_cst);     /* RetireMap.hpp:164 (reclaim_against) */
     if (!protected_now(P))                          /* the reclaim predicate */
         atomic_store_explicit(&n0.freed, 1, memory_order_relaxed);  /* delete() */
     return NULL;

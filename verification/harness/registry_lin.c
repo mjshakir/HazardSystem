@@ -1,12 +1,16 @@
-/* registry_lin.c — GenMC harness #2: HazardRegistry correctness.
+/* registry_lin.c — GenMC harness #2 (HISTORICAL): HazardRegistry correctness.
  *
- * The reclaimer's safety (harness #1, CONFIG_A) depends on the open-addressing
- * registry being correct: a hazard that was added (and ordered before a scan)
- * must be observed by contains(), and the tombstone/refcount probe machinery
- * must never lose or resurrect a pointer.
+ * HISTORICAL — HazardRegistry.hpp was deleted in ce998a7.  This harness is kept
+ * to document the refcount race (VARIANT=4) that justified replacing the shared
+ * registry with per-thread hazard slots.  It does not model any shipping code.
  *
- * Faithful plain-C11 port of HazardRegistry::{add,remove,contains}_local
- * (include/HazardRegistry.hpp:62-181), over a CAP=4 table with the hash
+ * Back when the registry existed, the reclaimer's safety (harness #1, CONFIG_A)
+ * depended on the open-addressing registry being correct: a hazard that was
+ * added (and ordered before a scan) had to be observed by contains(), and the
+ * tombstone/refcount probe machinery had to never lose or resurrect a pointer.
+ *
+ * Faithful plain-C11 port of the removed HazardRegistry::{add,remove,contains}
+ * _local, over a CAP=4 table with the hash
  * collapsed to 0 so the test pointers deliberately COLLIDE — forcing the
  * probe + tombstone paths that are the interesting (buggy-if-wrong) cases.
  *
@@ -37,7 +41,7 @@ static _Atomic(unsigned)  counts[CAP];
  * exercising the exact probe/tombstone logic of the real registry. */
 static size_t reg_hash(const void *p) { (void)p; return 0; }
 
-/* ---- port of add_local (HazardRegistry.hpp:62-105) ----------------------- */
+/* ---- port of the removed HazardRegistry::add_local ----------------------- */
 static int reg_add(void *ptr) {
     if (!ptr) return 0;
     void *tomb = TOMB;
@@ -70,7 +74,7 @@ static int reg_add(void *ptr) {
     return 0;
 }
 
-/* ---- port of remove_local (HazardRegistry.hpp:107-154) ------------------- */
+/* ---- port of the removed HazardRegistry::remove_local -------------------- */
 static int reg_remove(void *ptr) {
     if (!ptr) return 0;
     void *tomb = TOMB;
@@ -97,7 +101,7 @@ static int reg_remove(void *ptr) {
     return 0;
 }
 
-/* ---- port of contains_local (HazardRegistry.hpp:156-181) ----------------- */
+/* ---- port of the removed HazardRegistry::contains_local ------------------ */
 static int reg_contains(const void *ptr) {
     if (!ptr) return 0;
     size_t h = reg_hash(ptr);
