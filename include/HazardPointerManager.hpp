@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdbool>
 #include <cassert>
-#include <vector>
 #include <functional>
 #include <atomic>
 #include <memory>
@@ -14,7 +13,6 @@
 #include <algorithm>
 #include <utility>
 #include <bit>
-#include <unordered_set>
 //--------------------------------------------------------------
 // User Defined Headers
 //--------------------------------------------------------------
@@ -24,7 +22,6 @@
 #include "ProtectedPointer.hpp"
 #include "BitmaskTable.hpp"
 #include "RetireMap.hpp"
-#include "HazardRegistry.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
 //--------------------------------------------------------------
@@ -138,9 +135,7 @@ class HazardPointerManager {
             requires (N > 0)
         HazardPointerManager(const size_t& retired_size) : m_retired_threshold(retired_size * 8UL),
                                                           m_hazard_pointers(),
-                                                          m_registry(hazard_limiter(m_hazard_pointers.capacity())),
-                                                          m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
-                                                              [this](const T* p){ return is_hazard(p); })) {
+                                                          m_hazard_scan(make_hazard_scan()) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -149,9 +144,7 @@ class HazardPointerManager {
         HazardPointerManager(   const size_t& hazards_size,
                                 const size_t& retired_size) :   m_retired_threshold(retired_size * 8UL),
                                                                 m_hazard_pointers(hazard_limiter(hazards_size)),
-                                                                m_registry(hazard_limiter(m_hazard_pointers.capacity())),
-                                                                m_is_hazard_fn(std::make_shared<std::function<bool(const T*)>>(
-                                                                    [this](const T* p){ return is_hazard(p); })) {
+                                                                m_hazard_scan(make_hazard_scan()) {
             //--------------------------
         } // end HazardPointerManager(void)
         //--------------------------
@@ -173,11 +166,6 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            if (!m_registry.add(data)) {
-                // Slot is acquired but still empty; just release it.
-                release_data_iterator(it_opt.value());
-                return ProtectedPointer<T>();
-            }
             it_opt.value()->store(data, std::memory_order_release);
             //--------------------------
             return create_protected_pointer(it_opt.value(), data);
@@ -210,10 +198,6 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!protected_obj)
             //--------------------------
-            if (!m_registry.add(protected_obj)) {
-                release_data_iterator(it_opt.value());
-                return ProtectedPointer<T>();
-            }
             it_opt.value()->store_safe(protected_obj);
             //--------------------------
             std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -240,15 +224,8 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!protected_obj)
             //--------------------------
-            if (!m_registry.add(protected_obj.get())) {
-                release_data_iterator(it_opt.value());
-                return ProtectedPointer<T>();
-            }
             it_opt.value()->store_safe(protected_obj.get());
             //--------------------------
-            // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
-            // published hazard is globally visible before we re-read the source.
-            // Pairs with the reclaimer-side fence in RetireMap::scan_and_reclaim.
             std::atomic_thread_fence(std::memory_order_seq_cst);
             //--------------------------
             if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
@@ -277,16 +254,8 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
-                if (!m_registry.add(protected_obj)) {
-                    release_data_iterator(it_opt.value());
-                    return ProtectedPointer<T>();
-                }
                 it_opt.value()->store(protected_obj, std::memory_order_release);
                 //--------------------------
-                // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
-                // published hazard is globally visible before we re-read the source.
-                // The plain release store above is not even an RMW, so this fence is
-                // what makes the retry path correct. Pairs with the reclaimer fence.
                 std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
                 if (a_data.load(std::memory_order_acquire) == protected_obj) {
@@ -295,7 +264,6 @@ class HazardPointerManager {
                 //--------------------------
                 // Drop our hazard before retrying
                 it_opt.value()->store(nullptr, std::memory_order_release);
-                m_registry.remove(protected_obj);
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
             //--------------------------
             release_data_iterator(it_opt.value());
@@ -319,16 +287,8 @@ class HazardPointerManager {
                     return ProtectedPointer<T>();
                 }// end if (!protected_obj)
                 //--------------------------
-                if (!m_registry.add(protected_obj.get())) {
-                    release_data_iterator(it_opt.value());
-                    return ProtectedPointer<T>();
-                }
                 it_opt.value()->store(protected_obj.get(), std::memory_order_release);
                 //--------------------------
-                // Hazard-pointer publish/validate handshake: a StoreLoad fence so the
-                // published hazard is globally visible before we re-read the source.
-                // The plain release store above is not even an RMW, so this fence is
-                // what makes the retry path correct. Pairs with the reclaimer fence.
                 std::atomic_thread_fence(std::memory_order_seq_cst);
                 //--------------------------
                 if (a_sp_data.load(std::memory_order_acquire) == protected_obj) {
@@ -338,7 +298,6 @@ class HazardPointerManager {
                 //--------------------------
                 // Drop our hazard before retrying
                 it_opt.value()->store(nullptr, std::memory_order_release);
-                m_registry.remove(protected_obj.get());
             }// end for (size_t attempt = 0; attempt < max_retries; ++attempt)
             //--------------------------
             release_data_iterator(it_opt.value());
@@ -349,7 +308,9 @@ class HazardPointerManager {
         ProtectedPointer<T> create_protected_pointer(typename BitmaskType::iterator it,
                                                     T* protected_obj,
                                                     std::shared_ptr<T> owner = nullptr) {
-            return ProtectedPointer<T>(protected_obj, std::bind(&HazardPointerManager::release_data_iterator, this, std::move(it)), std::move(owner));
+            return ProtectedPointer<T>(protected_obj,
+                                       [this, it]() noexcept { return release_data_iterator(it); },
+                                       std::move(owner));
         }// end ProtectedPointer<T> create_protected_pointer(...)
         //--------------------------
         ProtectedPointer<T> protect_with_owner(T* ptr, std::shared_ptr<T> owner) {
@@ -363,11 +324,6 @@ class HazardPointerManager {
                 return ProtectedPointer<T>();
             }// end if (!it_opt)
             //--------------------------
-            if (!m_registry.add(ptr)) {
-                // Slot is acquired but still empty; just release it.
-                release_data_iterator(it_opt.value());
-                return ProtectedPointer<T>();
-            }
             it_opt.value()->store(ptr, std::memory_order_release);
             //--------------------------
             return create_protected_pointer(it_opt.value(), ptr, std::move(owner));
@@ -384,15 +340,9 @@ class HazardPointerManager {
         //--------------------------
         bool release_data_iterator(typename BitmaskType::iterator it) {
             //--------------------------
-            T* ptr = it->load(std::memory_order_acquire);
-            // Clear the hazard slot first, then drop from registry.
-            const bool cleared = m_hazard_pointers.set(it, nullptr);
-            if (ptr) {
-                m_registry.remove(ptr);
-            }
-            return cleared;
+            return m_hazard_pointers.set(it, nullptr);
             //--------------------------
-        } // end bool release_data(const std::pair<std::optional<IndexType>, std::shared_ptr<HazardPointer<T>>>& hp)
+        } // end bool release_data_iterator(typename BitmaskType::iterator it)
         //--------------------------
         std::expected<void, RetireError> retire_node(T* node) {
             if (!node) {
@@ -408,19 +358,21 @@ class HazardPointerManager {
             return retired_nodes().retire(std::move(node));
         }// end std::expected<void, RetireError> retire_node(std::shared_ptr<T> node)
         //--------------------------
-        bool is_hazard(const T* node) const {
+        std::shared_ptr<typename RetireMap<T>::HazardScan> make_hazard_scan(void) {
             //--------------------------
-            if (!node) {
-                return false;
-            }// end if (!node)
+            return std::make_shared<typename RetireMap<T>::HazardScan>(
+                [this](const typename RetireMap<T>::HazardVisit& visit){
+                    m_hazard_pointers.for_each([&visit](auto, T* ptr){
+                        if (ptr) {
+                            visit(ptr);
+                        }// end if (ptr)
+                    });
+                });
             //--------------------------
-            return m_registry.contains(node);
-        } // end bool is_hazard(const T* node)
+        } // end std::shared_ptr<RetireMap<T>::HazardScan> make_hazard_scan(void)
         //--------------------------
         void scan_and_reclaim(void) {
-            retired_nodes().reclaim_with([this](const T* ptr) {
-                return m_registry.contains(ptr);
-            });
+            static_cast<void>(retired_nodes().reclaim());
         } // end void scan_and_reclaim(void)
         //--------------------------
         void scan_and_reclaim_all(void) {
@@ -429,7 +381,6 @@ class HazardPointerManager {
         //--------------------------
         void clear_data(void) {
             m_hazard_pointers.clear();
-            m_registry.clear();
             retired_nodes().clear();
         } // end void clear_data(void)
         //--------------------------
@@ -440,7 +391,7 @@ class HazardPointerManager {
         //--------------------------
         RetireMap<T>& retired_nodes(void) const {
             //--------------------------
-            static thread_local RetireMap<T> tls_retired(m_retired_threshold, m_is_hazard_fn);
+            static thread_local RetireMap<T> tls_retired(m_retired_threshold, m_hazard_scan);
             //--------------------------
             return tls_retired;
             //--------------------------
@@ -450,10 +401,7 @@ class HazardPointerManager {
         //--------------------------------------------------------------
         const size_t m_retired_threshold;
         BitmaskType m_hazard_pointers;
-        HazardRegistry<T> m_registry;
-        // Built once in the constructor and shared with every per-thread RetireMap.
-        // The captured `this` means the manager must outlive any thread that called retired_nodes().
-        std::shared_ptr<std::function<bool(const T*)>> m_is_hazard_fn;
+        std::shared_ptr<typename RetireMap<T>::HazardScan> m_hazard_scan;
         //--------------------------------------------------------------
     }; // end class HazardPointerManager
 //--------------------------------------------------------------

@@ -100,6 +100,8 @@ option(BUILD_HAZARDSYSTEM_SHARED_LIBS "Build using shared libraries" ON)
 option(BUILD_HAZARDSYSTEM_EXAMPLE "Build HazardSystem example" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_TESTS "Build HazardSystem tests" ${HAZARDSYSTEM_STANDALONE_PROJECT})
 option(BUILD_HAZARDSYSTEM_BENCHMARK "Build HazardSystem benchmarks" ${HAZARDSYSTEM_STANDALONE_PROJECT})
+option(BUILD_HAZARDSYSTEM_VERIFICATION "Register GenMC formal-verification harnesses as ctest tests (requires genmc)." OFF)
+option(BUILD_HAZARDSYSTEM_CBMC "Register CBMC sequential reclaim-logic harnesses as ctest tests (requires cbmc)." OFF)
 set(HAS_TBB OFF CACHE BOOL "Set to TRUE if TBB is found, otherwise FALSE")
 #------------------------------------------------------------------------------------------
 # Force colored output
@@ -209,6 +211,18 @@ endif()
 if(BUILD_HAZARDSYSTEM_TESTS AND HAZARDSYSTEM_STANDALONE_PROJECT)
     enable_testing()
     add_subdirectory(test)
+endif()
+#------------------------------------------------------------------------------------------
+# Register the GenMC formal-verification harnesses (opt-in; requires genmc + clang)
+if(BUILD_HAZARDSYSTEM_VERIFICATION AND HAZARDSYSTEM_STANDALONE_PROJECT)
+    enable_testing()
+    add_subdirectory(verification)
+endif()
+#------------------------------------------------------------------------------------------
+# Register the CBMC sequential-logic harnesses (opt-in; requires cbmc)
+if(BUILD_HAZARDSYSTEM_CBMC AND HAZARDSYSTEM_STANDALONE_PROJECT)
+    enable_testing()
+    add_subdirectory(verification/cbmc)
 endif()
 #------------------------------------------------------------------------------------------
 # Enable benchmarks and add the benchmark directory if this is a standalone project

@@ -5,11 +5,13 @@
 //--------------------------------------------------------------
 #include <atomic>
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <expected>
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 //--------------------------------------------------------------
 // HazardSystem
 //--------------------------------------------------------------
@@ -17,12 +19,6 @@
 #include "Error.hpp"
 //--------------------------------------------------------------
 namespace HazardSystem {
-    //--------------------------------------------------------------
-    // RetireMap is the per-thread bag of pointers awaiting safe
-    // reclamation. It publicly inherits std::unordered_map so the
-    // standard map API (find, erase, reserve, begin, ...) is directly
-    // available; the wrapper-only retire / reclaim methods add the
-    // hazard-aware logic on top.
     //--------------------------------------------------------------
     template<typename T>
     class RetireMap : public std::unordered_map<T*, std::unique_ptr<T, Deleter<T>>> {
@@ -43,8 +39,11 @@ namespace HazardSystem {
             //--------------------------------------------------------------
             using SharedFn = typename Deleter<T>::SharedFn;
             //--------------------------
+            using HazardVisit = std::function<void(const T*)>;
+            using HazardScan  = std::function<void(const HazardVisit&)>;
+            //--------------------------
             explicit RetireMap( const size_t& threshold,
-                                std::shared_ptr<std::function<bool(const T*)>> hazard) 
+                                std::shared_ptr<HazardScan> hazard)
                                     :   Base(),
                                         m_threshold(std::bit_ceil(threshold)),
                                         m_hazard(std::move(hazard)) {
@@ -75,19 +74,19 @@ namespace HazardSystem {
                 return retire_shared(std::move(owner));
             }// end std::expected<void, RetireError> retire(std::shared_ptr<T> owner)
             //--------------------------
-            // Reclaims using the installed hazard predicate. The success value is
-            // the number of reclaimed pointers (0 is a valid result); the error
-            // channel distinguishes "no hazard function" from "reclaimed nothing".
             std::expected<size_t, RetireError> reclaim(void) {
                 if (!m_hazard) {
                     return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
                 }// end if (!m_hazard)
-                return scan_and_reclaim([h = m_hazard](const T* p){ return (*h)(p); });
+                return reclaim_against(*m_hazard);
             }// end std::expected<size_t, RetireError> reclaim(void)
             //--------------------------
             // Caller supplies the predicate, so this can never fail; returns the
             // number of reclaimed pointers (0 valid).
             template<class Pred>
+                requires requires(Pred&& pred, const T* node) {
+                    { pred(node) } -> std::convertible_to<bool>;
+                }
             size_t reclaim_with(Pred&& hazard_view) {
                 return scan_and_reclaim(std::forward<Pred>(hazard_view));
             }// end size_t reclaim_with(Pred&&)
@@ -108,10 +107,9 @@ namespace HazardSystem {
                     if (!m_hazard) {
                         return std::unexpected(RetireError::NO_HAZARD_FUNCTION);
                     }// end if (!m_hazard)
-                    auto h = m_hazard;
-                    if (scan_and_reclaim([h](const T* p){ return (*h)(p); }) == 0UL) {
+                    if (reclaim_against(*m_hazard) == 0UL) {
                         return std::unexpected(RetireError::RECLAIM_FAILED);
-                    }// end if (scan_and_reclaim(...) == 0UL)
+                    }// end if (reclaim_against(*m_hazard) == 0UL)
                 }// end if (Base::size() >= m_threshold)
                 //--------------------------
                 if (should_resize()) {
@@ -143,10 +141,36 @@ namespace HazardSystem {
                 return retire_data(ptr, Deleter<T>(std::move(owner)));
             }// end std::expected<void, RetireError> retire_shared(std::shared_ptr<T>&& owner)
             //--------------------------
-            // Erase every entry whose pointer is no longer hazarded; std::erase_if
-            // returns the count removed directly (erasing runs the Deleter that
-            // frees the object). 0 is a valid result and no longer ambiguous.
+            size_t reclaim_against(const HazardScan& scan) {
+                //--------------------------
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                //--------------------------
+                if (Base::empty()) {
+                    return 0UL;
+                }// end if (Base::empty())
+                //--------------------------
+                std::unordered_set<const T*> survivors;
+                scan([this, &survivors](const T* hazard){
+                    if (Base::contains(const_cast<T*>(hazard))) {
+                        survivors.insert(hazard);
+                    }// end if (Base::contains(const_cast<T*>(hazard)))
+                });
+                //--------------------------
+                if (survivors.empty()) {
+                    const size_t reclaimed = Base::size();
+                    Base::clear();
+                    return reclaimed;
+                }// end if (survivors.empty())
+                //--------------------------
+                return std::erase_if(static_cast<Base&>(*this),
+                    [&survivors](const auto& entry){ return !survivors.contains(entry.first); });
+                //--------------------------
+            }// end size_t reclaim_against(const HazardScan&)
+            //--------------------------
             template<class Pred>
+                requires requires(Pred&& pred, const T* node) {
+                    { pred(node) } -> std::convertible_to<bool>;
+                }
             size_t scan_and_reclaim(Pred&& hazard_view) {
                 //--------------------------
                 std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -177,7 +201,7 @@ namespace HazardSystem {
         private:
             //--------------------------------------------------------------
             size_t m_threshold;
-            std::shared_ptr<std::function<bool(const T*)>> m_hazard;
+            std::shared_ptr<HazardScan> m_hazard;
         //--------------------------------------------------------------
     };// end class RetireMap
     //--------------------------------------------------------------

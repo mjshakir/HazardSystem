@@ -344,6 +344,26 @@ namespace HazardSystem {
                     return std::unexpected(AcquireError::FULL);
                 }// end if (!capacity or !mask_count)
                 //--------------------------
+                // Single-word fast path: capacity <= 64 (one mask word, tree off).
+                // Skips lookup_free_part, the retry-budget loop, the per-attempt size
+                // load, and tree maintenance. Identical CAS to the fixed N<=64 path
+                // (GenMC harness #3, bitmask_excl.c), just on m_bitmask[0].
+                if (mask_count == 1) {
+                    uint64_t _mask = m_bitmask[0].load(std::memory_order_relaxed);
+                    while (_mask != ~0ULL) {
+                        const IndexType _index = static_cast<IndexType>(std::countr_zero(~_mask));
+                        if (_index >= capacity) {
+                            break;
+                        }// end if (_index >= capacity)
+                        const uint64_t _desired = _mask | (1ULL << _index);
+                        if (m_bitmask[0].compare_exchange_weak(_mask, _desired, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                            m_size.fetch_add(1, std::memory_order_relaxed);
+                            return _index;
+                        }// end if (compare_exchange_weak)
+                    }// end while (_mask != ~0ULL)
+                    return std::unexpected(AcquireError::FULL);
+                }// end if (mask_count == 1)
+                //--------------------------
                 const size_t available_plane = plane_index(PartPlane::Available);
                 //--------------------------
                 const size_t _retry_budget = (mask_count_size * 2UL) + 16UL;
@@ -1141,7 +1161,7 @@ namespace HazardSystem {
             constexpr IndexType get_capacity(void) const {
                 //--------------------------
                 if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
-                    return m_capacity.load(std::memory_order_relaxed);
+                    return m_capacity;
                 }// end if constexpr ((N == 0) or (N > C_ARRAY_LIMIT))
                 //--------------------------
                 return N;
@@ -1151,7 +1171,7 @@ namespace HazardSystem {
             constexpr IndexType get_mask_count(void) const {
                 //--------------------------
                 if constexpr ((N == 0) or (N > C_ARRAY_LIMIT)) {
-                    return m_mask_count.load(std::memory_order_relaxed);
+                    return m_mask_count;
                 }// end if constexpr ((N == 0) or (N > C_ARRAY_LIMIT))
                 //--------------------------
                 return C_MASK_COUNT;
@@ -1195,7 +1215,10 @@ namespace HazardSystem {
             //--------------------------------------------------------------
         private:
             //--------------------------------------------------------------
-            std::atomic<size_t> m_capacity, m_mask_count;
+            // Set once at construction, read-only afterwards (no resize path), so
+            // plain size_t — not atomic — lets get_capacity()/get_mask_count() fold
+            // to a direct load the compiler can hoist/CSE.
+            size_t m_capacity, m_mask_count;
             alignas(64) std::atomic<size_t> m_size;
             //--------------------------
             using BitmaskType = std::conditional_t<(N == 0) or (N > C_ARRAY_LIMIT), std::vector<std::atomic<uint64_t>>,

@@ -72,9 +72,7 @@ create_test_target(${PROJECT_NAME}_Fixed_Test                   HazardPointerMan
 create_test_target(${PROJECT_NAME}_Dynamic_Test                 HazardPointerManagerDynamicTest.cpp)
 create_test_target(${PROJECT_NAME}_Test                         HazardPointerManagerTest.cpp)
 create_test_target(${PROJECT_NAME}_ProtectedPointer_Test        ProtectedPointerTest.cpp)
-create_test_target(${PROJECT_NAME}_HazardRegistry_Test          HazardRegistryTest.cpp)
 create_test_target(${PROJECT_NAME}_ThreadRegistry_Test          ThreadRegistryTest.cpp)
 create_test_target(${PROJECT_NAME}_AvailabilityBitmapTree_Test  AvailabilityBitmapTreeTest.cpp)
-# Diagnostic probe (non-gtest): exercises protect/reset loops and logs on failure
 create_test_target(${PROJECT_NAME}_HazardPointer_Protect_Probe  HazardPointerProtectProbe.cpp)
 #------------------------------------------------------------------------------------------

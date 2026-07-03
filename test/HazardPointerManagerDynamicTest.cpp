@@ -1,7 +1,6 @@
 // HazardPointerManagerDynamicTest.cpp
 
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <thread>
 #include <vector>
 #include <atomic>
