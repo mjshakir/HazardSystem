@@ -1,11 +1,16 @@
 /* smr_registry_uaf.c — GenMC harness #1b: end-to-end use-after-free driven by
  * the HazardRegistry refcount race that harness #2 VARIANT 4 isolates.
  *
- * This wires the *real* refcounted registry (faithful port of
- * HazardRegistry::{add,remove,contains}_local, include/HazardRegistry.hpp:62-181)
- * into the SMR reclaim path WITH BOTH seq_cst fences present (HPM:219 reader,
- * RetireMap:152 reclaimer).  The fences are deliberately included so that any
- * violation found is purely the registry *logic* bug, not a missing barrier.
+ * HISTORICAL: HazardRegistry was deleted in ce998a7; the USE_REGISTRY=1 path is
+ * retained only to document the bug that justified its removal.  The
+ * USE_REGISTRY=0 (per-thread slots) path is the shipping design.
+ *
+ * This wires the *real* refcounted registry (faithful port of the removed
+ * HazardRegistry::{add,remove,contains}_local) into the SMR reclaim path WITH
+ * BOTH seq_cst fences present (HazardPointerManager.hpp:203 reader,
+ * RetireMap.hpp:164 reclaim_against).  The fences are deliberately included so
+ * that any violation found is purely the registry *logic* bug, not a missing
+ * barrier.
  *
  * Scenario (two threads protect the SAME node, the normal HP case):
  *   Reader A : protects P and keeps it  -> must safely dereference P
@@ -32,6 +37,11 @@
 #ifndef USE_REGISTRY
 #define USE_REGISTRY 1   /* 1 = refcounted HazardRegistry (buggy); 0 = per-thread slots */
 #endif
+#ifndef SCAN_BITGATED
+#define SCAN_BITGATED 0  /* (slots only) 1 = reclaimer reads the per-slot "active" bit
+                            BEFORE the pointer, mirroring the shipping BitmaskTable
+                            for_each (bit-then-pointer); 0 = direct slot read. */
+#endif
 
 #define CAP  4u
 #define MASK (CAP - 1u)
@@ -43,6 +53,9 @@ static size_t reg_hash(const void *p) { (void)p; return 0; }   /* force collisio
 
 /* per-thread hazard slots (textbook HP): one dedicated slot per reader */
 static _Atomic(void *) hp_slot[2];
+/* per-slot "active" bit, mirroring the BitmaskTable bitmask. Set at acquire
+ * (before the pointer) and cleared at release (after the pointer is zeroed). */
+static _Atomic(int) hp_active[2];
 
 /* ---- faithful ports (identical to registry_lin.c) ------------------------ */
 static int reg_add(void *ptr) {
@@ -117,22 +130,34 @@ static int  publish(int reader, void *p) {
 #if USE_REGISTRY
     (void)reader; return reg_add(p);
 #else
-    atomic_store_explicit(&hp_slot[reader], p, memory_order_release); return 1;
+    /* acquire sets the active bit BEFORE the pointer is stored (as acquire_data
+     * sets the bitmask bit before store_safe). */
+    atomic_store_explicit(&hp_active[reader], 1, memory_order_release);
+    atomic_store_explicit(&hp_slot[reader], p, memory_order_release);
+    return 1;
 #endif
 }
 static void unpublish(int reader, void *p) {
 #if USE_REGISTRY
     (void)reader; reg_remove(p);
 #else
-    (void)p; atomic_store_explicit(&hp_slot[reader], NULL, memory_order_release);
+    /* release zeroes the pointer BEFORE clearing the bit (as release_data does). */
+    (void)p;
+    atomic_store_explicit(&hp_slot[reader], NULL, memory_order_release);
+    atomic_store_explicit(&hp_active[reader], 0, memory_order_release);
 #endif
 }
 static int  protected_now(void *p) {
 #if USE_REGISTRY
     return reg_contains(p);
 #else
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 2; ++i) {
+#if SCAN_BITGATED
+        /* mirror for_each_active: read the bit, and only then the pointer */
+        if (!atomic_load_explicit(&hp_active[i], memory_order_acquire)) continue;
+#endif
         if (atomic_load_explicit(&hp_slot[i], memory_order_acquire) == p) return 1;
+    }
     return 0;
 #endif
 }
@@ -143,7 +168,7 @@ static void *readerA(void *a) {
     Node *p = atomic_load_explicit(&source, memory_order_acquire);
     if (!p) return NULL;
     if (!publish(0, p)) return NULL;               /* publish hazard on p */
-    atomic_thread_fence(memory_order_seq_cst);     /* HPM:219 */
+    atomic_thread_fence(memory_order_seq_cst);     /* HazardPointerManager.hpp:203 */
     if (atomic_load_explicit(&source, memory_order_acquire) == p) {
         /* validated: A holds a live hazard on p and dereferences it */
         assert(atomic_load_explicit(&p->freed, memory_order_relaxed) == 0); /* SAFETY */
@@ -164,14 +189,14 @@ static void *readerB(void *a) {
 }
 
 /* Reclaimer: unlink the node from the shared source (so it becomes retirable),
- * then scan_and_reclaim — fence then free iff scan says unprotected.  The
+ * then reclaim_against — fence then free iff scan says unprotected.  The
  * source-swap is the protocol precondition that makes Reader A's re-validation
  * meaningful; without it a still-linked node would be freed (a harness bug, not
  * a library bug). */
 static void *reclaimer(void *a) {
     (void)a;
     atomic_store_explicit(&source, NULL, memory_order_release);  /* unlink/retire P */
-    atomic_thread_fence(memory_order_seq_cst);     /* RetireMap:152 */
+    atomic_thread_fence(memory_order_seq_cst);     /* RetireMap.hpp:164 (reclaim_against) */
     if (!protected_now(P))                          /* the reclaim predicate */
         atomic_store_explicit(&n0.freed, 1, memory_order_relaxed);  /* delete() */
     return NULL;
@@ -180,6 +205,7 @@ static void *reclaimer(void *a) {
 int main(void) {
     for (size_t i = 0; i < CAP; ++i) { atomic_init(&slots[i], NULL); atomic_init(&counts[i], 0u); }
     atomic_init(&hp_slot[0], NULL); atomic_init(&hp_slot[1], NULL);
+    atomic_init(&hp_active[0], 0); atomic_init(&hp_active[1], 0);
     atomic_init(&n0.freed, 0); n0.data = 7;
     atomic_init(&source, &n0);
 

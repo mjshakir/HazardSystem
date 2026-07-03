@@ -1,8 +1,5 @@
-name: Formal Verification (GenMC)
+name: Formal Verification (GenMC + CBMC)
 
-# Exhaustively model-checks the core lock-free algorithm with GenMC (RC11/SC).
-# Kept separate from the main build matrix so the one-off GenMC source build
-# never gates normal CI; still runs on every push/PR as a regression guard.
 on: [push, pull_request]
 
 jobs:
@@ -58,6 +55,12 @@ jobs:
           genmc --version
           clang-${LLVM_VERSION} --version | head -1
 
+      - name: Install CBMC (sequential set-logic harnesses)
+        run: sudo apt-get install -y cbmc
+
+      - name: Sanity-check CBMC
+        run: cbmc --version
+
       - name: Setup CMake
         uses: lukka/get-cmake@v4.2.0
 
@@ -65,11 +68,12 @@ jobs:
         run: |
           cmake -S . -B build \
             -DBUILD_HAZARDSYSTEM_VERIFICATION=ON \
+            -DBUILD_HAZARDSYSTEM_CBMC=ON \
             -DBUILD_HAZARDSYSTEM_TESTS=OFF \
             -DBUILD_HAZARDSYSTEM_BENCHMARK=OFF \
             -DBUILD_HAZARDSYSTEM_EXAMPLE=OFF
 
-      - name: Run formal-verification harnesses
+      - name: Run formal-verification harnesses (GenMC + CBMC)
         env:
           CLANG: clang-19
         run: ctest --test-dir build -L verify --output-on-failure

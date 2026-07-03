@@ -5,12 +5,24 @@
  * memory that a concurrent reclaimer has freed.
  *
  * This is a faithful, plain-C11 extraction of the real handshake:
- *   reader     <- HazardPointerManager::protect_data()  (include/HazardPointerManager.hpp:200)
+ *   reader     <- HazardPointerManager::protect_data()  (include/HazardPointerManager.hpp:188)
  *   slot store <- HazardPointer::store_safe()            (include/HazardPointer.hpp:63)
- *   reclaimer  <- RetireMap::scan_and_reclaim()          (include/RetireMap.hpp:149)
+ *   reclaimer  <- RetireMap::reclaim_against()           (include/RetireMap.hpp:162)
+ *
+ * NOTE: this harness models the FORWARD membership direction (the reclaimer asks
+ * "is P in the slots?").  The shipping reclaim predicate is the INVERSE — iterate
+ * the slots and probe the thread-local retire bag — modelled literally in
+ * smr_inverted.c.  With one node the two directions coincide, so the fence
+ * handshake proven here carries over; smr_inverted.c additionally covers the
+ * survivor-set / erase-complement set-logic of the new code.
  *
  * No templates / STL / unordered_map / shared_ptr — only what a model checker
  * can exhaustively explore. Bounded to 1 reader + 1 writer/reclaimer, 1 node.
+ *
+ * EXPECTED-VIOLATION TOGGLES (a GenMC "Safety violation" with these is the PASS):
+ *   -DWITH_READER_FENCE=0 / -DWITH_RECLAIMER_FENCE=0 / -DDOWNGRADE_FENCE=1 deliberately
+ *   break a safeguard so the UAF reappears, proving the fence is load-bearing. The
+ *   default build (no toggle) is clean. See verification/README.md "Reading the results".
  *
  * Run (see verification/run.sh for the full sweep):
  *   genmc --rc11 --check-liveness -- -DCONFIG_A=1 smr_safety.c   # baseline: clean
@@ -25,8 +37,10 @@
 
 /* ---- compile-time toggles (each is a separate GenMC run) ----------------- */
 #ifndef CONFIG_A
-#define CONFIG_A 1            /* 1 = current code (reclaimer scans REGISTRY);
-                                 0 = textbook HP (reclaimer scans SLOTS only).  */
+#define CONFIG_A 1            /* 1 = HISTORICAL registry model (HazardRegistry,
+                                 deleted in ce998a7); 0 = the shipping design:
+                                 reclaimer scans per-thread SLOTS. Both prove the
+                                 fences are load-bearing; the slots path is current.*/
 #endif
 #ifndef WITH_READER_FENCE
 #define WITH_READER_FENCE 1   /* flip to 0 to test the reader seq_cst fence.    */
@@ -41,6 +55,35 @@
 #ifndef DOWNGRADE_FENCE
 #define DOWNGRADE_FENCE 0
 #endif
+
+/* ---- atomic-reduction sweep toggles (default 0 = current shipped order) ------
+ * C1: store_safe CAS success order — 0 acq_rel(cur) / 1 release / 2 acquire / 3 relaxed.
+ * C6: post-fence re-validation load and the initial source load — 0 acquire(cur) / 1 relaxed.
+ * Used to probe whether the order is reducible (clean) or load-bearing (violation). */
+#ifndef WEAKEN_STORE_SAFE_CAS
+#define WEAKEN_STORE_SAFE_CAS 0
+#endif
+#if   WEAKEN_STORE_SAFE_CAS==1
+#define STORE_SAFE_SUCC memory_order_release
+#elif WEAKEN_STORE_SAFE_CAS==2
+#define STORE_SAFE_SUCC memory_order_acquire
+#elif WEAKEN_STORE_SAFE_CAS==3
+#define STORE_SAFE_SUCC memory_order_relaxed
+#else
+#define STORE_SAFE_SUCC memory_order_acq_rel
+#endif
+#ifndef WEAKEN_REVALIDATE_LOAD
+#define WEAKEN_REVALIDATE_LOAD 0
+#endif
+/* WEAKEN_SOURCE_LOAD is C6b: intentionally NOT registered as a reduction test. This
+ * harness uses a static node, so it cannot model the publisher->reader content edge the
+ * initial source load's acquire carries in real code — a "clean" verdict here would be a
+ * faithfulness artifact, not a sound reduction (see verification/REDUCTION.md, C6b). */
+#ifndef WEAKEN_SOURCE_LOAD
+#define WEAKEN_SOURCE_LOAD 0
+#endif
+#define REVALIDATE_ORDER (WEAKEN_REVALIDATE_LOAD ? memory_order_relaxed : memory_order_acquire)
+#define SOURCE_LOAD_ORDER (WEAKEN_SOURCE_LOAD ? memory_order_relaxed : memory_order_acquire)
 
 #define NHP 1                 /* one reader => one hazard slot / registry entry */
 
@@ -74,7 +117,7 @@ static int reg_contains(Node *p) {
 static void store_safe(int i, Node *p) {
     Node *exp = atomic_load_explicit(&hp_slot[i], memory_order_acquire);
     while (!atomic_compare_exchange_weak_explicit(&hp_slot[i], &exp, p,
-            memory_order_acq_rel, memory_order_relaxed)) { /* exp refreshed */ }
+            STORE_SAFE_SUCC, memory_order_relaxed)) { /* exp refreshed */ }
 }
 
 /* -- the StoreLoad barrier under test -------------------------------------- */
@@ -83,7 +126,7 @@ static inline void reader_barrier(void) {
 #if DOWNGRADE_FENCE
     atomic_thread_fence(memory_order_acq_rel);   /* deliberately too weak */
 #else
-    atomic_thread_fence(memory_order_seq_cst);   /* HPM.hpp:219/252/290/332 */
+    atomic_thread_fence(memory_order_seq_cst);   /* HazardPointerManager.hpp:203/232/266/303 */
 #endif
 #endif
 }
@@ -92,7 +135,7 @@ static inline void reclaimer_barrier(void) {
 #if DOWNGRADE_FENCE
     atomic_thread_fence(memory_order_acq_rel);
 #else
-    atomic_thread_fence(memory_order_seq_cst);   /* RetireMap.hpp:152 */
+    atomic_thread_fence(memory_order_seq_cst);   /* RetireMap.hpp:164 (reclaim_against) */
 #endif
 #endif
 }
@@ -100,7 +143,7 @@ static inline void reclaimer_barrier(void) {
 /* =============================== READER =================================== */
 static void *reader(void *arg) {
     (void)arg;
-    Node *p = atomic_load_explicit(&source, memory_order_acquire);   /* R1 */
+    Node *p = atomic_load_explicit(&source, SOURCE_LOAD_ORDER);   /* R1 */
     if (!p)
         return NULL;
 
@@ -113,7 +156,7 @@ static void *reader(void *arg) {
 
     reader_barrier();           /* F-r */
 
-    if (atomic_load_explicit(&source, memory_order_acquire) == p) {  /* V */
+    if (atomic_load_explicit(&source, REVALIDATE_ORDER) == p) {  /* V */
         /* validated => the object must still be alive */
         assert(atomic_load_explicit(&p->freed, memory_order_relaxed) == 0); /* SAFETY */
         (void)p->data;          /* the actual dereference */
@@ -130,7 +173,7 @@ static void *reader(void *arg) {
 /* ========================= WRITER / RECLAIMER ============================== */
 static int is_hazard(Node *p) {
 #if CONFIG_A
-    return reg_contains(p);                       /* reclaimer scans REGISTRY  */
+    return reg_contains(p);                       /* HISTORICAL registry scan  */
 #else
     for (int i = 0; i < NHP; ++i)                 /* reclaimer scans SLOTS      */
         if (atomic_load_explicit(&hp_slot[i], memory_order_acquire) == p)
